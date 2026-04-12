@@ -1,0 +1,22 @@
+/** Official program / strand list (National University Dasmariñas) for case filing & student records. */
+export const NU_PROGRAM_OPTIONS = [
+  "BS Architecture",
+  "BS Civil Engineering",
+  "BS Computer Science with specialization in Machine Learning",
+  "BS Information Technology with specialization in Mobile and Web Applications",
+  "BS Accountancy",
+  "BS Management Accounting",
+  "BS Business Administration (BSBA) major in Financial Management",
+  "BSBA major in Marketing Management",
+  "BSBA major in Human Resource Management",
+  "AB Communication",
+  "BS Psychology",
+  "BS Nursing",
+  "Bachelor of Science in Pharmacy",
+  "Bachelor of Physical Education (BPEd)",
+  "BS Hospitality Management",
+  "BS Tourism Management",
+  "STEM: Science, Technology, Engineering, and Mathematics",
+  "ABM: Accountancy, Business, and Management",
+  "HUMSS: Humanities and Social Sciences",
+];

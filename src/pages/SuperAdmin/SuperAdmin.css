@@ -1,0 +1,152 @@
+/* Super Admin: shells use shared DO.css + office CSS; styles here are add-ons only */
+
+.sa-page-heading {
+  margin-bottom: 8px;
+}
+
+.sa-page-heading .page-title-row h1 {
+  font-family: "Inter", sans-serif;
+  font-weight: 500;
+  font-size: 30px;
+  line-height: 36px;
+  color: #0f172a;
+  margin: 0 0 8px 0;
+}
+
+.sa-page-heading .page-title-row p {
+  font-family: "Inter", sans-serif;
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 24px;
+  color: #64748b;
+  margin: 0;
+}
+
+/* User management — align with dashboard cards / tables */
+.sa-user-mgmt {
+  margin-top: 8px;
+}
+
+.sa-user-mgmt__banner {
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.sa-user-mgmt__muted {
+  color: #64748b;
+  font-size: 14px;
+}
+
+.sa-user-mgmt__empty {
+  background: #fff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  padding: 48px 24px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.sa-user-mgmt__table-wrap {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: auto;
+}
+
+.sa-user-mgmt__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  font-family: "Inter", sans-serif;
+}
+
+.sa-user-mgmt__table th {
+  text-align: left;
+  padding: 12px 16px;
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.sa-user-mgmt__table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+
+.sa-user-mgmt__name {
+  display: block;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.sa-user-mgmt__id {
+  display: block;
+  font-size: 11px;
+  color: #94a3b8;
+  font-family: ui-monospace, monospace;
+  margin-top: 4px;
+}
+
+.sa-user-mgmt__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sa-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-family: "Inter", sans-serif;
+}
+
+.sa-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sa-btn--approve {
+  background: #16a34a;
+  color: #fff;
+}
+
+.sa-btn--approve:hover:not(:disabled) {
+  background: #15803d;
+}
+
+.sa-btn--reject {
+  background: #fff;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.sa-btn--reject:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+/* Embeds: align with office main content padding */
+.sa-embed-hso {
+  margin: 0 -8px 0 0;
+}
+
+.sa-embed-do .do-office-shell {
+  padding-top: 0;
+}
+
+.sa-embed-sdao .sdao-page {
+  padding-top: 0;
+}

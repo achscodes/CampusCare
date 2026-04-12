@@ -1,0 +1,270 @@
+/* Sign-up: base field styles from authPagesLayout.css (.auth-split-form-panel) */
+
+.signup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.auth-form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Sign-up only: calmer header stack + consistent field spacing */
+.signup-page .auth-split-form-top {
+  gap: 14px;
+}
+
+.signup-page .auth-split-title {
+  margin-top: 18px;
+  margin-bottom: 8px;
+}
+
+.signup-page .auth-split-subtitle {
+  margin-bottom: 20px;
+}
+
+.signup-page .signup-form.auth-form-fields {
+  gap: 18px;
+}
+
+.signup-page .form-group {
+  gap: 6px;
+}
+
+.signup-page .form-row--aligned {
+  gap: 14px;
+}
+
+/* No fixed gap under fields until an error appears */
+.signup-page .form-feedback-slot {
+  min-height: 0;
+}
+
+.signup-page .form-feedback-slot:has(.form-error) {
+  min-height: 1.25rem;
+  margin-top: 4px;
+}
+
+.signup-page .form-hint {
+  margin-top: 4px;
+}
+
+.signup-page .form-consent-fieldset {
+  gap: 12px;
+  margin-top: 2px;
+  padding-top: 2px;
+}
+
+.signup-page .form-consent-legend {
+  margin: 0 0 4px;
+  padding: 0;
+}
+
+.signup-page .form-checkbox {
+  padding-top: 0;
+}
+
+.signup-page .form-feedback-slot--checkbox {
+  min-height: 0;
+  margin: 0 0 0 26px;
+}
+
+.signup-page .form-feedback-slot--checkbox:has(.form-error) {
+  min-height: 1.25rem;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+.signup-page .submit-button {
+  margin-top: 4px;
+}
+
+.signup-page .form-footer {
+  margin-top: 8px;
+}
+
+.form-row--aligned {
+  display: grid;
+  grid-template-columns: 1fr 3.75rem;
+  gap: 12px;
+  align-items: start;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group-large {
+  flex: 1;
+  min-width: 0;
+}
+
+.form-group-small {
+  width: auto;
+  min-width: 0;
+}
+
+.form-feedback-slot {
+  min-height: 1.25rem;
+}
+
+.form-feedback-slot--checkbox {
+  min-height: 0;
+  margin: -4px 0 6px 26px;
+}
+
+.form-feedback-slot--checkbox:empty {
+  display: none;
+}
+
+.input-with-icon {
+  position: relative;
+}
+
+.input-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.auth-split-form-panel .form-input.with-icon {
+  padding-left: 44px;
+}
+
+.cc-has-pw-toggle {
+  padding-right: 48px;
+}
+
+.form-select {
+  appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 40px;
+}
+
+.form-hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #64748b;
+  margin: 0;
+}
+
+.form-error {
+  font-size: 12px;
+  line-height: 1.4;
+  color: #b91c1c;
+  margin: 0;
+}
+
+.form-error-global {
+  margin-top: 4px;
+}
+
+.form-consent-fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.form-checkbox {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding-top: 2px;
+}
+
+.form-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: 4px;
+  accent-color: var(--cc-primary, #2b76f5);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.form-checkbox label {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #475569;
+  cursor: pointer;
+}
+
+.link-text {
+  color: var(--cc-primary, #2b76f5);
+  font-weight: 500;
+}
+
+.submit-button {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 6px;
+  background: var(--cc-primary, #2b76f5);
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.2;
+  color: #fff;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    opacity 0.15s ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.submit-button:hover:not(:disabled) {
+  background: var(--cc-primary-hover, #1d65e0);
+}
+
+.submit-button:active:not(:disabled) {
+  opacity: 0.92;
+}
+
+.submit-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.form-footer {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #64748b;
+  text-align: center;
+  margin: 4px 0 0;
+}
+
+.link-text-medium {
+  font-weight: 600;
+  color: var(--cc-primary, #2b76f5);
+  text-decoration: none;
+}
+
+.link-text-medium:hover {
+  text-decoration: underline;
+  color: var(--cc-primary-hover, #1d65e0);
+}
+
+@media (max-width: 768px) {
+  .form-row--aligned {
+    grid-template-columns: 1fr;
+  }
+}
