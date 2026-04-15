@@ -18,6 +18,88 @@ export function parseConferenceDate(conf) {
   return null;
 }
 
+function parseTimeLabelToHoursMinutes(timeLabel) {
+  const raw = String(timeLabel || "").trim();
+  if (!raw) return null;
+
+  // Supports "8:00 AM", "10:00 PM" (UI uses these).
+  const m = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (m) {
+    let h = parseInt(m[1], 10);
+    const min = m[2] ? parseInt(m[2], 10) : 0;
+    const ampm = m[3].toUpperCase();
+    if (ampm === "AM") {
+      if (h === 12) h = 0;
+    } else {
+      if (h !== 12) h += 12;
+    }
+    return { hours: h, minutes: min };
+  }
+
+  // Supports "HH:MM" (24h).
+  const m24 = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (m24) {
+    const h = parseInt(m24[1], 10);
+    const min = parseInt(m24[2], 10);
+    if (h >= 0 && h <= 23 && min >= 0 && min <= 59) return { hours: h, minutes: min };
+  }
+
+  return null;
+}
+
+export function durationMinutesFromLabel(durationLabel) {
+  const s = String(durationLabel || "").trim().toLowerCase();
+  if (!s) return 60;
+  if (s === "30 min" || s === "30 mins" || s === "30 minutes") return 30;
+  if (s === "45 min" || s === "45 mins" || s === "45 minutes") return 45;
+  if (s === "1 hour" || s === "1hr" || s === "1 h") return 60;
+  if (s === "1.5 hours" || s === "90 min" || s === "90 mins" || s === "90 minutes") return 90;
+  if (s === "2 hours" || s === "2hrs" || s === "2 h") return 120;
+  const mh = s.match(/(\d+(?:\.\d+)?)\s*hour/);
+  if (mh) {
+    const hrs = Number(mh[1]);
+    if (Number.isFinite(hrs) && hrs > 0) return Math.round(hrs * 60);
+  }
+  const mm = s.match(/(\d+)\s*min/);
+  if (mm) {
+    const mins = parseInt(mm[1], 10);
+    if (Number.isFinite(mins) && mins > 0) return mins;
+  }
+  return 60;
+}
+
+/**
+ * Local scheduled start datetime for a conference.
+ * @param {object} conf
+ * @returns {Date | null}
+ */
+export function parseConferenceStartDateTime(conf) {
+  const d = parseConferenceDate(conf);
+  if (!d || Number.isNaN(d.getTime())) return null;
+  const t = parseTimeLabelToHoursMinutes(conf?.timeLabel);
+  const x = new Date(d);
+  if (t) {
+    x.setHours(t.hours, t.minutes, 0, 0);
+  } else {
+    // If time is missing/unparseable, treat as noon to avoid marking as past too early.
+    x.setHours(12, 0, 0, 0);
+  }
+  return x;
+}
+
+/**
+ * @param {object} conf
+ * @returns {{ start: Date, end: Date } | null}
+ */
+export function conferenceWindow(conf) {
+  const start = parseConferenceStartDateTime(conf);
+  if (!start) return null;
+  const mins = durationMinutesFromLabel(conf?.durationLabel);
+  const end = new Date(start);
+  end.setMinutes(end.getMinutes() + mins);
+  return { start, end };
+}
+
 /**
  * Start of local calendar day for `d`.
  * @param {Date} d
@@ -42,6 +124,32 @@ export function isConferenceHearingDatePast(conf) {
 }
 
 /**
+ * Hearing end datetime is strictly before now (local).
+ * @param {object} conf
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
+export function isConferenceHearingTimePast(conf, now = new Date()) {
+  const w = conferenceWindow(conf);
+  if (!w) return false;
+  return w.end.getTime() <= now.getTime();
+}
+
+/**
+ * @param {object} conf
+ * @param {Date} [now]
+ * @returns {"future" | "ongoing" | "past" | "unknown"}
+ */
+export function conferenceTimeState(conf, now = new Date()) {
+  const w = conferenceWindow(conf);
+  if (!w) return "unknown";
+  const t = now.getTime();
+  if (t < w.start.getTime()) return "future";
+  if (t >= w.start.getTime() && t < w.end.getTime()) return "ongoing";
+  return "past";
+}
+
+/**
  * Display / workflow status: past scheduled hearings read as completed unless already cancelled.
  * @param {object} conf
  * @returns {"scheduled" | "completed" | "cancelled"}
@@ -50,7 +158,7 @@ export function effectiveConferenceStatus(conf) {
   const raw = String(conf?.status || "scheduled").toLowerCase();
   if (raw === "cancelled") return "cancelled";
   if (raw === "completed") return "completed";
-  if (raw === "scheduled" && isConferenceHearingDatePast(conf)) return "completed";
+  if (raw === "scheduled" && isConferenceHearingTimePast(conf)) return "completed";
   return "scheduled";
 }
 

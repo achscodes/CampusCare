@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { usePersistentState } from "./usePersistentState";
 import * as m from "../utils/disciplineOfficeMappers";
+import { conferenceWindow } from "../utils/conferenceCalendar";
 import {
   interOfficeDocumentRequestToInsert,
   interOfficeRowToDocumentRequest,
@@ -112,7 +113,7 @@ function useDisciplineTable({ table, localKey, seed, mapRow }) {
 }
 
 export function useStudentRecords(seed) {
-  const { items, loading, fetchError, refresh, useRemote, local, setLocal } = useDisciplineTable({
+  const { items, loading, fetchError, refresh, useRemote, setLocal } = useDisciplineTable({
     table: "discipline_student_records",
     localKey: "campuscare_do_student_records_v1",
     seed,
@@ -421,6 +422,16 @@ export function useCaseConferences(seed) {
   const updateConference = useCallback(
     async (conferenceId, patch) => {
       if (!conferenceId) return;
+      const existing = items.find((x) => String(x.conferenceId) === String(conferenceId)) || null;
+      const nextForValidation = existing ? { ...existing, ...patch } : patch;
+      if (String(patch?.status || "").toLowerCase() === "completed") {
+        const w = conferenceWindow(nextForValidation);
+        if (!w) throw new Error("Cannot complete hearing: missing schedule date/time.");
+        const now = new Date();
+        if (now.getTime() < w.end.getTime()) {
+          throw new Error("Cannot complete hearing before its scheduled time has passed.");
+        }
+      }
       if (!useRemote) {
         setLocal((prev) =>
           prev.map((row) => (String(row.conferenceId) === String(conferenceId) ? { ...row, ...patch } : row)),
@@ -430,11 +441,19 @@ export function useCaseConferences(seed) {
       if (!supabase) throw new Error("Supabase is not configured.");
       const dbPatch = { updated_at: new Date().toISOString() };
       if (patch.status != null) dbPatch.status = String(patch.status).toLowerCase();
+      if (patch.day != null) dbPatch.day_of_month = Number(patch.day);
+      if (patch.dateLabel != null) dbPatch.date_label = String(patch.dateLabel);
+      if (patch.timeLabel != null) dbPatch.time_label = String(patch.timeLabel);
+      if (patch.durationLabel != null) dbPatch.duration_label = String(patch.durationLabel);
+      if (patch.location != null) dbPatch.location = String(patch.location);
+      if (patch.attendees != null) dbPatch.attendees = Array.isArray(patch.attendees) ? patch.attendees : [];
+      if (patch.notes != null) dbPatch.notes = String(patch.notes);
+      if (patch.presidingOfficer != null) dbPatch.presiding_officer = String(patch.presidingOfficer);
       const { error } = await supabase.from("discipline_case_conferences").update(dbPatch).eq("id", conferenceId);
       if (error) throw error;
       await refresh();
     },
-    [useRemote, setLocal, refresh],
+    [items, useRemote, setLocal, refresh],
   );
 
   return { conferences: items, loading, fetchError, refresh, insertConference, updateConference };

@@ -383,8 +383,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     if (!newConsultForm.bloodPressure.trim()) missing.push("Blood pressure");
     if (!newConsultForm.temperature.trim()) missing.push("Temperature");
     if (!newConsultForm.heartRate.trim()) missing.push("Heart rate");
-    if (!newConsultForm.diagnosis.trim()) missing.push("Diagnosis");
-    if (!newConsultForm.treatment.trim()) missing.push("Treatment");
     if (missing.length) {
       showToast(`Please complete all fields: ${missing.join(", ")}.`, { variant: "warning" });
       return;
@@ -400,8 +398,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       blood_pressure: newConsultForm.bloodPressure.trim(),
       temperature_c: newConsultForm.temperature.trim(),
       heart_rate_bpm: newConsultForm.heartRate.trim(),
-      diagnosis: newConsultForm.diagnosis.trim(),
-      treatment: newConsultForm.treatment.trim(),
       status: "pending",
     };
     let newId = `CONS-${Date.now()}`;
@@ -2086,21 +2082,12 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               />
             </div>
           </div>
-          <div className="hs-modal-field">
-            <label>Diagnosis</label>
-            <textarea
-              rows={2}
-              value={newConsultForm.diagnosis}
-              onChange={(e) => setNewConsultForm((f) => ({ ...f, diagnosis: e.target.value }))}
-            />
-          </div>
-          <div className="hs-modal-field">
-            <label>Treatment</label>
-            <textarea
-              rows={2}
-              value={newConsultForm.treatment}
-              onChange={(e) => setNewConsultForm((f) => ({ ...f, treatment: e.target.value }))}
-            />
+          <div className="hs-lock-box" style={{ marginTop: 12 }}>
+            <Lock size={16} strokeWidth={1.5} aria-hidden style={{ flexShrink: 0, marginTop: 2 }} />
+            <span>
+              <strong>Diagnosis</strong> is available after a doctor completes the checkup and the consultation is marked{" "}
+              <strong>Completed</strong>.
+            </span>
           </div>
         </div>
         <div className="hs-modal-footer">

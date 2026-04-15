@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Bar,
@@ -49,6 +49,7 @@ import {
   buildMonthGrid,
   dateKey,
   effectiveConferenceStatus,
+  conferenceTimeState,
   endOfWeekSunday,
   fromDateInputToLabel,
   parseConferenceDate,
@@ -1863,6 +1864,7 @@ export function CaseConferencePage() {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [selectedConference, setSelectedConference] = useState(null);
+  const [scheduleEditId, setScheduleEditId] = useState(null);
 
   const {
     conferences,
@@ -1923,6 +1925,25 @@ export function CaseConferencePage() {
   }, [defaultCaseId, caseOptions]);
 
   const [scheduleErrors, setScheduleErrors] = useState({});
+  const openReschedule = useCallback(
+    (conf) => {
+      const d = parseConferenceDate(conf) || new Date();
+      const attendeeText = Array.isArray(conf?.attendees) ? conf.attendees.join(", ") : "";
+      setScheduleEditId(String(conf.conferenceId));
+      setScheduleErrors({});
+      setScheduleForm({
+        caseId: conf.caseId || defaultCaseId,
+        dateIso: toDateInputValue(d),
+        time: conf.timeLabel || "10:00 AM",
+        duration: conf.durationLabel || "1 hour",
+        location: conf.location || "",
+        attendees: attendeeText,
+        notes: conf.notes || "",
+      });
+      setIsScheduleOpen(true);
+    },
+    [defaultCaseId],
+  );
 
   const dataFetchError = confFetchError || casesFetchError;
   const dataLoading = confLoading || casesLoading;
@@ -2408,7 +2429,7 @@ export function CaseConferencePage() {
                 </div>
                 <div>
                   <h2 id="cc-schedule-title" className="do-modal-heading">
-                    Schedule New Case Conference
+                    {scheduleEditId ? "Reschedule Case Conference" : "Schedule New Case Conference"}
                   </h2>
                   <p className="do-modal-sub">Set up a new disciplinary conference for a case</p>
                 </div>
@@ -2446,26 +2467,44 @@ export function CaseConferencePage() {
                   .filter(Boolean);
 
                 try {
-                  await insertConference({
-                    caseId: effectiveCaseId,
-                    studentName: refCase.studentName || "Student",
-                    studentId: refCase.studentId || "—",
-                    caseTitle: refCase.caseTitle || refCase.caseType || effectiveCaseId,
-                    day,
-                    dateLabel,
-                    timeLabel: scheduleForm.time,
-                    durationLabel: scheduleForm.duration,
-                    location: scheduleForm.location,
-                    status: "scheduled",
-                    attendees:
-                      attendeeList.length > 0
-                        ? attendeeList
-                        : ["Student", "Discipline Coordinator"],
-                    notes: scheduleForm.notes.trim(),
-                    presidingOfficer: "Ms. Arny Lynne Saragina",
-                  });
-                  showToast("Conference scheduled.", { variant: "success" });
+                  if (scheduleEditId) {
+                    await updateConference(scheduleEditId, {
+                      caseId: effectiveCaseId,
+                      day,
+                      dateLabel,
+                      timeLabel: scheduleForm.time,
+                      durationLabel: scheduleForm.duration,
+                      location: scheduleForm.location,
+                      attendees:
+                        attendeeList.length > 0 ? attendeeList : ["Student", "Discipline Coordinator"],
+                      notes: scheduleForm.notes.trim(),
+                      presidingOfficer: "Ms. Arny Lynne Saragina",
+                      status: "scheduled",
+                    });
+                    showToast("Conference rescheduled.", { variant: "success" });
+                  } else {
+                    await insertConference({
+                      caseId: effectiveCaseId,
+                      studentName: refCase.studentName || "Student",
+                      studentId: refCase.studentId || "—",
+                      caseTitle: refCase.caseTitle || refCase.caseType || effectiveCaseId,
+                      day,
+                      dateLabel,
+                      timeLabel: scheduleForm.time,
+                      durationLabel: scheduleForm.duration,
+                      location: scheduleForm.location,
+                      status: "scheduled",
+                      attendees:
+                        attendeeList.length > 0
+                          ? attendeeList
+                          : ["Student", "Discipline Coordinator"],
+                      notes: scheduleForm.notes.trim(),
+                      presidingOfficer: "Ms. Arny Lynne Saragina",
+                    });
+                    showToast("Conference scheduled.", { variant: "success" });
+                  }
                   setIsScheduleOpen(false);
+                  setScheduleEditId(null);
                   setScheduleErrors({});
                   setScheduleForm((prev) => ({
                     ...prev,
@@ -2765,8 +2804,16 @@ export function CaseConferencePage() {
               {String(selectedConference.status || "").toLowerCase() === "scheduled" ? (
                 <>
                   <button
+                    className="cc-btn-secondary"
+                    type="button"
+                    onClick={() => openReschedule(selectedConference)}
+                  >
+                    Reschedule
+                  </button>
+                  <button
                     className="cc-btn-primary"
                     type="button"
+                    disabled={conferenceTimeState(selectedConference) !== "past"}
                     onClick={async () => {
                       try {
                         await updateConference(selectedConference.conferenceId, { status: "completed" });
