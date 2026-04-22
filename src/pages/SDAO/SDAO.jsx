@@ -44,6 +44,7 @@ import { appendEvidenceToInterOfficeRequest } from "../../services/interOfficeDo
 import { PROFILE_SETTINGS_PATH_DEVELOPMENT } from "../../utils/profileSettingsRoutes";
 import "../DODashboard/DO.css";
 import "./SDAO.css";
+import { sanitizeDigitsOnlyInput, sanitizePersonNameInput } from "../../utils/signupFieldValidation";
 import "../HealthServices/HealthServices.css";
 
 const iconProps = { size: 16, strokeWidth: 1.5 };
@@ -1423,7 +1424,9 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                 <input
                   className="cc-input"
                   value={beneficiaryForm.fullName}
-                  onChange={(e) => setBeneficiaryForm((f) => ({ ...f, fullName: e.target.value }))}
+                  onChange={(e) =>
+                    setBeneficiaryForm((f) => ({ ...f, fullName: sanitizePersonNameInput(e.target.value) }))
+                  }
                   placeholder="Full name as on record"
                 />
               </div>
@@ -1432,7 +1435,9 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                 <input
                   className="cc-input"
                   value={beneficiaryForm.studentId}
-                  onChange={(e) => setBeneficiaryForm((f) => ({ ...f, studentId: e.target.value }))}
+                  onChange={(e) =>
+                    setBeneficiaryForm((f) => ({ ...f, studentId: sanitizeDigitsOnlyInput(e.target.value) }))
+                  }
                   placeholder="e.g., 2023-10234"
                 />
               </div>
@@ -2032,7 +2037,9 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                 <input
                   className="cc-input"
                   value={referralForm.studentName}
-                  onChange={(e) => setReferralForm((f) => ({ ...f, studentName: e.target.value }))}
+                  onChange={(e) =>
+                    setReferralForm((f) => ({ ...f, studentName: sanitizePersonNameInput(e.target.value) }))
+                  }
                   placeholder="Enter student full name"
                 />
               </div>
@@ -2041,7 +2048,9 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                 <input
                   className="cc-input"
                   value={referralForm.studentId}
-                  onChange={(e) => setReferralForm((f) => ({ ...f, studentId: e.target.value }))}
+                  onChange={(e) =>
+                    setReferralForm((f) => ({ ...f, studentId: sanitizeDigitsOnlyInput(e.target.value) }))
+                  }
                   placeholder="e.g., 2023-10234"
                 />
               </div>

@@ -2,6 +2,64 @@
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+// ── Offense classification ────────────────────────────────────────────────────
+
+/** Major offenses — serious violations requiring formal disciplinary action */
+const MAJOR_OFFENSE_PATTERNS = [
+  /academic\s*dishonest/i,
+  /plagiar/i,
+  /cheating/i,
+  /falsif/i,
+  /property\s*damage/i,
+  /fraud/i,
+  /harassment/i,
+  /violence/i,
+  /drug/i,
+  /weapon/i,
+];
+
+/** Minor offenses — less severe, may be resolved through counseling */
+const MINOR_OFFENSE_PATTERNS = [
+  /attendance/i,
+  /absent/i,
+  /tardy/i,
+  /disrupt/i,
+  /code\s*of\s*conduct/i,
+  /uniform/i,
+  /noise/i,
+  /language/i,
+];
+
+export function classifyOffense(caseType) {
+  const s = String(caseType || "").trim();
+  for (const p of MAJOR_OFFENSE_PATTERNS) {
+    if (p.test(s)) return "major";
+  }
+  for (const p of MINOR_OFFENSE_PATTERNS) {
+    if (p.test(s)) return "minor";
+  }
+  // Default to minor for unclassified
+  return "minor";
+}
+
+// ── Program → Department mapping ─────────────────────────────────────────────
+
+function programToDepartment(program) {
+  const p = String(program || "").toLowerCase();
+  if (/architecture|civil|engineering/i.test(p)) return "College of Engineering & Architecture";
+  if (/computer|information\s*tech/i.test(p)) return "College of Computing & Information Technology";
+  if (/accountanc|management\s*account|business\s*admin|bsba|financial|marketing|human\s*resource/i.test(p))
+    return "College of Business & Accountancy";
+  if (/communication|psychology|ab\s*/i.test(p)) return "College of Arts & Sciences";
+  if (/nursing|pharmacy|health\s*sci/i.test(p)) return "College of Health Sciences";
+  if (/physical\s*educ|bped/i.test(p)) return "College of Education";
+  if (/hospitality|tourism/i.test(p)) return "College of Tourism & Hospitality";
+  if (/stem|abm|humss/i.test(p)) return "Senior High School";
+  return "Other";
+}
+
+// ── Date range helpers ────────────────────────────────────────────────────────
+
 /** Philippine-style academic semester containing `date` (Sem 1: Aug–Jan, Sem 2: Feb–Jul). */
 export function getAcademicSemesterRange(date = new Date()) {
   const y = date.getFullYear();
@@ -63,16 +121,11 @@ function getLast12MonthsRange(now = new Date()) {
 
 function getPeriodRange(periodId, now = new Date()) {
   switch (periodId) {
-    case "semester":
-      return getAcademicSemesterRange(now);
-    case "year":
-      return getCalendarYearRange(now);
-    case "90d":
-      return getLastNDaysRange(90, now);
-    case "all":
-      return { start: new Date(2000, 0, 1), end: new Date(2100, 11, 31), label: "All time" };
-    default:
-      return getAcademicSemesterRange(now);
+    case "semester": return getAcademicSemesterRange(now);
+    case "year": return getCalendarYearRange(now);
+    case "90d": return getLastNDaysRange(90, now);
+    case "all": return { start: new Date(2000, 0, 1), end: new Date(2100, 11, 31), label: "All time" };
+    default: return getAcademicSemesterRange(now);
   }
 }
 
@@ -109,6 +162,8 @@ const DEMO_ANALYTICS = {
   resolutionRatePct: 89,
   avgResolutionDays: 12,
   studentsMonitored: 1892,
+  majorOffenses: 89,
+  minorOffenses: 112,
   monthly: [
     { month: "Aug", filed: 42, resolved: 38 },
     { month: "Sep", filed: 48, resolved: 44 },
@@ -123,12 +178,24 @@ const DEMO_ANALYTICS = {
     { name: "Pending", key: "pending", value: 6, color: "#ea580c" },
     { name: "New", key: "new", value: 5, color: "#7c3aed" },
   ],
+  offenseBreakdown: [
+    { label: "Major Offenses", count: 89, pct: 44, color: "#dc2626" },
+    { label: "Minor Offenses", count: 112, pct: 56, color: "#f59e0b" },
+  ],
   violations: [
-    { label: "Academic Dishonesty", count: 45, pct: 28 },
-    { label: "Attendance Violation", count: 38, pct: 24 },
-    { label: "Code of Conduct", count: 32, pct: 20 },
-    { label: "Property Damage", count: 23, pct: 14 },
-    { label: "Disruptive Behavior", count: 22, pct: 14 },
+    { label: "Academic Dishonesty", count: 45, pct: 28, severity: "major" },
+    { label: "Attendance Violation", count: 38, pct: 24, severity: "minor" },
+    { label: "Code of Conduct", count: 32, pct: 20, severity: "minor" },
+    { label: "Property Damage", count: 23, pct: 14, severity: "major" },
+    { label: "Disruptive Behavior", count: 22, pct: 14, severity: "minor" },
+  ],
+  departmentStats: [
+    { department: "College of Business & Accountancy", count: 54, pct: 27 },
+    { department: "College of Computing & Information Technology", count: 48, pct: 24 },
+    { department: "College of Arts & Sciences", count: 39, pct: 19 },
+    { department: "College of Health Sciences", count: 28, pct: 14 },
+    { department: "College of Engineering & Architecture", count: 20, pct: 10 },
+    { department: "Other", count: 12, pct: 6 },
   ],
   resolutionBuckets: [
     { label: "< 1 week", count: 72 },
@@ -141,22 +208,12 @@ const DEMO_ANALYTICS = {
     { student: "Student B", studentId: "2022-08901", violations: 3, lastDate: "Jan 8, 2026" },
     { student: "Student C", studentId: "2024-11567", violations: 3, lastDate: "Dec 19, 2025" },
   ],
+  peakPeriod: "October–November",
+  peakDepartment: "College of Business & Accountancy",
   insights: [
-    {
-      tone: "positive",
-      title: "Positive trend",
-      text: "Resolution rate improved by 8% this semester compared to the prior period.",
-    },
-    {
-      tone: "warning",
-      title: "Area of concern",
-      text: "Academic dishonesty cases increased by 15% — consider faculty awareness sessions.",
-    },
-    {
-      tone: "info",
-      title: "Recommendation",
-      text: "Implement early intervention programs for repeat offenders identified below.",
-    },
+    { tone: "positive", title: "Positive trend", text: "Resolution rate improved by 8% this semester compared to the prior period." },
+    { tone: "warning", title: "Area of concern", text: "Academic dishonesty cases increased by 15% — consider faculty awareness sessions." },
+    { tone: "info", title: "Recommendation", text: "Implement early intervention programs for repeat offenders identified below." },
   ],
 };
 
@@ -167,6 +224,8 @@ function normalizeViolationLabel(caseType) {
   if (/conduct|code of conduct/i.test(s)) return "Code of Conduct";
   if (/property|damage/i.test(s)) return "Property Damage";
   if (/disrupt/i.test(s)) return "Disruptive Behavior";
+  if (/falsif/i.test(s)) return "Falsification of Records";
+  if (/plagiar/i.test(s)) return "Plagiarism";
   return s || "Other";
 }
 
@@ -190,6 +249,14 @@ function buildMonthlyFromCases(cases, range) {
   }
   const list = [...byMonth.values()];
   return list.length > 6 ? list.slice(-6) : list;
+}
+
+function parseProgramFromDescription(description) {
+  const desc = String(description || "");
+  for (const part of desc.split("\n\n")) {
+    if (part.startsWith("Program: ")) return part.slice(9).trim();
+  }
+  return "";
 }
 
 /**
@@ -234,16 +301,45 @@ export function buildReportsAnalytics(cases, periodId = "semester") {
   const uniqueStudents = new Set(filtered.map((c) => String(c.studentId || "").trim()).filter(Boolean));
   const studentsMonitored = uniqueStudents.size;
 
-  const monthlyRaw = buildMonthlyFromCases(filtered, chartRange);
-  const monthly =
-    monthlyRaw.length > 0
-      ? monthlyRaw
-      : Array.from({ length: 6 }, (_, i) => ({
-          month: MONTH_SHORT[Math.max(0, chartRange.end.getMonth() - 5 + i)],
-          filed: 0,
-          resolved: 0,
-        }));
+  // ── Offense breakdown (major vs minor) ──────────────────────────────────
+  let majorCount = 0;
+  let minorCount = 0;
+  for (const c of filtered) {
+    if (classifyOffense(c.caseType) === "major") majorCount += 1;
+    else minorCount += 1;
+  }
+  const offenseBreakdown = [
+    { label: "Major Offenses", count: majorCount, pct: Math.round((majorCount / total) * 100), color: "#dc2626" },
+    { label: "Minor Offenses", count: minorCount, pct: Math.round((minorCount / total) * 100), color: "#f59e0b" },
+  ];
 
+  // ── Department stats ────────────────────────────────────────────────────
+  const deptMap = new Map();
+  for (const c of filtered) {
+    const prog = parseProgramFromDescription(c.description) || c.program || "";
+    const dept = programToDepartment(prog);
+    deptMap.set(dept, (deptMap.get(dept) || 0) + 1);
+  }
+  const departmentStats = [...deptMap.entries()]
+    .map(([department, count]) => ({ department, count, pct: Math.round((count / total) * 100) }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+  const peakDepartment = departmentStats[0]?.department || "—";
+
+  // ── Monthly trend ───────────────────────────────────────────────────────
+  const monthlyRaw = buildMonthlyFromCases(filtered, chartRange);
+  const monthly = monthlyRaw.length > 0
+    ? monthlyRaw
+    : Array.from({ length: 6 }, (_, i) => ({
+        month: MONTH_SHORT[Math.max(0, chartRange.end.getMonth() - 5 + i)],
+        filed: 0, resolved: 0,
+      }));
+
+  // Find peak period
+  const peakMonth = [...monthly].sort((a, b) => b.filed - a.filed)[0];
+  const peakPeriod = peakMonth ? peakMonth.month : "—";
+
+  // ── Status distribution ─────────────────────────────────────────────────
   const statusCounts = { new: 0, ongoing: 0, pending: 0, closed: 0 };
   for (const c of filtered) {
     const k = String(c.status || "new");
@@ -257,6 +353,7 @@ export function buildReportsAnalytics(cases, periodId = "semester") {
     { name: STATUS_LABEL.new, key: "new", value: Math.round((statusCounts.new / stTotal) * 1000) / 10, color: "#7c3aed" },
   ];
 
+  // ── Violation types ─────────────────────────────────────────────────────
   const violMap = new Map();
   for (const c of filtered) {
     const lab = normalizeViolationLabel(c.caseType);
@@ -268,8 +365,10 @@ export function buildReportsAnalytics(cases, periodId = "semester") {
     label,
     count,
     pct: Math.round((count / violTotal) * 100),
+    severity: classifyOffense(label),
   }));
 
+  // ── Resolution time buckets ─────────────────────────────────────────────
   const resBuckets = [
     { label: "< 1 week", count: 0 },
     { label: "1–2 weeks", count: 0 },
@@ -288,6 +387,7 @@ export function buildReportsAnalytics(cases, periodId = "semester") {
     else resBuckets[3].count += 1;
   }
 
+  // ── Repeat offenders ────────────────────────────────────────────────────
   const byStudent = new Map();
   for (const c of filtered) {
     const sid = String(c.studentId || "").trim();
@@ -312,31 +412,29 @@ export function buildReportsAnalytics(cases, periodId = "semester") {
         : "—",
     }));
 
+  // ── Insights ────────────────────────────────────────────────────────────
   const adCount = violMap.get("Academic Dishonesty") || 0;
   const insights = [
     {
       tone: resolutionRatePct >= 70 ? "positive" : "warning",
       title: resolutionRatePct >= 70 ? "Positive trend" : "Resolution focus",
-      text:
-        resolutionRatePct >= 70
-          ? `Resolution rate is ${resolutionRatePct}% for ${range.label.toLowerCase()}.`
-          : `Resolution rate is ${resolutionRatePct}% — prioritize closing backlog cases.`,
+      text: resolutionRatePct >= 70
+        ? `Resolution rate is ${resolutionRatePct}% for ${range.label.toLowerCase()}.`
+        : `Resolution rate is ${resolutionRatePct}% — prioritize closing backlog cases.`,
     },
     {
-      tone: adCount > total * 0.2 ? "warning" : "info",
-      title: "Area of concern",
-      text:
-        adCount > 0
-          ? `Academic dishonesty represents ${Math.round((adCount / total) * 100)}% of cases in this period.`
-          : "No academic dishonesty cases in this period.",
+      tone: majorCount > total * 0.3 ? "warning" : "info",
+      title: "Offense severity",
+      text: majorCount > 0
+        ? `${majorCount} major offense${majorCount !== 1 ? "s" : ""} (${Math.round((majorCount / total) * 100)}%) and ${minorCount} minor offense${minorCount !== 1 ? "s" : ""} in this period.`
+        : "No major offenses recorded in this period.",
     },
     {
-      tone: "info",
-      title: "Recommendation",
-      text:
-        repeatOffenders.length > 0
-          ? `${repeatOffenders.length} student(s) with multiple cases — consider intervention follow-up.`
-          : "No repeat offenders in this period.",
+      tone: repeatOffenders.length > 0 ? "warning" : "positive",
+      title: "Repeat offenders",
+      text: repeatOffenders.length > 0
+        ? `${repeatOffenders.length} student${repeatOffenders.length !== 1 ? "s" : ""} with multiple cases. Highest from ${peakDepartment}.`
+        : "No repeat offenders in this period.",
     },
   ];
 
@@ -347,9 +445,15 @@ export function buildReportsAnalytics(cases, periodId = "semester") {
     resolutionRatePct,
     avgResolutionDays: avgResolutionDays ?? 0,
     studentsMonitored,
+    majorOffenses: majorCount,
+    minorOffenses: minorCount,
+    offenseBreakdown,
     monthly,
     statusSlices,
     violations: violations.length ? violations : DEMO_ANALYTICS.violations,
+    departmentStats: departmentStats.length ? departmentStats : DEMO_ANALYTICS.departmentStats,
+    peakDepartment,
+    peakPeriod,
     resolutionBuckets: resBuckets.some((b) => b.count > 0) ? resBuckets : DEMO_ANALYTICS.resolutionBuckets,
     repeatOffenders: repeatOffenders.length ? repeatOffenders : [],
     insights,
@@ -361,12 +465,19 @@ export function exportAnalyticsCsv(analytics, periodLabel) {
     ["CampusCare — Reports & Analytics", ""],
     ["Period", periodLabel],
     ["Total cases", String(analytics.totalCases)],
+    ["Major offenses", String(analytics.majorOffenses)],
+    ["Minor offenses", String(analytics.minorOffenses)],
     ["Resolution rate %", String(analytics.resolutionRatePct)],
     ["Avg. resolution (days)", String(analytics.avgResolutionDays)],
     ["Students monitored", String(analytics.studentsMonitored)],
+    ["Peak period", String(analytics.peakPeriod || "—")],
+    ["Peak department", String(analytics.peakDepartment || "—")],
     [],
     ["Month", "Cases filed", "Cases resolved"],
     ...analytics.monthly.map((m) => [m.month, String(m.filed), String(m.resolved)]),
+    [],
+    ["Department", "Cases", "Percentage"],
+    ...(analytics.departmentStats || []).map((d) => [d.department, String(d.count), `${d.pct}%`]),
     [],
     ["Repeat offenders", "Student ID", "Violations", "Last violation"],
     ...analytics.repeatOffenders.map((r) => [r.student, r.studentId, String(r.violations), r.lastDate]),

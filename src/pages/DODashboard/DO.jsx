@@ -60,6 +60,12 @@ import { isStaffCampusRole } from "../../utils/officeSession";
 import { PROFILE_SETTINGS_PATH_DISCIPLINE } from "../../utils/profileSettingsRoutes";
 import { formatCaseDateFromIso } from "../../utils/disciplineCaseMapper";
 import {
+  sanitizeDigitsOnlyInput,
+  sanitizePersonNameInput,
+  validatePersonName,
+  validateStrictNumericStudentId,
+} from "../../utils/signupFieldValidation";
+import {
   STANDING_LABELS,
   mergeStudentRecordsFromCases,
 } from "../../utils/studentRecordsFromCases";
@@ -712,12 +718,11 @@ export function DashboardPage() {
               onSubmit={async (e) => {
                 e.preventDefault();
                 const nextErrors = {};
-                if (!newCaseForm.student.trim()) {
-                  nextErrors.student = "Student name is required.";
-                }
-                if (!newCaseForm.studentId.trim()) {
-                  nextErrors.studentId = "Student ID is required.";
-                }
+                const nmErr = validatePersonName(newCaseForm.student, "Student name");
+                if (nmErr) nextErrors.student = nmErr;
+
+                const sidErr = validateStrictNumericStudentId(newCaseForm.studentId, "Student ID");
+                if (sidErr) nextErrors.studentId = sidErr;
                 if (!newCaseForm.caseType) {
                   nextErrors.caseType = "Case type is required.";
                 }
@@ -781,7 +786,7 @@ export function DashboardPage() {
                       placeholder="Enter student name"
                       value={newCaseForm.student}
                       onChange={(e) =>
-                        setNewCaseForm((p) => ({ ...p, student: e.target.value }))
+                        setNewCaseForm((p) => ({ ...p, student: sanitizePersonNameInput(e.target.value) }))
                       }
                       aria-invalid={Boolean(newCaseErrors.student)}
                     />
@@ -798,10 +803,10 @@ export function DashboardPage() {
                     <input
                       id="nf-sid"
                       className={`cc-input${newCaseErrors.studentId ? " cc-input-error" : ""}`}
-                      placeholder="e.g., 2023-10234"
+                      placeholder="Numeric ID only (e.g., 202310234)"
                       value={newCaseForm.studentId}
                       onChange={(e) =>
-                        setNewCaseForm((p) => ({ ...p, studentId: e.target.value }))
+                        setNewCaseForm((p) => ({ ...p, studentId: sanitizeDigitsOnlyInput(e.target.value) }))
                       }
                       aria-invalid={Boolean(newCaseErrors.studentId)}
                     />
@@ -993,6 +998,9 @@ const CM_PriorityBadge = ({ priority }) => (
 export function CaseManagementPage() {
   const [activeTab, setActiveTab] = useState("all");
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [dateFilterIso, setDateFilterIso] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState("");
   const [selectedCase, setSelectedCase] = useState(null);
   const [isNewCaseOpen, setIsNewCaseOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
@@ -1023,6 +1031,15 @@ export function CaseManagementPage() {
     setCaseModalError(null);
   }, [selectedCase]);
 
+  const departmentOptions = useMemo(() => {
+    const set = new Set();
+    for (const c of cases) {
+      const p = String(c.program || "").trim();
+      if (p) set.add(p);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [cases]);
+
   const filtered = useMemo(() => {
     return cases.filter((c) => {
       const matchesTab =
@@ -1038,9 +1055,22 @@ export function CaseManagementPage() {
         c.id.toLowerCase().includes(q) ||
         c.caseType.toLowerCase().includes(q);
 
-      return matchesTab && matchesSearch;
+      const matchesStatus = !statusFilter || String(c.status) === statusFilter;
+      const matchesDepartment =
+        !departmentFilter || String(c.program || "").trim() === String(departmentFilter).trim();
+
+      const matchesDate = (() => {
+        if (!dateFilterIso) return true;
+        const d =
+          c.reportedAt ? new Date(c.reportedAt) : c.updatedAt ? new Date(c.updatedAt) : new Date(String(c.date || ""));
+        if (Number.isNaN(d.getTime())) return false;
+        const ck = dateKey(d);
+        return ck === dateFilterIso;
+      })();
+
+      return matchesTab && matchesSearch && matchesStatus && matchesDepartment && matchesDate;
     });
-  }, [cases, activeTab, search]);
+  }, [cases, activeTab, search, statusFilter, departmentFilter, dateFilterIso]);
 
   const stats = useMemo(() => {
     return {
@@ -1247,6 +1277,50 @@ export function CaseManagementPage() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
+              </div>
+
+              <div className="cc-filters-row" aria-label="Case filters">
+                <div className="cc-filter">
+                  <label htmlFor="cm-filter-status">Status</label>
+                  <select
+                    id="cm-filter-status"
+                    className="cc-input"
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                  >
+                    <option value="">All</option>
+                    <option value="new">Pending</option>
+                    <option value="ongoing">Ongoing</option>
+                    <option value="pending">Pending</option>
+                    <option value="closed">Completed</option>
+                  </select>
+                </div>
+                <div className="cc-filter">
+                  <label htmlFor="cm-filter-date">Date</label>
+                  <input
+                    id="cm-filter-date"
+                    type="date"
+                    className="cc-input"
+                    value={dateFilterIso}
+                    onChange={(e) => setDateFilterIso(e.target.value)}
+                  />
+                </div>
+                <div className="cc-filter">
+                  <label htmlFor="cm-filter-dept">Department</label>
+                  <select
+                    id="cm-filter-dept"
+                    className="cc-input"
+                    value={departmentFilter}
+                    onChange={(e) => setDepartmentFilter(e.target.value)}
+                  >
+                    <option value="">All</option>
+                    {departmentOptions.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="tab-list">
@@ -1551,10 +1625,11 @@ export function CaseManagementPage() {
                 e.preventDefault();
                 const nextErrors = {};
 
-                if (!newCaseForm.student.trim())
-                  nextErrors.student = "Student Name is required.";
-                if (!newCaseForm.studentId.trim())
-                  nextErrors.studentId = "Student ID is required.";
+                const nmErr = validatePersonName(newCaseForm.student, "Student name");
+                if (nmErr) nextErrors.student = nmErr;
+
+                const sidErr = validateStrictNumericStudentId(newCaseForm.studentId, "Student ID");
+                if (sidErr) nextErrors.studentId = sidErr;
                 if (!newCaseForm.caseType)
                   nextErrors.caseType = "Case Type is required.";
                 if (!newCaseForm.description.trim())
@@ -1618,7 +1693,7 @@ export function CaseManagementPage() {
                       onChange={(e) =>
                         setNewCaseForm((prev) => ({
                           ...prev,
-                          student: e.target.value,
+                          student: sanitizePersonNameInput(e.target.value),
                         }))
                       }
                       aria-invalid={Boolean(newCaseErrors.student)}
@@ -1640,7 +1715,7 @@ export function CaseManagementPage() {
                       onChange={(e) =>
                         setNewCaseForm((prev) => ({
                           ...prev,
-                          studentId: e.target.value,
+                          studentId: sanitizeDigitsOnlyInput(e.target.value),
                         }))
                       }
                       aria-invalid={Boolean(newCaseErrors.studentId)}
@@ -3374,7 +3449,7 @@ export function StudentRecordsPage() {
                       onChange={(e) =>
                         setCreateForm((prev) => ({
                           ...prev,
-                          studentName: e.target.value,
+                          studentName: sanitizePersonNameInput(e.target.value),
                         }))
                       }
                       aria-invalid={Boolean(createErrors.studentName)}
@@ -3394,7 +3469,7 @@ export function StudentRecordsPage() {
                       onChange={(e) =>
                         setCreateForm((prev) => ({
                           ...prev,
-                          studentId: e.target.value,
+                          studentId: sanitizeDigitsOnlyInput(e.target.value),
                         }))
                       }
                       aria-invalid={Boolean(createErrors.studentId)}
@@ -4826,6 +4901,14 @@ export function ReportsPage({ standalone = false } = {}) {
               <p className="reports-kpi-label">Total cases</p>
             </div>
             <div className="reports-kpi-card">
+              <p className="reports-kpi-value">{Number(analytics.minorOffenses || 0).toLocaleString()}</p>
+              <p className="reports-kpi-label">Minor offenses</p>
+            </div>
+            <div className="reports-kpi-card">
+              <p className="reports-kpi-value">{Number(analytics.majorOffenses || 0).toLocaleString()}</p>
+              <p className="reports-kpi-label">Major offenses</p>
+            </div>
+            <div className="reports-kpi-card">
               <p className="reports-kpi-value">
                 {analytics.resolutionRatePct}%
                 <span className="reports-kpi-trend" title="Resolution rate">
@@ -4844,6 +4927,22 @@ export function ReportsPage({ standalone = false } = {}) {
             <div className="reports-kpi-card">
               <p className="reports-kpi-value">{analytics.studentsMonitored.toLocaleString()}</p>
               <p className="reports-kpi-label">Students monitored</p>
+            </div>
+            <div className="reports-kpi-card">
+              <p className="reports-kpi-value" style={{ fontSize: 18, lineHeight: "24px" }}>
+                {analytics.topDepartment?.department || "—"}
+              </p>
+              <p className="reports-kpi-label">
+                Top department ({Number(analytics.topDepartment?.count || 0).toLocaleString()})
+              </p>
+            </div>
+            <div className="reports-kpi-card">
+              <p className="reports-kpi-value" style={{ fontSize: 18, lineHeight: "24px" }}>
+                {analytics.peakPeriod?.label || "—"}
+              </p>
+              <p className="reports-kpi-label">
+                Peak period ({Number(analytics.peakPeriod?.count || 0).toLocaleString()})
+              </p>
             </div>
           </section>
 
@@ -4943,6 +5042,40 @@ export function ReportsPage({ standalone = false } = {}) {
                       dataKey="count"
                       name="Cases"
                       fill="#155dfc"
+                      radius={[0, 6, 6, 0]}
+                      barSize={18}
+                      animationDuration={CHART_ANIMATION_DURATION}
+                      animationEasing={CHART_ANIMATION_EASING}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="reports-chart-card reports-chart-card--tall">
+              <h2 className="reports-chart-title">Offenses by department</h2>
+              <p className="reports-chart-hint">Top departments (based on program/course on case records)</p>
+              <div style={{ width: "100%", height: 280 }} className="reports-hbar">
+                <ResponsiveContainer>
+                  <BarChart
+                    layout="vertical"
+                    data={(analytics.departmentCounts || []).slice(0, 10)}
+                    margin={{ top: 4, right: 16, left: 8, bottom: 4 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+                    <YAxis
+                      type="category"
+                      dataKey="department"
+                      width={148}
+                      tick={{ fontSize: 11 }}
+                      stroke="#64748b"
+                    />
+                    <Tooltip contentStyle={{ borderRadius: 8 }} />
+                    <Bar
+                      dataKey="count"
+                      name="Cases"
+                      fill="#7c3aed"
                       radius={[0, 6, 6, 0]}
                       barSize={18}
                       animationDuration={CHART_ANIMATION_DURATION}

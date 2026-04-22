@@ -6,6 +6,8 @@ import LandingPage from "./pages/LandingPage";
 import SignupPage from "./pages/SignupPage";
 import SigninPage from "./pages/SigninPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import TermsPage from "./pages/TermsPage";
+import PrivacyPage from "./pages/PrivacyPage";
 import {
   CaseConferencePage,
   CaseManagementPage,
@@ -41,6 +43,8 @@ function App() {
         <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/signin" element={<SigninPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/do" element={<DashboardPage />} />

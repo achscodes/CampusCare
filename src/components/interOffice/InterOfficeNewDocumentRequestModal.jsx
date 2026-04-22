@@ -6,6 +6,7 @@ import {
   INTER_OFFICE_DOCUMENT_TYPES_BY_TARGET,
   INTER_OFFICE_DOC_REQ_PRIORITY_OPTIONS,
 } from "../../constants/interOfficeDocumentTypes";
+import { sanitizeDigitsOnlyInput, sanitizePersonNameInput } from "../../utils/signupFieldValidation";
 import "../../pages/DODashboard/DO.css";
 import "./InterOfficeNewDocumentRequestModal.css";
 
@@ -126,7 +127,9 @@ export default function InterOfficeNewDocumentRequestModal({
                 <input
                   className={`cc-input${errors.studentName ? " cc-input-error" : ""}`}
                   value={form.studentName}
-                  onChange={(e) => setForm((p) => ({ ...p, studentName: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, studentName: sanitizePersonNameInput(e.target.value) }))
+                  }
                   placeholder="As it should appear on the document"
                   aria-invalid={Boolean(errors.studentName)}
                 />
@@ -141,7 +144,9 @@ export default function InterOfficeNewDocumentRequestModal({
                 <input
                   className={`cc-input${errors.studentId ? " cc-input-error" : ""}`}
                   value={form.studentId}
-                  onChange={(e) => setForm((p) => ({ ...p, studentId: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, studentId: sanitizeDigitsOnlyInput(e.target.value) }))
+                  }
                   placeholder="e.g., 2023-10234"
                   aria-invalid={Boolean(errors.studentId)}
                 />

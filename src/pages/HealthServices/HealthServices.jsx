@@ -61,6 +61,7 @@ import { canCreateDocumentRequest, labelForOfficeKey } from "../../constants/doc
 import { NU_PROGRAM_OPTIONS } from "../../data/nuPrograms";
 import "../DODashboard/DO.css";
 import "./HealthServices.css";
+import { sanitizeDigitsOnlyInput, sanitizePersonNameInput } from "../../utils/signupFieldValidation";
 
 const iconProps = { size: 16, strokeWidth: 1.5 };
 
@@ -2017,7 +2018,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               <input
                 placeholder="Full name"
                 value={newConsultForm.studentName}
-                onChange={(e) => setNewConsultForm((f) => ({ ...f, studentName: e.target.value }))}
+                onChange={(e) =>
+                  setNewConsultForm((f) => ({ ...f, studentName: sanitizePersonNameInput(e.target.value) }))
+                }
               />
             </div>
             <div className="hs-modal-field">
@@ -2025,7 +2028,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               <input
                 placeholder="ID number"
                 value={newConsultForm.studentId}
-                onChange={(e) => setNewConsultForm((f) => ({ ...f, studentId: e.target.value }))}
+                onChange={(e) =>
+                  setNewConsultForm((f) => ({ ...f, studentId: sanitizeDigitsOnlyInput(e.target.value) }))
+                }
               />
             </div>
             <div className="hs-modal-field">
@@ -2114,14 +2119,18 @@ function HealthServices({ embedReportsOnly = false } = {}) {
             <label>Student Name</label>
             <input
               value={newApptForm.studentName}
-              onChange={(e) => setNewApptForm((f) => ({ ...f, studentName: e.target.value }))}
+              onChange={(e) =>
+                setNewApptForm((f) => ({ ...f, studentName: sanitizePersonNameInput(e.target.value) }))
+              }
             />
           </div>
           <div className="hs-modal-field">
             <label>Student ID</label>
             <input
               value={newApptForm.studentId}
-              onChange={(e) => setNewApptForm((f) => ({ ...f, studentId: e.target.value }))}
+              onChange={(e) =>
+                setNewApptForm((f) => ({ ...f, studentId: sanitizeDigitsOnlyInput(e.target.value) }))
+              }
             />
           </div>
           <div className="hs-modal-grid">
@@ -2193,14 +2202,18 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               <label>Student Name</label>
               <input
                 value={newReferralForm.studentName}
-                onChange={(e) => setNewReferralForm((f) => ({ ...f, studentName: e.target.value }))}
+                onChange={(e) =>
+                  setNewReferralForm((f) => ({ ...f, studentName: sanitizePersonNameInput(e.target.value) }))
+                }
               />
             </div>
             <div className="hs-modal-field">
               <label>Student ID</label>
               <input
                 value={newReferralForm.studentId}
-                onChange={(e) => setNewReferralForm((f) => ({ ...f, studentId: e.target.value }))}
+                onChange={(e) =>
+                  setNewReferralForm((f) => ({ ...f, studentId: sanitizeDigitsOnlyInput(e.target.value) }))
+                }
               />
             </div>
             <div className="hs-modal-field">
@@ -2274,7 +2287,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               <input
                 placeholder="Student full name"
                 value={newRecordForm.studentName}
-                onChange={(e) => setNewRecordForm((f) => ({ ...f, studentName: e.target.value }))}
+                onChange={(e) =>
+                  setNewRecordForm((f) => ({ ...f, studentName: sanitizePersonNameInput(e.target.value) }))
+                }
               />
             </div>
             <div className="hs-modal-field">
@@ -2282,7 +2297,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               <input
                 placeholder="e.g., 2023-10234"
                 value={newRecordForm.studentId}
-                onChange={(e) => setNewRecordForm((f) => ({ ...f, studentId: e.target.value }))}
+                onChange={(e) =>
+                  setNewRecordForm((f) => ({ ...f, studentId: sanitizeDigitsOnlyInput(e.target.value) }))
+                }
               />
             </div>
             <div className="hs-modal-field">

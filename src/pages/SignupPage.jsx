@@ -17,6 +17,7 @@ import {
   resolveSignupOfficeAndRole,
 } from "../utils/superAdmin";
 import {
+  getPasswordStrength,
   validateMiddleInitial,
   validatePersonName,
   validateStaffPassword,
@@ -37,13 +38,14 @@ const SignupPage = () => {
   const [office, setOffice] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [termsOfServiceAccepted, setTermsOfServiceAccepted] = useState(false);
-  const [privacyPolicyAccepted, setPrivacyPolicyAccepted] = useState(false);
+  const [policiesAccepted, setPoliciesAccepted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const pwStrength = useMemo(() => getPasswordStrength(password), [password]);
 
   const roleByOffice = useMemo(
     () => ({
@@ -91,11 +93,8 @@ const SignupPage = () => {
       nextErrors.confirmPassword = "Passwords do not match.";
     }
 
-    if (!termsOfServiceAccepted) {
-      nextErrors.termsOfService = "You must accept the Terms of Service.";
-    }
-    if (!privacyPolicyAccepted) {
-      nextErrors.privacyPolicy = "You must accept the Privacy Policy.";
+    if (!policiesAccepted) {
+      nextErrors.policiesAccepted = "You must agree to the Terms and Privacy Policy.";
     }
 
     return nextErrors;
@@ -394,6 +393,30 @@ const SignupPage = () => {
                 </button>
               </div>
               <p className="form-hint">8+ characters, with at least one letter and one number.</p>
+              <div className="cc-pw-strength" aria-live="polite">
+                <div className="cc-pw-strength-top">
+                  <span className={`cc-pw-strength-pill cc-pw-strength-pill--${pwStrength.level}`}>
+                    {pwStrength.level === "weak"
+                      ? "Weak"
+                      : pwStrength.level === "medium"
+                        ? "Medium"
+                        : "Strong"}
+                  </span>
+                  <div className="cc-pw-strength-bar" role="presentation">
+                    <div
+                      className={`cc-pw-strength-bar-fill cc-pw-strength-bar-fill--${pwStrength.level}`}
+                      style={{ width: `${Math.min(100, (pwStrength.score / 5) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+                {pwStrength.tips?.length ? (
+                  <ul className="cc-pw-strength-tips">
+                    {pwStrength.tips.map((t) => (
+                      <li key={t}>{t}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
               <div className="form-feedback-slot" id="password-error">
                 {fieldErrors.password ? (
                   <p className="form-error" role="alert">
@@ -455,47 +478,29 @@ const SignupPage = () => {
               <div className="form-checkbox">
                 <input
                   type="checkbox"
-                  id="termsOfService"
-                  checked={termsOfServiceAccepted}
+                  id="policiesAccepted"
+                  checked={policiesAccepted}
                   onChange={(e) => {
-                    setTermsOfServiceAccepted(e.target.checked);
-                    clearFieldError("termsOfService");
+                    setPoliciesAccepted(e.target.checked);
+                    clearFieldError("policiesAccepted");
                   }}
-                  aria-invalid={Boolean(fieldErrors.termsOfService)}
+                  aria-invalid={Boolean(fieldErrors.policiesAccepted)}
                 />
-                <label htmlFor="termsOfService">
-                  I have read and agree to the{" "}
-                  <span className="link-text">Terms of Service</span>
+                <label htmlFor="policiesAccepted">
+                  I agree to the{" "}
+                  <Link to="/terms" className="link-text">
+                    Terms and Conditions
+                  </Link>{" "}
+                  and{" "}
+                  <Link to="/privacy" className="link-text">
+                    Privacy Policy
+                  </Link>
                 </label>
               </div>
               <div className="form-feedback-slot form-feedback-slot--checkbox">
-                {fieldErrors.termsOfService ? (
+                {fieldErrors.policiesAccepted ? (
                   <p className="form-error" role="alert">
-                    {fieldErrors.termsOfService}
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="form-checkbox">
-                <input
-                  type="checkbox"
-                  id="privacyPolicy"
-                  checked={privacyPolicyAccepted}
-                  onChange={(e) => {
-                    setPrivacyPolicyAccepted(e.target.checked);
-                    clearFieldError("privacyPolicy");
-                  }}
-                  aria-invalid={Boolean(fieldErrors.privacyPolicy)}
-                />
-                <label htmlFor="privacyPolicy">
-                  I have read and agree to the{" "}
-                  <span className="link-text">Privacy Policy</span>
-                </label>
-              </div>
-              <div className="form-feedback-slot form-feedback-slot--checkbox">
-                {fieldErrors.privacyPolicy ? (
-                  <p className="form-error" role="alert">
-                    {fieldErrors.privacyPolicy}
+                    {fieldErrors.policiesAccepted}
                   </p>
                 ) : null}
               </div>
