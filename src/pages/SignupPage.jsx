@@ -18,6 +18,8 @@ import {
 } from "../utils/superAdmin";
 import {
   getPasswordStrength,
+  sanitizeMiddleInitialInput,
+  sanitizePersonNameInput,
   validateMiddleInitial,
   validatePersonName,
   validateStaffPassword,
@@ -234,7 +236,7 @@ const SignupPage = () => {
                   className={`form-input${fieldErrors.firstName ? " form-input-error" : ""}`}
                   value={firstName}
                   onChange={(e) => {
-                    setFirstName(e.target.value);
+                    setFirstName(sanitizePersonNameInput(e.target.value));
                     clearFieldError("firstName");
                   }}
                   aria-invalid={Boolean(fieldErrors.firstName)}
@@ -259,7 +261,7 @@ const SignupPage = () => {
                   className={`form-input${fieldErrors.middleInitial ? " form-input-error" : ""}`}
                   value={middleInitial}
                   onChange={(e) => {
-                    setMiddleInitial(e.target.value);
+                    setMiddleInitial(sanitizeMiddleInitialInput(e.target.value));
                     clearFieldError("middleInitial");
                   }}
                   aria-invalid={Boolean(fieldErrors.middleInitial)}
@@ -286,7 +288,7 @@ const SignupPage = () => {
                 className={`form-input${fieldErrors.lastName ? " form-input-error" : ""}`}
                 value={lastName}
                 onChange={(e) => {
-                  setLastName(e.target.value);
+                  setLastName(sanitizePersonNameInput(e.target.value));
                   clearFieldError("lastName");
                 }}
                 aria-invalid={Boolean(fieldErrors.lastName)}

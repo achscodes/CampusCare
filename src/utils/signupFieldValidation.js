@@ -130,3 +130,13 @@ export function sanitizePersonNameInput(value) {
 export function sanitizeDigitsOnlyInput(value) {
   return String(value ?? "").replace(/[^\d]+/g, "");
 }
+
+/**
+ * UI helper: middle initial as user types (single Unicode letter only).
+ * @param {string} value
+ */
+export function sanitizeMiddleInitialInput(value) {
+  const raw = String(value ?? "");
+  const lettersOnly = raw.replace(/[^\p{L}]+/gu, "");
+  return lettersOnly.slice(0, 1);
+}
