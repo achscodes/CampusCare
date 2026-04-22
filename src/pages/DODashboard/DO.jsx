@@ -2953,6 +2953,7 @@ export function StudentRecordsPage() {
     useStudentRecords(DO_STUDENT_RECORDS_SEED);
   const [search, setSearch] = useState("");
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [isViewOpen, setIsViewOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isManageOpen, setIsManageOpen] = useState(false);
 
@@ -3144,7 +3145,10 @@ export function StudentRecordsPage() {
                           <button
                             className="cc-btn-secondary"
                             type="button"
-                            onClick={() => setSelectedStudent(r)}
+                            onClick={() => {
+                              setSelectedStudent(r);
+                              setIsViewOpen(true);
+                            }}
                           >
                             View
                           </button>
@@ -3153,6 +3157,7 @@ export function StudentRecordsPage() {
                             type="button"
                             onClick={() => {
                               setSelectedStudent(r);
+                              setIsViewOpen(false);
                               setManageCategory(r.category);
                               setManageNotes(r.notes);
                               setIsManageOpen(true);
@@ -3178,7 +3183,7 @@ export function StudentRecordsPage() {
         </main>
       </div>
 
-      {selectedStudent && !isManageOpen && (
+      {selectedStudent && isViewOpen && !isManageOpen && (
         <div
           className="cc-modal-overlay do-modal-overlay"
           role="dialog"
@@ -3244,6 +3249,7 @@ export function StudentRecordsPage() {
                 className="cc-btn-secondary"
                 type="button"
                 onClick={() => {
+                  setIsViewOpen(false);
                   setIsManageOpen(true);
                   setManageCategory(selectedStudent.category);
                   setManageNotes(selectedStudent.notes);
@@ -3251,7 +3257,10 @@ export function StudentRecordsPage() {
               >
                 Manage Record
               </button>
-              <button className="cc-btn-secondary" type="button" onClick={() => setSelectedStudent(null)}>
+              <button className="cc-btn-secondary" type="button" onClick={() => {
+                setSelectedStudent(null);
+                setIsViewOpen(false);
+              }}>
                 Close
               </button>
             </div>

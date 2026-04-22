@@ -1296,6 +1296,7 @@
 
 .do-modal--lg {
   width: min(560px, 100%);
+  max-height: min(90vh, 850px);
 }
 
 /* New Case: avoid nested scrollbars; keep full form visible within the viewport */
