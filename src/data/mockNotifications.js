@@ -2,7 +2,7 @@ export const DEFAULT_NOTIFICATIONS = [
   {
     id: "n-1",
     title: "Case Requires Action",
-    body: "New review request created for DC-2024-089.",
+    body: "New review request created for DC-2024-89.",
     createdAt: "Feb 10, 2026",
     unread: true,
   },
@@ -16,7 +16,7 @@ export const DEFAULT_NOTIFICATIONS = [
   {
     id: "n-3",
     title: "Case Conference Scheduled",
-    body: "A hearing has been scheduled for DC-2024-088.",
+    body: "A hearing has been scheduled for DC-2024-88.",
     createdAt: "Feb 12, 2026",
     unread: true,
   },

@@ -41,7 +41,7 @@ function AuthDisciplineDashboardPreview() {
               </div>
               <div className="auth-do-preview__stat">
                 <span className="auth-do-preview__stat-val auth-do-preview__stat-val--ongoing">4</span>
-                <span className="auth-do-preview__stat-lbl">Ongoing</span>
+                <span className="auth-do-preview__stat-lbl">Pending</span>
               </div>
               <div className="auth-do-preview__stat">
                 <span className="auth-do-preview__stat-val auth-do-preview__stat-val--closed">1</span>
@@ -57,7 +57,7 @@ function AuthDisciplineDashboardPreview() {
               <div className="auth-do-preview__tabs">
                 <span className="auth-do-preview__tab auth-do-preview__tab--on">All Cases (9)</span>
                 <span className="auth-do-preview__tab">New (2)</span>
-                <span className="auth-do-preview__tab">Ongoing (4)</span>
+                <span className="auth-do-preview__tab">Pending (4)</span>
                 <span className="auth-do-preview__tab">Closed (1)</span>
               </div>
               <div className="auth-do-preview__table-wrap">
@@ -72,20 +72,20 @@ function AuthDisciplineDashboardPreview() {
                   </thead>
                   <tbody>
                     <tr>
-                      <td className="auth-do-preview__mono">DC-2024-089</td>
+                      <td className="auth-do-preview__mono">DC-2024-89</td>
                       <td>
                         <div className="auth-do-preview__sn">Michael Tan</div>
                         <div className="auth-do-preview__sid">2023-10234</div>
                       </td>
                       <td>
-                        <span className="auth-do-preview__badge auth-do-preview__badge--ongoing">ongoing</span>
+                        <span className="auth-do-preview__badge auth-do-preview__badge--ongoing">pending</span>
                       </td>
                       <td>
                         <span className="auth-do-preview__badge auth-do-preview__badge--high">high</span>
                       </td>
                     </tr>
                     <tr>
-                      <td className="auth-do-preview__mono">DC-2024-090</td>
+                      <td className="auth-do-preview__mono">DC-2024-90</td>
                       <td>
                         <div className="auth-do-preview__sn">Sarah Wong</div>
                         <div className="auth-do-preview__sid">2023-11056</div>

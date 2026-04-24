@@ -151,7 +151,6 @@ function daysBetween(a, b) {
 
 const STATUS_LABEL = {
   closed: "Resolved",
-  ongoing: "Ongoing",
   pending: "Pending",
   new: "New",
 };
@@ -174,8 +173,7 @@ const DEMO_ANALYTICS = {
   ],
   statusSlices: [
     { name: "Resolved", key: "closed", value: 78, color: "#16a34a" },
-    { name: "Ongoing", key: "ongoing", value: 11, color: "#155dfc" },
-    { name: "Pending", key: "pending", value: 6, color: "#ea580c" },
+    { name: "Pending", key: "pending", value: 17, color: "#155dfc" },
     { name: "New", key: "new", value: 5, color: "#7c3aed" },
   ],
   offenseBreakdown: [
@@ -340,7 +338,7 @@ export function buildReportsAnalytics(cases, periodId = "semester") {
   const peakPeriod = peakMonth ? peakMonth.month : "—";
 
   // ── Status distribution ─────────────────────────────────────────────────
-  const statusCounts = { new: 0, ongoing: 0, pending: 0, closed: 0 };
+  const statusCounts = { new: 0, pending: 0, closed: 0 };
   for (const c of filtered) {
     const k = String(c.status || "new");
     if (statusCounts[k] !== undefined) statusCounts[k] += 1;
@@ -348,8 +346,7 @@ export function buildReportsAnalytics(cases, periodId = "semester") {
   const stTotal = total || 1;
   const statusSlices = [
     { name: STATUS_LABEL.closed, key: "closed", value: Math.round((statusCounts.closed / stTotal) * 1000) / 10, color: "#16a34a" },
-    { name: STATUS_LABEL.ongoing, key: "ongoing", value: Math.round((statusCounts.ongoing / stTotal) * 1000) / 10, color: "#155dfc" },
-    { name: STATUS_LABEL.pending, key: "pending", value: Math.round((statusCounts.pending / stTotal) * 1000) / 10, color: "#ea580c" },
+    { name: STATUS_LABEL.pending, key: "pending", value: Math.round((statusCounts.pending / stTotal) * 1000) / 10, color: "#155dfc" },
     { name: STATUS_LABEL.new, key: "new", value: Math.round((statusCounts.new / stTotal) * 1000) / 10, color: "#7c3aed" },
   ];
 

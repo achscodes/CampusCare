@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { usePersistentState } from "./usePersistentState";
 import { PRIORITY_OPTIONS, STATUS_OPTIONS } from "../data/mockCases";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
-import { buildCaseInsertRow, rowToCase } from "../utils/disciplineCaseMapper";
+import {
+  buildCaseInsertRow,
+  normalizeCaseStatus,
+  rowToCase,
+} from "../utils/disciplineCaseMapper";
 
 const CASES_KEY = "campuscare_cases_v1";
 
@@ -18,7 +22,7 @@ function makeNextCaseIdFromList(cases) {
   const prefix = `DC-${year}-`;
   const maxIdx = cases.reduce((acc, c) => Math.max(acc, parseCaseIndex(c.id)), 0);
   const next = maxIdx + 1;
-  return `${prefix}${String(next).padStart(3, "0")}`;
+  return `${prefix}${String(next).padStart(2, "0")}`;
 }
 
 function getDefaultPriority(priority) {
@@ -26,7 +30,8 @@ function getDefaultPriority(priority) {
 }
 
 function getDefaultStatus(status) {
-  return STATUS_OPTIONS.includes(status) ? status : "new";
+  const nextStatus = normalizeCaseStatus(status);
+  return STATUS_OPTIONS.includes(nextStatus) ? nextStatus : "new";
 }
 
 export function useCases(initialCases = []) {
@@ -76,7 +81,10 @@ export function useCases(initialCases = []) {
     };
   }, [useRemote, loadRemote]);
 
-  const cases = useRemote ? remoteCases : localCases;
+  const cases = (useRemote ? remoteCases : localCases).map((caseRow) => ({
+    ...caseRow,
+    status: normalizeCaseStatus(caseRow.status),
+  }));
 
   const createCase = useCallback(
     async ({

@@ -10,4 +10,4 @@ export const CASE_TYPE_OPTIONS = [
 ];
 
 export const PRIORITY_OPTIONS = ["low", "medium", "high"];
-export const STATUS_OPTIONS = ["new", "ongoing", "pending", "closed"];
+export const STATUS_OPTIONS = ["new", "pending", "closed"];

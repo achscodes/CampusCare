@@ -229,6 +229,9 @@
 .stat-value.ongoing {
   color: #155dfc;
 }
+.stat-value.pending {
+  color: #155dfc;
+}
 .stat-value.closed {
   color: #00a63e;
 }
@@ -530,9 +533,11 @@
 .btn-view {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   height: 32px;
   padding: 0 12px;
+  min-width: 72px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
@@ -1203,6 +1208,7 @@
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   overflow: hidden;
+  min-width: 0;
 }
 
 .do-panel-header {
@@ -1228,6 +1234,7 @@
 
 .do-panel-body {
   padding: 0 22px 20px;
+  min-width: 0;
 }
 
 .do-panel-footer {
@@ -1285,6 +1292,7 @@
   justify-content: center;
   align-items: center;
   padding: 24px;
+  overflow-y: auto;
 }
 
 .do-modal {
@@ -1292,6 +1300,7 @@
   max-height: min(92vh, 760px);
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .do-modal--lg {
@@ -1329,6 +1338,10 @@
   color: #4f46e5;
 }
 
+.do-cc-stats .stat-value.pending {
+  color: #4f46e5;
+}
+
 .do-cc-stats .stat-value.closed {
   color: #b45309;
 }
@@ -1336,6 +1349,7 @@
 .do-modal .do-modal-body-scroll {
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
   padding: 20px 22px;
 }
 
@@ -1557,7 +1571,7 @@
   font-size: 13px;
   font-weight: 500;
   color: #334155;
-  margin: 0 0 6px 0;
+  margin: 0 0 8px 0;
   display: block;
 }
 
@@ -1568,7 +1582,7 @@
 .do-form-grid2 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 16px;
+  gap: 0 18px;
   align-items: start;
   margin-bottom: 0;
 }
@@ -1587,19 +1601,20 @@
 .do-modal .do-form-stack {
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 
 .do-modal .do-form-cell {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   min-width: 0;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .do-modal .do-form-grid2 .do-form-cell {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .do-modal .cc-input,
@@ -1627,9 +1642,20 @@
 .do-modal .do-form-actions-inline {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
+}
+
+.do-panel .cases-table-wrapper {
+  overflow-x: auto;
+}
+
+.do-panel .cases-table th:last-child,
+.do-panel .cases-table td:last-child {
+  width: 1%;
+  padding-right: 16px;
+  white-space: nowrap;
 }
 
 /* Conference details modal - notes callout */

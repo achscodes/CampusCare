@@ -19,6 +19,22 @@ export function formatCaseDateFromIso(isoOrDate) {
   return `${MONTHS[dt.getMonth()]} ${dt.getDate()}, ${dt.getFullYear()}`;
 }
 
+export function formatCaseId(caseId) {
+  const raw = String(caseId ?? "").trim();
+  const match = raw.match(/^DC-(\d{4})-(\d+)$/i);
+  if (!match) return raw;
+  const seq = Number.parseInt(match[2], 10);
+  if (Number.isNaN(seq)) return raw;
+  return `DC-${match[1]}-${String(seq).padStart(2, "0")}`;
+}
+
+export function normalizeCaseStatus(status) {
+  const value = String(status ?? "new").trim().toLowerCase();
+  if (value === "ongoing") return "pending";
+  if (value === "new" || value === "pending" || value === "closed") return value;
+  return "new";
+}
+
 function parseProgramFromDescription(description) {
   const raw = String(description || "");
   if (!raw.trim()) return "";
@@ -41,7 +57,7 @@ export function rowToCase(row) {
     student: String(row.student_name ?? ""),
     studentId: String(row.student_id ?? ""),
     caseType: String(row.case_type ?? ""),
-    status: String(row.status ?? "new"),
+    status: normalizeCaseStatus(row.status),
     priority: String(row.priority ?? "medium"),
     date: formatCaseDateFromIso(row.reported_at),
     officer: String(row.reporting_officer ?? ""),

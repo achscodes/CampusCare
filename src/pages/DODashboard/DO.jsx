@@ -58,7 +58,7 @@ import {
 } from "../../utils/conferenceCalendar";
 import { isStaffCampusRole } from "../../utils/officeSession";
 import { PROFILE_SETTINGS_PATH_DISCIPLINE } from "../../utils/profileSettingsRoutes";
-import { formatCaseDateFromIso } from "../../utils/disciplineCaseMapper";
+import { formatCaseDateFromIso, formatCaseId } from "../../utils/disciplineCaseMapper";
 import {
   sanitizeDigitsOnlyInput,
   sanitizePersonNameInput,
@@ -218,9 +218,8 @@ const DO_StatusBadge = ({ status }) => (
   <span className={`badge badge-${status}`}>{status}</span>
 );
 
-const DO_PriorityBadge = ({ priority }) => (
-  <span className={`badge badge-${priority}`}>{priority}</span>
-);
+const DO_SCHOOL_OPTIONS = ["SECA", "SBMA", "SASE"];
+const DO_OFFENSE_TYPE_OPTIONS = ["Minor Offense", "Major Offense"];
 
 function parseCaseMeta(caseRow) {
   const desc = String(caseRow?.description || "");
@@ -264,15 +263,16 @@ export function DashboardPage() {
   const [newCaseForm, setNewCaseForm] = useState({
     student: "",
     studentId: "",
+    school: "",
     program: "",
     caseType: "",
-    priority: "medium",
+    offenseType: "",
     description: "",
     reportedBy: "",
   });
   const [newCaseEvidence, setNewCaseEvidence] = useState(null);
   const [newCaseErrors, setNewCaseErrors] = useState({});
-  const [statusUpdate, setStatusUpdate] = useState("ongoing");
+  const [statusUpdate, setStatusUpdate] = useState("pending");
   const [statusNote, setStatusNote] = useState("");
   const [caseModalError, setCaseModalError] = useState(null);
 
@@ -282,9 +282,7 @@ export function DashboardPage() {
 
   const stats = useMemo(() => {
     const newCount = cases.filter((c) => c.status === "new").length;
-    const pendingCount = cases.filter(
-      (c) => c.status === "pending" || c.status === "ongoing",
-    ).length;
+    const pendingCount = cases.filter((c) => c.status === "pending").length;
     const closedCount = cases.filter((c) => c.status === "closed").length;
     return { newCount, pendingCount, closedCount };
   }, [cases]);
@@ -412,7 +410,7 @@ export function DashboardPage() {
                     <tbody>
                       {recentCases.map((c) => (
                         <tr key={c.id}>
-                          <td className="cell-case-id">{c.id}</td>
+                          <td className="cell-case-id">{formatCaseId(c.id)}</td>
                           <td>
                             <p className="cell-student-name">{c.student}</p>
                             <p className="cell-student-id">{c.studentId}</p>
@@ -426,11 +424,7 @@ export function DashboardPage() {
                             <button
                               className="btn-view"
                               type="button"
-                              onClick={() => {
-                                setSelectedCase(c);
-                                setStatusUpdate(c.status);
-                                setStatusNote("");
-                              }}
+                              onClick={() => setSelectedCase(c)}
                             >
                               <Eye size={16} strokeWidth={2} aria-hidden />
                               View
@@ -478,7 +472,7 @@ export function DashboardPage() {
                   <div key={h.conferenceId} className="do-hearing-item">
                     <p className="do-hearing-name">
                       {h.studentName}{" "}
-                      <span style={{ color: "#64748b", fontWeight: 500 }}>/ {h.caseId}</span>
+                      <span style={{ color: "#64748b", fontWeight: 500 }}>/ {formatCaseId(h.caseId)}</span>
                     </p>
                     <p className="do-hearing-meta">
                       {h.dateLabel}
@@ -542,12 +536,11 @@ export function DashboardPage() {
             <div className="do-modal-body-scroll">
               <div className="do-case-banner">
                 <div>
-                  <p className="do-case-banner-id">{selectedCase.id}</p>
+                  <p className="do-case-banner-id">{formatCaseId(selectedCase.id)}</p>
                   <p className="do-case-banner-type">{selectedCase.caseType}</p>
                 </div>
                 <div className="do-banner-badges">
                   <DO_StatusBadge status={selectedCase.status} />
-                  <DO_PriorityBadge priority={selectedCase.priority} />
                 </div>
               </div>
 
@@ -611,10 +604,10 @@ export function DashboardPage() {
                 )}
               </div>
 
-              <div className="do-form-stack">
+              <div className="do-form-stack" style={{ display: "none" }}>
                 <div className="do-form-actions-inline">
                   <label className="do-form-label" htmlFor="dash-status-upd">
-                    Update status
+                    Status
                   </label>
                   <select
                     id="dash-status-upd"
@@ -623,7 +616,6 @@ export function DashboardPage() {
                     onChange={(e) => setStatusUpdate(e.target.value)}
                   >
                     <option value="new">new</option>
-                    <option value="ongoing">ongoing</option>
                     <option value="pending">pending</option>
                     <option value="closed">closed</option>
                   </select>
@@ -644,7 +636,7 @@ export function DashboardPage() {
             </div>
 
             {caseModalError && (
-              <div className="cc-form-error" role="alert" style={{ padding: "0 22px 12px" }}>
+              <div className="cc-form-error" role="alert" style={{ display: "none", padding: "0 22px 12px" }}>
                 {caseModalError}
               </div>
             )}
@@ -659,6 +651,7 @@ export function DashboardPage() {
               <button
                 className="cc-btn-primary"
                 type="button"
+                style={{ display: "none" }}
                 onClick={async () => {
                   setCaseModalError(null);
                   try {
@@ -671,7 +664,7 @@ export function DashboardPage() {
                   }
                 }}
               >
-                Update Case
+                Close
               </button>
             </div>
           </div>
@@ -726,6 +719,12 @@ export function DashboardPage() {
                 if (!newCaseForm.caseType) {
                   nextErrors.caseType = "Case type is required.";
                 }
+                if (!newCaseForm.school) {
+                  nextErrors.school = "School is required.";
+                }
+                if (!newCaseForm.offenseType) {
+                  nextErrors.offenseType = "Offense type is required.";
+                }
                 if (!newCaseForm.description.trim()) {
                   nextErrors.description = "Case description is required.";
                 }
@@ -736,12 +735,19 @@ export function DashboardPage() {
                 if (Object.keys(nextErrors).length > 0) return;
 
                 try {
+                  const caseDescription = [
+                    newCaseForm.school ? `School: ${newCaseForm.school}` : "",
+                    newCaseForm.offenseType ? `Offense Type: ${newCaseForm.offenseType}` : "",
+                    newCaseForm.description,
+                  ]
+                    .filter(Boolean)
+                    .join("\n\n");
+
                   await createCase({
                     student: newCaseForm.student,
                     studentId: newCaseForm.studentId,
                     caseType: newCaseForm.caseType,
-                    description: newCaseForm.description,
-                    priority: newCaseForm.priority,
+                    description: caseDescription,
                     program: newCaseForm.program,
                     reportedBy: newCaseForm.reportedBy,
                     evidence: [
@@ -753,9 +759,10 @@ export function DashboardPage() {
                   setNewCaseForm({
                     student: "",
                     studentId: "",
+                    school: "",
                     program: "",
                     caseType: "",
-                    priority: "medium",
+                    offenseType: "",
                     description: "",
                     reportedBy: "",
                   });
@@ -819,6 +826,33 @@ export function DashboardPage() {
                 </div>
 
                 <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                  <label className="do-form-label" htmlFor="nf-school">
+                    School <span className="req">*</span>
+                  </label>
+                  <select
+                    id="nf-school"
+                    className={`cc-input${newCaseErrors.school ? " cc-input-error" : ""}`}
+                    value={newCaseForm.school}
+                    onChange={(e) =>
+                      setNewCaseForm((p) => ({ ...p, school: e.target.value }))
+                    }
+                    aria-invalid={Boolean(newCaseErrors.school)}
+                  >
+                    <option value="">Select school</option>
+                    {DO_SCHOOL_OPTIONS.map((school) => (
+                      <option value={school} key={school}>
+                        {school}
+                      </option>
+                    ))}
+                  </select>
+                  {newCaseErrors.school && (
+                    <div className="cc-form-error" role="alert">
+                      {newCaseErrors.school}
+                    </div>
+                  )}
+                </div>
+
+                <div className="do-form-cell" style={{ marginBottom: 0 }}>
                   <label className="do-form-label" htmlFor="nf-program">
                     Program / Course
                   </label>
@@ -858,23 +892,30 @@ export function DashboardPage() {
                     )}
                   </div>
                   <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                    <label className="do-form-label" htmlFor="nf-pri">
-                      Priority Level
+                    <label className="do-form-label" htmlFor="nf-offense-type">
+                      Offense Type <span className="req">*</span>
                     </label>
                     <select
-                      id="nf-pri"
-                      className="cc-input"
-                      value={newCaseForm.priority}
+                      id="nf-offense-type"
+                      className={`cc-input${newCaseErrors.offenseType ? " cc-input-error" : ""}`}
+                      value={newCaseForm.offenseType}
                       onChange={(e) =>
-                        setNewCaseForm((p) => ({ ...p, priority: e.target.value }))
+                        setNewCaseForm((p) => ({ ...p, offenseType: e.target.value }))
                       }
+                      aria-invalid={Boolean(newCaseErrors.offenseType)}
                     >
-                      {PRIORITY_OPTIONS.map((p) => (
-                        <option value={p} key={p}>
-                          {p.charAt(0).toUpperCase() + p.slice(1)}
+                      <option value="">Select offense type</option>
+                      {DO_OFFENSE_TYPE_OPTIONS.map((offenseType) => (
+                        <option value={offenseType} key={offenseType}>
+                          {offenseType}
                         </option>
                       ))}
                     </select>
+                    {newCaseErrors.offenseType && (
+                      <div className="cc-form-error" role="alert">
+                        {newCaseErrors.offenseType}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -976,9 +1017,9 @@ const TABS = [
       `New / Unreviewed (${cases.filter((c) => c.status === "new").length})`,
   },
   {
-    key: "ongoing",
+    key: "pending",
     label: (cases) =>
-      `Ongoing (${cases.filter((c) => c.status === "ongoing").length})`,
+      `Pending (${cases.filter((c) => c.status === "pending").length})`,
   },
   {
     key: "closed",
@@ -1023,7 +1064,7 @@ export function CaseManagementPage() {
   });
   const [newCaseEvidence, setNewCaseEvidence] = useState(null);
   const [newCaseErrors, setNewCaseErrors] = useState({});
-  const [statusUpdate, setStatusUpdate] = useState("ongoing");
+  const [statusUpdate, setStatusUpdate] = useState("pending");
   const [statusNote, setStatusNote] = useState("");
   const [caseModalError, setCaseModalError] = useState(null);
 
@@ -1045,7 +1086,7 @@ export function CaseManagementPage() {
       const matchesTab =
         activeTab === "all" ||
         (activeTab === "new" && c.status === "new") ||
-        (activeTab === "ongoing" && c.status === "ongoing") ||
+        (activeTab === "pending" && c.status === "pending") ||
         (activeTab === "closed" && c.status === "closed");
 
       const q = search.toLowerCase();
@@ -1076,7 +1117,7 @@ export function CaseManagementPage() {
     return {
       total: cases.length,
       newCount: cases.filter((c) => c.status === "new").length,
-      ongoing: cases.filter((c) => c.status === "ongoing").length,
+      pending: cases.filter((c) => c.status === "pending").length,
       closed: cases.filter((c) => c.status === "closed").length,
     };
   }, [cases]);
@@ -1174,8 +1215,8 @@ export function CaseManagementPage() {
               <p className="stat-label">New / Unreviewed</p>
             </div>
             <div className="stat-card">
-              <p className="stat-value ongoing">{stats.ongoing}</p>
-              <p className="stat-label">Ongoing</p>
+              <p className="stat-value pending">{stats.pending}</p>
+              <p className="stat-label">Pending</p>
             </div>
             <div className="stat-card">
               <p className="stat-value closed">{stats.closed}</p>
@@ -1289,8 +1330,7 @@ export function CaseManagementPage() {
                     onChange={(e) => setStatusFilter(e.target.value)}
                   >
                     <option value="">All</option>
-                    <option value="new">Pending</option>
-                    <option value="ongoing">Ongoing</option>
+                    <option value="new">New / Unreviewed</option>
                     <option value="pending">Pending</option>
                     <option value="closed">Completed</option>
                   </select>
@@ -1354,7 +1394,7 @@ export function CaseManagementPage() {
                 <tbody>
                   {filtered.map((c) => (
                     <tr key={c.id}>
-                      <td className="cell-case-id">{c.id}</td>
+                      <td className="cell-case-id">{formatCaseId(c.id)}</td>
                       <td>
                         <p className="cell-student-name">{c.student}</p>
                         <p className="cell-student-id">{c.studentId}</p>
@@ -1455,7 +1495,7 @@ export function CaseManagementPage() {
               <div style={{ marginBottom: 12 }}>
                 <div className="cc-label">Case ID</div>
                 <div style={{ fontWeight: 600, color: "#0f172a" }}>
-                  {selectedCase.id}
+                  {formatCaseId(selectedCase.id)}
                 </div>
               </div>
 
@@ -1486,12 +1526,6 @@ export function CaseManagementPage() {
                   <div className="cc-label">Status</div>
                   <div style={{ marginTop: 6 }}>
                     <CM_StatusBadge status={selectedCase.status} />
-                  </div>
-                </div>
-                <div>
-                  <div className="cc-label">Priority</div>
-                  <div style={{ marginTop: 6 }}>
-                    <CM_PriorityBadge priority={selectedCase.priority} />
                   </div>
                 </div>
               </div>
@@ -1540,14 +1574,13 @@ export function CaseManagementPage() {
                   <div className="cc-label">Update Status</div>
                   <select
                     className="cc-input"
-                    value={statusUpdate}
-                    onChange={(e) => setStatusUpdate(e.target.value)}
-                  >
-                    <option value="new">new</option>
-                    <option value="ongoing">ongoing</option>
-                    <option value="pending">pending</option>
-                    <option value="closed">closed</option>
-                  </select>
+                  value={statusUpdate}
+                  onChange={(e) => setStatusUpdate(e.target.value)}
+                >
+                  <option value="new">new</option>
+                  <option value="pending">pending</option>
+                  <option value="closed">closed</option>
+                </select>
                 </div>
               </div>
 
@@ -2300,7 +2333,7 @@ export function CaseConferencePage() {
                           className="cc-conf-list-row"
                           onClick={() => setSelectedConference(c)}
                         >
-                          <div style={{ fontWeight: 600, color: "#0f172a" }}>{c.caseId}</div>
+                          <div style={{ fontWeight: 600, color: "#0f172a" }}>{formatCaseId(c.caseId)}</div>
                           <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>
                             {c.timeLabel} • {c.location}
                           </div>
@@ -2348,7 +2381,7 @@ export function CaseConferencePage() {
                           className="cc-conf-list-row"
                           onClick={() => setSelectedConference(c)}
                         >
-                          <div style={{ fontWeight: 600, color: "#0f172a" }}>{c.caseId}</div>
+                          <div style={{ fontWeight: 600, color: "#0f172a" }}>{formatCaseId(c.caseId)}</div>
                           <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>
                             {c.timeLabel} • {c.location}
                           </div>
@@ -2391,7 +2424,7 @@ export function CaseConferencePage() {
                           {upcoming.studentName || upcoming.caseTitle}
                         </div>
                         <div style={{ color: "#64748b", fontSize: 12 }}>
-                          {upcoming.caseId} • {upcoming.dateLabel}
+                          {formatCaseId(upcoming.caseId)} • {upcoming.dateLabel}
                         </div>
                         <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>
                           {upcoming.timeLabel} • {upcoming.location}
@@ -2452,7 +2485,7 @@ export function CaseConferencePage() {
                           <ConferencePill conference={c} />
                         </div>
                         <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>
-                          {c.studentId} • {c.caseId}
+                          {c.studentId} • {formatCaseId(c.caseId)}
                         </div>
                       </td>
                       <td>{c.caseTitle}</td>
@@ -2611,7 +2644,7 @@ export function CaseConferencePage() {
                     <option value="">Select case</option>
                     {caseOptions.map((c) => (
                       <option value={c.caseId} key={c.caseId}>
-                        {c.caseId} — {c.caseTitle}
+                        {formatCaseId(c.caseId)} — {c.caseTitle}
                       </option>
                     ))}
                   </select>
@@ -2805,7 +2838,7 @@ export function CaseConferencePage() {
                 <div>
                   <p className="do-case-banner-id">{selectedConference.conferenceId}</p>
                   <p className="do-conf-banner-case">
-                    Case: {selectedConference.caseId}
+                    Case: {formatCaseId(selectedConference.caseId)}
                   </p>
                 </div>
                 <ConferencePill conference={selectedConference} />
