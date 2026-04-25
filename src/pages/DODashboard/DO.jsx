@@ -192,7 +192,7 @@ function DONotificationBell() {
   );
 }
 
-/** Simple top bar (notifications + user). Page titles live in each view’s content area. */
+/** Simple top bar (notifications + user). Page titles live in each view's content area. */
 export function DisciplineOfficeTopBar() {
   const session = useMemo(() => {
     try {
@@ -1166,10 +1166,6 @@ const CM_StatusBadge = ({ status }) => (
   <span className={`badge badge-${status}`}>{status}</span>
 );
 
-const CM_PriorityBadge = ({ priority }) => (
-  <span className={`badge badge-${priority}`}>{priority}</span>
-);
-
 export function CaseManagementPage() {
   const [activeTab, setActiveTab] = useState("all");
   const [search, setSearch] = useState("");
@@ -1193,7 +1189,6 @@ export function CaseManagementPage() {
     studentId: "",
     program: "",
     caseType: "",
-    priority: "medium",
     description: "",
   });
   const [newCaseEvidence, setNewCaseEvidence] = useState(null);
@@ -1519,7 +1514,6 @@ export function CaseManagementPage() {
                     <th>Student</th>
                     <th>Case Type</th>
                     <th>Status</th>
-                    <th>Priority</th>
                     <th>Reported Date</th>
                     <th>Reporting Officer</th>
                     <th>Action</th>
@@ -1536,9 +1530,6 @@ export function CaseManagementPage() {
                       <td className="cell-text">{c.caseType}</td>
                       <td>
                         <CM_StatusBadge status={c.status} />
-                      </td>
-                      <td>
-                        <CM_PriorityBadge priority={c.priority} />
                       </td>
                       <td className="cell-date">{c.date}</td>
                       <td className="cell-text">{c.officer}</td>
@@ -1583,7 +1574,7 @@ export function CaseManagementPage() {
                   {filtered.length === 0 && (
                     <tr>
                       <td
-                        colSpan={8}
+                        colSpan={7}
                         style={{
                           textAlign: "center",
                           color: "#64748b",
@@ -1625,107 +1616,115 @@ export function CaseManagementPage() {
               </button>
             </div>
 
-            <div className="cc-modal-body">
-              <div style={{ marginBottom: 12 }}>
-                <div className="cc-label">Case ID</div>
-                <div style={{ fontWeight: 600, color: "#0f172a" }}>
-                  {formatCaseId(selectedCase.id)}
-                </div>
-              </div>
-
-              <div className="cc-modal-row">
+            <div className="cc-modal-body" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              {/* Case ID + Status row */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
                 <div>
-                  <div className="cc-label">Student</div>
-                  <div style={{ fontWeight: 600, color: "#0f172a" }}>
-                    {selectedCase.student}
+                  <div className="cc-label">Case ID</div>
+                  <div style={{ fontWeight: 700, fontSize: 18, color: "#0f172a", marginTop: 2 }}>
+                    {formatCaseId(selectedCase.id)}
                   </div>
                 </div>
-                <div>
-                  <div className="cc-label">Student ID</div>
-                  <div style={{ fontWeight: 600, color: "#0f172a" }}>
-                    {selectedCase.studentId}
+                <CM_StatusBadge status={selectedCase.status} />
+              </div>
+
+              {/* Divider */}
+              <div style={{ borderTop: "1px solid #e2e8f0", marginBottom: 16 }} />
+
+              {/* Student info group */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+                  Student Information
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px" }}>
+                  <div>
+                    <div className="cc-label">Name</div>
+                    <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 4 }}>{selectedCase.student}</div>
                   </div>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 12 }}>
-                <div className="cc-label">Case Type</div>
-                <div style={{ fontWeight: 600, color: "#0f172a" }}>
-                  {selectedCase.caseType}
-                </div>
-              </div>
-
-              <div className="cc-modal-row">
-                <div>
-                  <div className="cc-label">Status</div>
-                  <div style={{ marginTop: 6 }}>
-                    <CM_StatusBadge status={selectedCase.status} />
+                  <div>
+                    <div className="cc-label">Student ID</div>
+                    <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 4 }}>{selectedCase.studentId}</div>
                   </div>
                 </div>
               </div>
 
-              <div style={{ marginTop: 12 }}>
-                <div className="cc-label">Reporting Officer</div>
-                <div style={{ fontWeight: 600, color: "#0f172a" }}>
-                  {selectedCase.officer}
+              {/* Divider */}
+              <div style={{ borderTop: "1px solid #f1f5f9", marginBottom: 16 }} />
+
+              {/* Case info group */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+                  Case Information
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px", marginBottom: 12 }}>
+                  <div>
+                    <div className="cc-label">Case Type</div>
+                    <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 4 }}>{selectedCase.caseType}</div>
+                  </div>
+                  <div>
+                    <div className="cc-label">Reporting Officer</div>
+                    <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 4 }}>{selectedCase.officer || "—"}</div>
+                  </div>
+                </div>
+                <div>
+                  <div className="cc-label">Case Description</div>
+                  <div style={{ color: "#334155", fontSize: 14, lineHeight: "20px", marginTop: 6, whiteSpace: "pre-wrap", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px" }}>
+                    {selectedCase.description || "No description provided."}
+                  </div>
                 </div>
               </div>
 
-              <div style={{ marginTop: 14 }}>
-                <div className="cc-label">Case Description</div>
-                <div
-                  style={{
-                    color: "#0f172a",
-                    fontSize: 14,
-                    lineHeight: "20px",
-                    marginTop: 6,
-                    whiteSpace: "pre-wrap",
-                  }}
-                >
-                  {selectedCase.description || "No description provided."}
-                </div>
-              </div>
+              {/* Divider */}
+              <div style={{ borderTop: "1px solid #f1f5f9", marginBottom: 16 }} />
 
-              <div style={{ marginTop: 14 }}>
-                <div className="cc-label">Evidence Submitted</div>
+              {/* Evidence */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+                  Evidence Submitted
+                </div>
                 {selectedCase.evidence && selectedCase.evidence.length > 0 ? (
-                  <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {selectedCase.evidence.map((ev, idx) => (
-                      <div key={`${ev.name}-${idx}`} style={{ color: "#0f172a", fontSize: 14 }}>
-                        <span style={{ fontWeight: 600 }}>{ev.name}</span>
+                      <div key={`${ev.name}-${idx}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 7, fontSize: 13, color: "#166534", fontWeight: 500 }}>
+                        <CheckCircle2 size={14} strokeWidth={2} aria-hidden />
+                        {ev.name}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div style={{ marginTop: 6, color: "#64748b", fontSize: 14 }}>
-                    No evidence submitted.
-                  </div>
+                  <div style={{ color: "#94a3b8", fontSize: 14 }}>No evidence submitted.</div>
                 )}
               </div>
 
-              <div className="cc-modal-row" style={{ marginTop: 14 }}>
-                <div className="cc-field">
-                  <div className="cc-label">Update Status</div>
+              {/* Divider */}
+              <div style={{ borderTop: "1px solid #e2e8f0", marginBottom: 16 }} />
+
+              {/* Update status */}
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+                  Update Case
+                </div>
+                <div className="cc-field" style={{ marginBottom: 12 }}>
+                  <div className="cc-label">Status</div>
                   <select
                     className="cc-input"
-                  value={statusUpdate}
-                  onChange={(e) => setStatusUpdate(e.target.value)}
-                >
-                  <option value="new">new</option>
-                  <option value="pending">pending</option>
-                  <option value="closed">closed</option>
-                </select>
+                    value={statusUpdate}
+                    onChange={(e) => setStatusUpdate(e.target.value)}
+                  >
+                    <option value="new">new</option>
+                    <option value="pending">pending</option>
+                    <option value="closed">closed</option>
+                  </select>
                 </div>
-              </div>
-
-              <div className="cc-field" style={{ marginTop: 12 }}>
-                <div className="cc-label">Notes (optional)</div>
-                <textarea
-                  className="cc-textarea"
-                  value={statusNote}
-                  onChange={(e) => setStatusNote(e.target.value)}
-                  placeholder="Add an update note for this case..."
-                />
+                <div className="cc-field">
+                  <div className="cc-label">Notes (optional)</div>
+                  <textarea
+                    className="cc-textarea"
+                    value={statusNote}
+                    onChange={(e) => setStatusNote(e.target.value)}
+                    placeholder="Add an update note for this case..."
+                  />
+                </div>
               </div>
             </div>
 
@@ -1813,7 +1812,6 @@ export function CaseManagementPage() {
                     studentId: newCaseForm.studentId,
                     caseType: newCaseForm.caseType,
                     description: newCaseForm.description,
-                    priority: newCaseForm.priority,
                     program: newCaseForm.program,
                     evidence: [
                       {
@@ -1830,7 +1828,6 @@ export function CaseManagementPage() {
                     studentId: "",
                     program: "",
                     caseType: "",
-                    priority: "medium",
                     description: "",
                   });
                   setNewCaseEvidence(null);
@@ -1939,28 +1936,6 @@ export function CaseManagementPage() {
                         {newCaseErrors.caseType}
                       </div>
                     )}
-                  </div>
-                </div>
-
-                <div className="cc-modal-row">
-                  <div className="cc-field">
-                    <div className="cc-label">Priority</div>
-                    <select
-                      className="cc-input"
-                      value={newCaseForm.priority}
-                      onChange={(e) =>
-                        setNewCaseForm((prev) => ({
-                          ...prev,
-                          priority: e.target.value,
-                        }))
-                      }
-                    >
-                      {PRIORITY_OPTIONS.map((p) => (
-                        <option value={p} key={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
                   </div>
                 </div>
 
