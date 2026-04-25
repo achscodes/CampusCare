@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Bar,
@@ -221,6 +221,135 @@ const DO_StatusBadge = ({ status }) => (
 const DO_SCHOOL_OPTIONS = ["SECA", "SBMA", "SASE"];
 const DO_OFFENSE_TYPE_OPTIONS = ["Minor Offense", "Major Offense"];
 
+/** School → Programs mapping for filtering */
+const SCHOOL_PROGRAM_MAP = {
+  "SECA": [
+    "BS Architecture",
+    "BS Civil Engineering",
+    "BS Computer Science with specialization in Machine Learning",
+    "BS Information Technology with specialization in Mobile and Web Applications",
+  ],
+  "SBMA": [
+    "BS Accountancy",
+    "BS Management Accounting",
+    "BS Business Administration (BSBA) major in Financial Management",
+    "BSBA major in Marketing Management",
+    "BSBA major in Human Resource Management",
+  ],
+  "SASE": [
+    "AB Communication",
+    "BS Psychology",
+    "BS Nursing",
+    "Bachelor of Science in Pharmacy",
+    "Bachelor of Physical Education (BPEd)",
+    "BS Hospitality Management",
+    "BS Tourism Management",
+    "STEM: Science, Technology, Engineering, and Mathematics",
+    "ABM: Accountancy, Business, and Management",
+    "HUMSS: Humanities and Social Sciences",
+  ],
+};
+
+/** Offense Type → Case Types mapping */
+const OFFENSE_TYPE_CASE_TYPE_MAP = {
+  "Major Offense": [
+    "Academic Dishonesty",
+    "Plagiarism",
+    "Cheating",
+    "Falsification of Records",
+    "Property Damage",
+  ],
+  "Minor Offense": [
+    "Code of Conduct Violation",
+    "Attendance Violation",
+    "Disruptive Behavior",
+  ],
+};
+
+/** Get programs for a selected school */
+function getProgramsForSchool(school) {
+  return SCHOOL_PROGRAM_MAP[school] || [];
+}
+
+/** Get case types for a selected offense type */
+function getCaseTypesForOffenseType(offenseType) {
+  return OFFENSE_TYPE_CASE_TYPE_MAP[offenseType] || [];
+}
+
+/** Custom select dropdown matching ProgramSelect design */
+function CustomSelect({
+  id,
+  value,
+  onChange,
+  options,
+  placeholder,
+  error,
+  disabled,
+  isOpen,
+  onOpen,
+  onClose,
+}) {
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const close = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) onClose();
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [isOpen, onClose]);
+
+  const display = value?.trim() ? value : "";
+
+  return (
+    <div className="program-select" ref={wrapRef}>
+      <button
+        id={id}
+        type="button"
+        className={`program-select-trigger${error ? " program-select-trigger--error" : ""}`}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        disabled={disabled}
+        onClick={() => !disabled && onOpen()}
+      >
+        {display || placeholder}
+      </button>
+      {isOpen && (
+        <ul className="program-select-dropdown" role="listbox" aria-labelledby={id}>
+          <li
+            className="program-select-option program-select-option--placeholder"
+            role="option"
+            aria-selected={!display}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              onChange("");
+              onClose();
+            }}
+          >
+            {placeholder}
+          </li>
+          {options.map((opt) => (
+            <li
+              key={opt}
+              className="program-select-option"
+              role="option"
+              aria-selected={value === opt}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onChange(opt);
+                onClose();
+              }}
+            >
+              {opt}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function parseCaseMeta(caseRow) {
   const desc = String(caseRow?.description || "");
   let program = caseRow?.program || "";
@@ -251,6 +380,7 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const [selectedCase, setSelectedCase] = useState(null);
   const [isNewCaseOpen, setIsNewCaseOpen] = useState(false);
+  const [openDropdownId, setOpenDropdownId] = useState(null);
   const {
     cases,
     loading: casesLoading,
@@ -829,22 +959,20 @@ export function DashboardPage() {
                   <label className="do-form-label" htmlFor="nf-school">
                     School <span className="req">*</span>
                   </label>
-                  <select
+                  <CustomSelect
                     id="nf-school"
-                    className={`cc-input${newCaseErrors.school ? " cc-input-error" : ""}`}
                     value={newCaseForm.school}
-                    onChange={(e) =>
-                      setNewCaseForm((p) => ({ ...p, school: e.target.value }))
-                    }
-                    aria-invalid={Boolean(newCaseErrors.school)}
-                  >
-                    <option value="">Select school</option>
-                    {DO_SCHOOL_OPTIONS.map((school) => (
-                      <option value={school} key={school}>
-                        {school}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => {
+                      setNewCaseForm((p) => ({ ...p, school: v, program: "" }));
+                      setOpenDropdownId(null);
+                    }}
+                    options={DO_SCHOOL_OPTIONS}
+                    placeholder="Select school"
+                    error={Boolean(newCaseErrors.school)}
+                    isOpen={openDropdownId === "nf-school"}
+                    onOpen={() => setOpenDropdownId("nf-school")}
+                    onClose={() => setOpenDropdownId(null)}
+                  />
                   {newCaseErrors.school && (
                     <div className="cc-form-error" role="alert">
                       {newCaseErrors.school}
@@ -856,11 +984,19 @@ export function DashboardPage() {
                   <label className="do-form-label" htmlFor="nf-program">
                     Program / Course
                   </label>
-                  <ProgramSelect
+                  <CustomSelect
                     id="nf-program"
                     value={newCaseForm.program}
-                    onChange={(v) => setNewCaseForm((p) => ({ ...p, program: v }))}
-                    options={NU_PROGRAM_OPTIONS}
+                    onChange={(v) => {
+                      setNewCaseForm((p) => ({ ...p, program: v }));
+                      setOpenDropdownId(null);
+                    }}
+                    options={newCaseForm.school ? getProgramsForSchool(newCaseForm.school) : NU_PROGRAM_OPTIONS}
+                    placeholder="Select program / course"
+                    error={false}
+                    isOpen={openDropdownId === "nf-program"}
+                    onOpen={() => setOpenDropdownId("nf-program")}
+                    onClose={() => setOpenDropdownId(null)}
                   />
                 </div>
 
@@ -869,22 +1005,22 @@ export function DashboardPage() {
                     <label className="do-form-label" htmlFor="nf-ctype">
                       Case Type <span className="req">*</span>
                     </label>
-                    <select
+                    <CustomSelect
                       id="nf-ctype"
-                      className={`cc-input${newCaseErrors.caseType ? " cc-input-error" : ""}`}
                       value={newCaseForm.caseType}
-                      onChange={(e) =>
-                        setNewCaseForm((p) => ({ ...p, caseType: e.target.value }))
-                      }
-                      aria-invalid={Boolean(newCaseErrors.caseType)}
-                    >
-                      <option value="">Select case type</option>
-                      {CASE_TYPE_OPTIONS.map((opt) => (
-                        <option value={opt} key={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => {
+                        setNewCaseForm((p) => ({ ...p, caseType: v }));
+                        setOpenDropdownId(null);
+                      }}
+                      options={newCaseForm.offenseType
+                        ? getCaseTypesForOffenseType(newCaseForm.offenseType)
+                        : CASE_TYPE_OPTIONS}
+                      placeholder="Select case type"
+                      error={Boolean(newCaseErrors.caseType)}
+                      isOpen={openDropdownId === "nf-ctype"}
+                      onOpen={() => setOpenDropdownId("nf-ctype")}
+                      onClose={() => setOpenDropdownId(null)}
+                    />
                     {newCaseErrors.caseType && (
                       <div className="cc-form-error" role="alert">
                         {newCaseErrors.caseType}
@@ -895,22 +1031,20 @@ export function DashboardPage() {
                     <label className="do-form-label" htmlFor="nf-offense-type">
                       Offense Type <span className="req">*</span>
                     </label>
-                    <select
+                    <CustomSelect
                       id="nf-offense-type"
-                      className={`cc-input${newCaseErrors.offenseType ? " cc-input-error" : ""}`}
                       value={newCaseForm.offenseType}
-                      onChange={(e) =>
-                        setNewCaseForm((p) => ({ ...p, offenseType: e.target.value }))
-                      }
-                      aria-invalid={Boolean(newCaseErrors.offenseType)}
-                    >
-                      <option value="">Select offense type</option>
-                      {DO_OFFENSE_TYPE_OPTIONS.map((offenseType) => (
-                        <option value={offenseType} key={offenseType}>
-                          {offenseType}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => {
+                        setNewCaseForm((p) => ({ ...p, offenseType: v, caseType: "" }));
+                        setOpenDropdownId(null);
+                      }}
+                      options={DO_OFFENSE_TYPE_OPTIONS}
+                      placeholder="Select offense type"
+                      error={Boolean(newCaseErrors.offenseType)}
+                      isOpen={openDropdownId === "nf-offense-type"}
+                      onOpen={() => setOpenDropdownId("nf-offense-type")}
+                      onClose={() => setOpenDropdownId(null)}
+                    />
                     {newCaseErrors.offenseType && (
                       <div className="cc-form-error" role="alert">
                         {newCaseErrors.offenseType}
