@@ -1174,7 +1174,7 @@ export function CaseManagementPage() {
   const [departmentFilter, setDepartmentFilter] = useState("");
   const [selectedCase, setSelectedCase] = useState(null);
   const [isNewCaseOpen, setIsNewCaseOpen] = useState(false);
-  const [isExportOpen, setIsExportOpen] = useState(false);
+  const [searchField, setSearchField] = useState("all");
   const {
     cases,
     loading: casesLoading,
@@ -1219,11 +1219,14 @@ export function CaseManagementPage() {
         (activeTab === "closed" && c.status === "closed");
 
       const q = search.toLowerCase();
-      const matchesSearch =
-        !q ||
-        c.student.toLowerCase().includes(q) ||
-        c.id.toLowerCase().includes(q) ||
-        c.caseType.toLowerCase().includes(q);
+      const matchesSearch = (() => {
+        if (!q) return true;
+        if (searchField === "caseId") return c.id.toLowerCase().includes(q);
+        if (searchField === "studentName") return c.student.toLowerCase().includes(q);
+        if (searchField === "program") return String(c.program || "").toLowerCase().includes(q);
+        if (searchField === "caseType") return c.caseType.toLowerCase().includes(q);
+        return c.student.toLowerCase().includes(q) || c.id.toLowerCase().includes(q) || c.caseType.toLowerCase().includes(q);
+      })();
 
       const matchesStatus = !statusFilter || String(c.status) === statusFilter;
       const matchesDepartment =
@@ -1240,7 +1243,7 @@ export function CaseManagementPage() {
 
       return matchesTab && matchesSearch && matchesStatus && matchesDepartment && matchesDate;
     });
-  }, [cases, activeTab, search, statusFilter, departmentFilter, dateFilterIso]);
+  }, [cases, activeTab, search, searchField, statusFilter, departmentFilter, dateFilterIso]);
 
   const stats = useMemo(() => {
     return {
@@ -1251,22 +1254,6 @@ export function CaseManagementPage() {
     };
   }, [cases]);
 
-  const handleExport = () => {
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      cases: filtered,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `campuscare_cases_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setIsExportOpen(false);
-  };
 
   return (
     <div className="dashboard-layout do-office-layout">
@@ -1378,29 +1365,6 @@ export function CaseManagementPage() {
                   </svg>
                   All Cases
                 </div>
-
-                <button
-                  className="btn-export"
-                  type="button"
-                  onClick={() => setIsExportOpen(true)}
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M14 10v2.667A1.333 1.333 0 0112.667 14H3.333A1.333 1.333 0 012 12.667V10M5.333 6.667L8 9.333l2.667-2.666M8 9.333V2"
-                      stroke="#374151"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  Export
-                </button>
               </div>
 
               <div className="confidential-notice">
@@ -1422,7 +1386,21 @@ export function CaseManagementPage() {
                 Confidential - Handle with discretion
               </div>
 
-              <div className="search-bar-wrapper">
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 0 }}>
+                <select
+                  className="cc-input"
+                  style={{ width: 140, height: 36, flexShrink: 0 }}
+                  value={searchField}
+                  onChange={(e) => setSearchField(e.target.value)}
+                  aria-label="Search by field"
+                >
+                  <option value="all">All Fields</option>
+                  <option value="caseId">Case ID</option>
+                  <option value="studentName">Student Name</option>
+                  <option value="program">Program</option>
+                  <option value="caseType">Case Type</option>
+                </select>
+                <div className="search-bar-wrapper" style={{ flex: 1, marginBottom: 0 }}>
                 <span className="search-icon" aria-hidden="true">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                     <circle
@@ -1443,10 +1421,17 @@ export function CaseManagementPage() {
                 <input
                   type="text"
                   className="search-input"
-                  placeholder="Search by student name, case ID, or case type..."
+                  placeholder={
+                    searchField === "caseId" ? "Search by case ID…" :
+                    searchField === "studentName" ? "Search by student name…" :
+                    searchField === "program" ? "Search by program…" :
+                    searchField === "caseType" ? "Search by case type…" :
+                    "Search cases…"
+                  }
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
+                </div>
               </div>
 
               <div className="cc-filters-row" aria-label="Case filters">
@@ -1603,6 +1588,7 @@ export function CaseManagementPage() {
           <div
             className="cc-modal do-modal do-modal--lg"
             onMouseDown={(e) => e.stopPropagation()}
+            style={{ display: "flex", flexDirection: "column", maxHeight: "min(90vh, 760px)" }}
           >
             <div className="cc-modal-header">
               <div className="cc-modal-title">Case Details</div>
@@ -1616,7 +1602,7 @@ export function CaseManagementPage() {
               </button>
             </div>
 
-            <div className="cc-modal-body" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            <div className="cc-modal-body" style={{ display: "flex", flexDirection: "column", gap: 0, overflowY: "auto", flex: 1, minHeight: 0 }}>
               {/* Case ID + Status row */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
                 <div>
@@ -2001,47 +1987,6 @@ export function CaseManagementPage() {
         </div>
       )}
 
-      {isExportOpen && (
-        <div
-          className="cc-modal-overlay do-modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          onMouseDown={() => setIsExportOpen(false)}
-        >
-          <div
-            className="cc-modal do-modal do-modal--lg"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div className="cc-modal-header">
-              <div className="cc-modal-title">Export Cases</div>
-              <button
-                className="cc-modal-close"
-                type="button"
-                aria-label="Close"
-                onClick={() => setIsExportOpen(false)}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="cc-modal-body">
-              <div style={{ color: "#64748b", fontSize: 14, lineHeight: "20px" }}>
-                This will download the currently filtered cases as a JSON file.
-              </div>
-            </div>
-
-            <div className="cc-modal-actions">
-              <button
-                className="cc-btn-primary"
-                type="button"
-                onClick={handleExport}
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
