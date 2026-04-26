@@ -1603,7 +1603,6 @@ export function CaseManagementPage() {
             </div>
 
             <div className="cc-modal-body" style={{ display: "flex", flexDirection: "column", gap: 0, overflowY: "auto", flex: 1, minHeight: 0 }}>
-              {/* Case ID + Status row */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
                 <div>
                   <div className="cc-label">Case ID</div>
@@ -1614,10 +1613,8 @@ export function CaseManagementPage() {
                 <CM_StatusBadge status={selectedCase.status} />
               </div>
 
-              {/* Divider */}
               <div style={{ borderTop: "1px solid #e2e8f0", marginBottom: 16 }} />
 
-              {/* Student info group */}
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
                   Student Information
@@ -1634,10 +1631,8 @@ export function CaseManagementPage() {
                 </div>
               </div>
 
-              {/* Divider */}
               <div style={{ borderTop: "1px solid #f1f5f9", marginBottom: 16 }} />
 
-              {/* Case info group */}
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
                   Case Information
@@ -1660,10 +1655,8 @@ export function CaseManagementPage() {
                 </div>
               </div>
 
-              {/* Divider */}
               <div style={{ borderTop: "1px solid #f1f5f9", marginBottom: 16 }} />
 
-              {/* Evidence */}
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
                   Evidence Submitted
@@ -1682,10 +1675,8 @@ export function CaseManagementPage() {
                 )}
               </div>
 
-              {/* Divider */}
               <div style={{ borderTop: "1px solid #e2e8f0", marginBottom: 16 }} />
 
-              {/* Update status */}
               <div>
                 <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
                   Update Case
@@ -1993,18 +1984,6 @@ export function CaseManagementPage() {
 
 
 
-/** Predefined hearing slots only — no free-text times. */
-const HEARING_TIME_OPTIONS = [
-  "8:00 AM",
-  "9:00 AM",
-  "10:00 AM",
-  "11:00 AM",
-  "1:00 PM",
-  "2:00 PM",
-  "3:00 PM",
-  "4:00 PM",
-];
-
 const ConferencePill = ({ conference, status: statusProp }) => {
   const status = conference ? effectiveConferenceStatus(conference) : String(statusProp || "scheduled").toLowerCase();
   const cls =
@@ -2066,17 +2045,21 @@ export function CaseConferencePage() {
     return Array.from(map.values());
   }, [cases, conferences]);
 
+  const defaultCaseId = caseOptions[0]?.caseId || "";
+
+  // ── Schedule modal: Case ID search state ──────────────────────────────────
+  const [caseIdInput, setCaseIdInput] = useState("");
+  const [caseIdError, setCaseIdError] = useState("");
+
   const [scheduleForm, setScheduleForm] = useState({
     caseId: "",
     dateIso: toDateInputValue(new Date()),
-    time: "10:00 AM",
-    duration: "1 hour",
+    startTime: "",
+    endTime: "",
     location: "",
     attendees: "",
     notes: "",
   });
-
-  const defaultCaseId = caseOptions[0]?.caseId || "";
 
   useEffect(() => {
     if (!defaultCaseId) return;
@@ -2087,17 +2070,36 @@ export function CaseConferencePage() {
   }, [defaultCaseId, caseOptions]);
 
   const [scheduleErrors, setScheduleErrors] = useState({});
+
   const openReschedule = useCallback(
     (conf) => {
       const d = parseConferenceDate(conf) || new Date();
       const attendeeText = Array.isArray(conf?.attendees) ? conf.attendees.join(", ") : "";
       setScheduleEditId(String(conf.conferenceId));
       setScheduleErrors({});
+      setCaseIdInput(conf.caseId || defaultCaseId || "");
+      setCaseIdError("");
+      // Convert stored timeLabel (e.g. "10:00 AM") back to HH:MM for input[type=time]
+      const storedTime = conf.timeLabel || "";
+      let timeValue = "";
+      if (storedTime) {
+        const m = storedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+        if (m) {
+          let h = parseInt(m[1], 10);
+          const min = m[2];
+          const ampm = m[3].toUpperCase();
+          if (ampm === "PM" && h !== 12) h += 12;
+          if (ampm === "AM" && h === 12) h = 0;
+          timeValue = `${String(h).padStart(2, "0")}:${min}`;
+        } else {
+          timeValue = storedTime;
+        }
+      }
       setScheduleForm({
         caseId: conf.caseId || defaultCaseId,
         dateIso: toDateInputValue(d),
-        time: conf.timeLabel || "10:00 AM",
-        duration: conf.durationLabel || "1 hour",
+        startTime: timeValue,
+        endTime: "",
         location: conf.location || "",
         attendees: attendeeText,
         notes: conf.notes || "",
@@ -2106,6 +2108,32 @@ export function CaseConferencePage() {
     },
     [defaultCaseId],
   );
+
+  /** Convert HH:MM → "h:MM AM/PM" label for storage */
+  function timeInputToLabel(val) {
+    if (!val) return "";
+    const [hStr, mStr] = val.split(":");
+    let h = parseInt(hStr, 10);
+    const m = mStr || "00";
+    const ampm = h >= 12 ? "PM" : "AM";
+    if (h > 12) h -= 12;
+    if (h === 0) h = 12;
+    return `${h}:${m} ${ampm}`;
+  }
+
+  /** Validate Case ID search field: must exactly match a known case */
+  function validateCaseIdInput(val) {
+    const trimmed = val.trim();
+    if (!trimmed) return "Case ID is required.";
+    // Accept either raw ID or formatted (e.g. "CASE-001" vs stored id)
+    const match = caseOptions.find(
+      (x) =>
+        x.caseId === trimmed ||
+        formatCaseId(x.caseId) === trimmed,
+    );
+    if (!match) return "Can't find case ID";
+    return "";
+  }
 
   const dataFetchError = confFetchError || casesFetchError;
   const dataLoading = confLoading || casesLoading;
@@ -2178,7 +2206,6 @@ export function CaseConferencePage() {
 
   const monthTitle = viewMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const todayKeyStr = dateKey(new Date());
-  /** Scheduled conferences on today's calendar date — right-column "Today" list opens the same details modal as View Details. */
   const todayConferences = useMemo(() => eventsByDateKey.get(todayKeyStr) || [], [eventsByDateKey, todayKeyStr]);
   const todayFormatted = useMemo(
     () =>
@@ -2245,7 +2272,22 @@ export function CaseConferencePage() {
             <button
               className="cc-schedule-btn"
               type="button"
-              onClick={() => setIsScheduleOpen(true)}
+              onClick={() => {
+                setScheduleEditId(null);
+                setScheduleErrors({});
+                setCaseIdInput("");
+                setCaseIdError("");
+                setScheduleForm({
+                  caseId: "",
+                  dateIso: toDateInputValue(new Date()),
+                  startTime: "",
+                  endTime: "",
+                  location: "",
+                  attendees: "",
+                  notes: "",
+                });
+                setIsScheduleOpen(true);
+              }}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path
@@ -2564,6 +2606,7 @@ export function CaseConferencePage() {
         </main>
       </div>
 
+      {/* ── Schedule / Reschedule modal ───────────────────────────────────── */}
       {isScheduleOpen && (
         <div
           className="cc-modal-overlay do-modal-overlay"
@@ -2602,13 +2645,26 @@ export function CaseConferencePage() {
               onSubmit={async (e) => {
                 e.preventDefault();
                 const nextErrors = {};
-                const effectiveCaseId = scheduleForm.caseId || defaultCaseId;
-                if (!effectiveCaseId) nextErrors.caseId = "Case is required.";
-                if (!scheduleForm.dateIso?.trim()) nextErrors.date = "Date is required.";
-                if (!HEARING_TIME_OPTIONS.includes(scheduleForm.time)) {
-                  nextErrors.time = "Select a hearing time from the list.";
+
+                // Validate Case ID search input
+                const caseIdErr = validateCaseIdInput(caseIdInput);
+                if (caseIdErr) {
+                  setCaseIdError(caseIdErr);
+                  nextErrors.caseId = caseIdErr;
+                } else {
+                  setCaseIdError("");
                 }
-                if (!scheduleForm.duration) nextErrors.duration = "Duration is required.";
+
+                // Resolve matched case
+                const trimmedInput = caseIdInput.trim();
+                const matchedCase = caseOptions.find(
+                  (x) => x.caseId === trimmedInput || formatCaseId(x.caseId) === trimmedInput,
+                );
+                const effectiveCaseId = matchedCase?.caseId || "";
+
+                if (!scheduleForm.dateIso?.trim()) nextErrors.date = "Date is required.";
+                if (!scheduleForm.startTime) nextErrors.startTime = "Start time is required.";
+                if (!scheduleForm.endTime) nextErrors.endTime = "End time is required.";
                 if (!scheduleForm.location.trim()) nextErrors.location = "Location is required.";
 
                 setScheduleErrors(nextErrors);
@@ -2617,6 +2673,9 @@ export function CaseConferencePage() {
                 const confDate = new Date(`${scheduleForm.dateIso}T12:00:00`);
                 const day = confDate.getDate();
                 const dateLabel = fromDateInputToLabel(scheduleForm.dateIso);
+                const startTimeLabel = timeInputToLabel(scheduleForm.startTime);
+                const endTimeLabel = timeInputToLabel(scheduleForm.endTime);
+                const timeLabel = `${startTimeLabel} - ${endTimeLabel}`;
 
                 const refCase =
                   conferences.find((x) => x.caseId === effectiveCaseId) ||
@@ -2634,8 +2693,7 @@ export function CaseConferencePage() {
                       caseId: effectiveCaseId,
                       day,
                       dateLabel,
-                      timeLabel: scheduleForm.time,
-                      durationLabel: scheduleForm.duration,
+                      timeLabel,
                       location: scheduleForm.location,
                       attendees:
                         attendeeList.length > 0 ? attendeeList : ["Student", "Discipline Coordinator"],
@@ -2652,8 +2710,7 @@ export function CaseConferencePage() {
                       caseTitle: refCase.caseTitle || refCase.caseType || effectiveCaseId,
                       day,
                       dateLabel,
-                      timeLabel: scheduleForm.time,
-                      durationLabel: scheduleForm.duration,
+                      timeLabel,
                       location: scheduleForm.location,
                       status: "scheduled",
                       attendees:
@@ -2668,8 +2725,13 @@ export function CaseConferencePage() {
                   setIsScheduleOpen(false);
                   setScheduleEditId(null);
                   setScheduleErrors({});
+                  setCaseIdInput("");
+                  setCaseIdError("");
                   setScheduleForm((prev) => ({
                     ...prev,
+                    caseId: "",
+                    startTime: "",
+                    endTime: "",
                     dateIso: toDateInputValue(new Date()),
                     notes: "",
                   }));
@@ -2679,32 +2741,32 @@ export function CaseConferencePage() {
               }}
             >
               <div className="do-modal-body-scroll do-form-stack">
+                {/* ── Case ID search input (replaces dropdown) ── */}
                 <div className="do-form-cell" style={{ marginBottom: 0 }}>
                   <label className="do-form-label" htmlFor="sch-case">
                     Case ID
                   </label>
-                  <select
+                  <input
                     id="sch-case"
-                    className={`cc-input${scheduleErrors.caseId ? " cc-input-error" : ""}`}
-                    value={scheduleForm.caseId || defaultCaseId}
-                    onChange={(e) =>
-                      setScheduleForm((prev) => ({
-                        ...prev,
-                        caseId: e.target.value,
-                      }))
-                    }
-                    aria-invalid={Boolean(scheduleErrors.caseId)}
-                  >
-                    <option value="">Select case</option>
-                    {caseOptions.map((c) => (
-                      <option value={c.caseId} key={c.caseId}>
-                        {formatCaseId(c.caseId)} — {c.caseTitle}
-                      </option>
-                    ))}
-                  </select>
-                  {scheduleErrors.caseId && (
+                    className={`cc-input${caseIdError || scheduleErrors.caseId ? " cc-input-error" : ""}`}
+                    placeholder="Enter exact Case ID (e.g. CASE-001)"
+                    value={caseIdInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCaseIdInput(val);
+                      // Live validation
+                      if (val.trim()) {
+                        const err = validateCaseIdInput(val);
+                        setCaseIdError(err);
+                      } else {
+                        setCaseIdError("");
+                      }
+                    }}
+                    aria-invalid={Boolean(caseIdError || scheduleErrors.caseId)}
+                  />
+                  {(caseIdError || scheduleErrors.caseId) && (
                     <div className="cc-form-error" role="alert">
-                      {scheduleErrors.caseId}
+                      {caseIdError || scheduleErrors.caseId}
                     </div>
                   )}
                 </div>
@@ -2730,58 +2792,50 @@ export function CaseConferencePage() {
                       </div>
                     )}
                   </div>
+
+                  {/* ── Start Time input ── */}
                   <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                    <label className="do-form-label" htmlFor="sch-time">
-                      Time
+                    <label className="do-form-label" htmlFor="sch-start-time">
+                      Start Time
                     </label>
-                    <select
-                      id="sch-time"
-                      className={`cc-input${scheduleErrors.time ? " cc-input-error" : ""}`}
-                      value={HEARING_TIME_OPTIONS.includes(scheduleForm.time) ? scheduleForm.time : ""}
+                    <input
+                      id="sch-start-time"
+                      type="time"
+                      className={`cc-input${scheduleErrors.startTime ? " cc-input-error" : ""}`}
+                      value={scheduleForm.startTime}
                       onChange={(e) =>
-                        setScheduleForm((prev) => ({ ...prev, time: e.target.value }))
+                        setScheduleForm((prev) => ({ ...prev, startTime: e.target.value }))
                       }
-                      aria-invalid={Boolean(scheduleErrors.time)}
-                    >
-                      <option value="">Select time</option>
-                      {HEARING_TIME_OPTIONS.map((slot) => (
-                        <option key={slot} value={slot}>
-                          {slot}
-                        </option>
-                      ))}
-                    </select>
-                    {scheduleErrors.time && (
+                      aria-invalid={Boolean(scheduleErrors.startTime)}
+                    />
+                    {scheduleErrors.startTime && (
                       <div className="cc-form-error" role="alert">
-                        {scheduleErrors.time}
+                        {scheduleErrors.startTime}
                       </div>
                     )}
                   </div>
-                </div>
 
-                <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                  <label className="do-form-label" htmlFor="sch-dur">
-                    Duration
-                  </label>
-                  <select
-                    id="sch-dur"
-                    className={`cc-input${scheduleErrors.duration ? " cc-input-error" : ""}`}
-                    value={scheduleForm.duration}
-                    onChange={(e) =>
-                      setScheduleForm((prev) => ({ ...prev, duration: e.target.value }))
-                    }
-                  >
-                    <option value="">Select duration</option>
-                    {CONFERENCE_DURATION_OPTIONS.map((d) => (
-                      <option value={d} key={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                  {scheduleErrors.duration && (
-                    <div className="cc-form-error" role="alert">
-                      {scheduleErrors.duration}
-                    </div>
-                  )}
+                  {/* ── End Time input ── */}
+                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                    <label className="do-form-label" htmlFor="sch-end-time">
+                      End Time
+                    </label>
+                    <input
+                      id="sch-end-time"
+                      type="time"
+                      className={`cc-input${scheduleErrors.endTime ? " cc-input-error" : ""}`}
+                      value={scheduleForm.endTime}
+                      onChange={(e) =>
+                        setScheduleForm((prev) => ({ ...prev, endTime: e.target.value }))
+                      }
+                      aria-invalid={Boolean(scheduleErrors.endTime)}
+                    />
+                    {scheduleErrors.endTime && (
+                      <div className="cc-form-error" role="alert">
+                        {scheduleErrors.endTime}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="do-form-cell" style={{ marginBottom: 0 }}>
