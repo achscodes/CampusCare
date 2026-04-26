@@ -5,6 +5,7 @@
 
 import { formatCaseDateFromIso } from "../utils/disciplineCaseMapper";
 import { isAllowedInterOfficePair, labelForOfficeKey } from "../constants/documentRequestAccess";
+import { INTER_OFFICE_DOC_STATUS } from "../utils/interOfficeWorkflow";
 
 function isoFromDateField(v) {
   if (!v) return "";
@@ -55,7 +56,7 @@ export function interOfficeDocumentRequestToInsert(id, payload, requestingOffice
     program: (payload.program || "").trim(),
     document_type: payload.documentType,
     priority: String(payload.priority || "medium").toLowerCase(),
-    status: payload.status || "Pending",
+    status: payload.status || INTER_OFFICE_DOC_STATUS.PENDING_APPROVAL,
     description: (payload.description || "").trim(),
     evidence: Array.isArray(payload.evidence) ? payload.evidence : [],
     notes: payload.notes != null ? String(payload.notes).trim() || null : null,

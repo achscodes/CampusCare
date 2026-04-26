@@ -27,11 +27,10 @@ import {
 } from "lucide-react";
 import { showToast } from "../../utils/toast";
 import Sidebar from "../../components/Sidebar/Sidebar";
-import ProgramSelect from "../../components/common/ProgramSelect";
 import { CASE_TYPE_OPTIONS, PRIORITY_OPTIONS } from "../../data/mockCases";
 import { NU_PROGRAM_OPTIONS } from "../../data/nuPrograms";
 import { canCreateDocumentRequest, labelForOfficeKey } from "../../constants/documentRequestAccess";
-import { CONFERENCE_DURATION_OPTIONS, MOCK_CONFERENCES } from "../../data/mockConferences";
+import { CONFERENCE_DURATION_OPTIONS } from "../../data/mockConferences";
 import { DO_CONFERENCES_SEED } from "../../data/doOfficeSeeds";
 import { DO_STUDENT_RECORDS_SEED } from "../../data/doOfficeSeeds";
 import { DO_DOCUMENT_REQUESTS_SEED } from "../../data/doOfficeSeeds";
@@ -58,12 +57,26 @@ import {
 } from "../../utils/conferenceCalendar";
 import { isStaffCampusRole } from "../../utils/officeSession";
 import { PROFILE_SETTINGS_PATH_DISCIPLINE } from "../../utils/profileSettingsRoutes";
+import { readCampusCareSession } from "../../utils/campusCareSession";
+import {
+  INTER_OFFICE_DOC_STATUS,
+  canReceivingOfficeUploadDoc,
+  isDocRequestDeclined,
+  isDocRequestPendingApproval,
+  isDocRequestApprovedForFulfillment,
+  normalizeInterOfficeDocStatus,
+  DISCIPLINE_REFERRAL_STATUS,
+  isReferralPendingPartnerReview,
+  isReferralPendingReferringReview,
+  canReceivingOfficeReviewReferral,
+} from "../../utils/interOfficeWorkflow";
 import { formatCaseDateFromIso, formatCaseId } from "../../utils/disciplineCaseMapper";
 import {
-  sanitizeDigitsOnlyInput,
+  sanitizeDoStudentIdInput,
   sanitizePersonNameInput,
+  studentIdDigitsOnly,
+  validateDoStudentId,
   validatePersonName,
-  validateStrictNumericStudentId,
 } from "../../utils/signupFieldValidation";
 import {
   STANDING_LABELS,
@@ -74,145 +87,14 @@ import {
   buildReportsAnalytics,
   exportAnalyticsCsv,
 } from "../../utils/reportsAnalytics";
-import { useDONotificationStore } from "../../stores/doNotificationStore";
-import OfficeHeader from "../../components/OfficeHeader/OfficeHeader";
+import { fileToEvidenceItem } from "../../utils/disciplineEvidence";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import { appendEvidenceToInterOfficeRequest } from "../../services/interOfficeDocumentEvidence";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
+import { DisciplineOfficeTopBar } from "./DisciplineOfficeTopBar";
 import "./DO.css";
 
-
-function DONotificationBell() {
-  const [open, setOpen] = useState(false);
-  const notifications = useDONotificationStore((s) => s.notifications);
-  const markRead = useDONotificationStore((s) => s.markNotificationRead);
-  const markAllRead = useDONotificationStore((s) => s.markAllNotificationsRead);
-
-  const unreadCount = notifications.filter((n) => n.unread).length;
-
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        className="header-notifications"
-        type="button"
-        aria-label="Notifications"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-          <path
-            d="M15 6.667A5 5 0 005 6.667C5 10.833 3.333 12.5 3.333 12.5h13.334S15 10.833 15 6.667zM11.442 17.5a1.667 1.667 0 01-2.884 0"
-            stroke="#374151"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        {unreadCount > 0 ? <span className="notif-badge">{unreadCount}</span> : null}
-      </button>
-
-      {open && (
-        <div
-          style={{
-            position: "absolute",
-            right: 0,
-            top: 44,
-            width: 320,
-            background: "#fff",
-            border: "1px solid #e2e8f0",
-            borderRadius: 12,
-            boxShadow: "0px 18px 60px rgba(15, 23, 42, 0.15)",
-            padding: 12,
-            zIndex: 2500,
-          }}
-          role="menu"
-        >
-          <div
-            style={{
-              fontFamily: "Inter, sans-serif",
-              fontWeight: 600,
-              color: "#0f172a",
-              fontSize: 14,
-              marginBottom: 8,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            Notifications
-            <button
-              type="button"
-              className="cc-btn-secondary"
-              style={{ height: 28, padding: "0 10px" }}
-              onClick={() => setOpen(false)}
-            >
-              Close
-            </button>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {notifications.length === 0 ? (
-              <div style={{ color: "#64748b", fontSize: 13 }}>No notifications.</div>
-            ) : (
-              notifications.map((n) => (
-                <button
-                  key={n.id}
-                  type="button"
-                  style={{
-                    textAlign: "left",
-                    background: "transparent",
-                    padding: 8,
-                    borderRadius: 10,
-                    cursor: "pointer",
-                    border: n.unread ? "1px solid #e9d5ff" : "1px solid transparent",
-                  }}
-                  onClick={() => markRead(n.id)}
-                >
-                  <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>{n.title}</div>
-                  <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>{n.body}</div>
-                  <div style={{ color: "#94a3b8", fontSize: 11, marginTop: 4 }}>{n.createdAt}</div>
-                </button>
-              ))
-            )}
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-            <button
-              type="button"
-              className="cc-btn-secondary"
-              style={{ height: 30, padding: "0 12px" }}
-              onClick={() => markAllRead()}
-            >
-              Mark all as read
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Simple top bar (notifications + user). Page titles live in each view's content area. */
-export function DisciplineOfficeTopBar() {
-  const session = useMemo(() => {
-    try {
-      return JSON.parse(window.localStorage.getItem("campuscare_session_v1") || "null");
-    } catch {
-      return null;
-    }
-  }, []);
-  const userName = session?.name || "Arny Lynne Saragina";
-  const userRole = session?.role || "Discipline Coordinator";
-
-  return (
-    <OfficeHeader
-      userName={userName}
-      userRole={userRole}
-      notifications={[]}
-      notificationSlot={<DONotificationBell />}
-    />
-  );
-}
+export { DisciplineOfficeTopBar };
 
 const DO_StatusBadge = ({ status }) => (
   <span className={`badge badge-${status}`}>{status}</span>
@@ -353,11 +235,17 @@ function CustomSelect({
 function parseCaseMeta(caseRow) {
   const desc = String(caseRow?.description || "");
   let program = caseRow?.program || "";
+  let school = caseRow?.school || "";
+  let offenseType = caseRow?.offenseType || "";
   let reportedBy = "";
   const chunks = [];
   for (const part of desc.split("\n\n")) {
     if (part.startsWith("Program: ")) {
       program = program || part.slice(9).trim();
+    } else if (part.startsWith("School: ")) {
+      school = school || part.slice(8).trim();
+    } else if (part.startsWith("Offense Type: ")) {
+      offenseType = offenseType || part.slice(14).trim();
     } else if (part.startsWith("Reported by: ")) {
       reportedBy = part.slice(13).trim();
     } else {
@@ -366,6 +254,8 @@ function parseCaseMeta(caseRow) {
   }
   return {
     program: program || "—",
+    school: school || "—",
+    offenseType: offenseType || "—",
     reportedBy: reportedBy || caseRow?.officer || "—",
     body: chunks.join("\n\n").trim() || desc,
   };
@@ -374,6 +264,55 @@ function parseCaseMeta(caseRow) {
 function evidenceToTags(evidence) {
   if (!Array.isArray(evidence) || evidence.length === 0) return [];
   return evidence.map((e) => (typeof e === "string" ? e : e?.name)).filter(Boolean);
+}
+
+function DOEvidenceViewer({ evidence }) {
+  if (!Array.isArray(evidence) || evidence.length === 0) {
+    return <p style={{ color: "#64748b", fontSize: 14 }}>No evidence submitted.</p>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {evidence.map((ev, idx) => {
+        const item = typeof ev === "string" ? { name: ev } : ev || {};
+        const name = item.name || "Attachment";
+        const dataUrl = item.dataUrl || "";
+        const mime = String(item.mime || "");
+        const isImg = mime.startsWith("image/") && dataUrl;
+
+        return (
+          <div
+            key={`${name}-${idx}`}
+            style={{
+              border: "1px solid #e2e8f0",
+              borderRadius: 10,
+              padding: 12,
+              background: "#f8fafc",
+            }}
+          >
+            <div style={{ fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>{name}</div>
+            {isImg ? (
+              <a href={dataUrl} target="_blank" rel="noopener noreferrer">
+                <img src={dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: 220, borderRadius: 8 }} />
+              </a>
+            ) : null}
+            {dataUrl ? (
+              <a
+                href={dataUrl}
+                download={name}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontSize: 14, fontWeight: 600, color: "#2563eb" }}
+              >
+                {isImg ? "Open full size / download" : "Open or download file"}
+              </a>
+            ) : (
+              <span style={{ fontSize: 13, color: "#64748b" }}>Filename only (upload a new case to store viewable copy).</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export function DashboardPage() {
@@ -419,11 +358,7 @@ export function DashboardPage() {
 
   const recentCases = useMemo(() => cases.slice(0, 5), [cases]);
 
-  const upcomingHearings = useMemo(() => {
-    return MOCK_CONFERENCES.filter((c) => c.status === "scheduled")
-      .sort((a, b) => a.day - b.day)
-      .slice(0, 4);
-  }, []);
+  const upcomingHearings = useMemo(() => [], []);
 
   const selectedMeta = selectedCase ? parseCaseMeta(selectedCase) : null;
 
@@ -638,7 +573,7 @@ export function DashboardPage() {
           onMouseDown={() => setSelectedCase(null)}
         >
           <div
-            className="cc-modal do-modal do-modal--lg"
+            className="cc-modal do-modal do-modal--lg do-modal--case-detail"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="do-modal-head">
@@ -692,11 +627,19 @@ export function DashboardPage() {
                     <p className="do-info-dt">Program</p>
                     <p className="do-info-dd">{selectedMeta.program}</p>
                   </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">School</p>
+                    <p className="do-info-dd">{selectedMeta.school}</p>
+                  </div>
                 </div>
                 <div className="do-info-card">
                   <div className="do-info-card-top">
                     <FileText size={18} strokeWidth={2} aria-hidden />
                     Case Information
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Offense type</p>
+                    <p className="do-info-dd">{selectedMeta.offenseType}</p>
                   </div>
                   <div className="do-info-row">
                     <p className="do-info-dt">Filed Date</p>
@@ -720,18 +663,7 @@ export function DashboardPage() {
 
               <div className="do-section-card">
                 <h4>Evidence Submitted</h4>
-                {evidenceToTags(selectedCase.evidence).length > 0 ? (
-                  <div className="do-evidence-tags">
-                    {evidenceToTags(selectedCase.evidence).map((tag) => (
-                      <span key={tag} className="do-evidence-tag">
-                        <CheckCircle2 size={14} strokeWidth={2} aria-hidden />
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p style={{ color: "#64748b", fontSize: 14 }}>No evidence listed.</p>
-                )}
+                <DOEvidenceViewer evidence={selectedCase.evidence} />
               </div>
 
               <div className="do-form-stack" style={{ display: "none" }}>
@@ -810,7 +742,7 @@ export function DashboardPage() {
           onMouseDown={() => setIsNewCaseOpen(false)}
         >
           <div
-            className="cc-modal do-modal do-modal--lg"
+            className="cc-modal do-modal do-modal--lg do-modal--new-case"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="do-modal-head">
@@ -844,7 +776,7 @@ export function DashboardPage() {
                 const nmErr = validatePersonName(newCaseForm.student, "Student name");
                 if (nmErr) nextErrors.student = nmErr;
 
-                const sidErr = validateStrictNumericStudentId(newCaseForm.studentId, "Student ID");
+                const sidErr = validateDoStudentId(newCaseForm.studentId, "Student ID");
                 if (sidErr) nextErrors.studentId = sidErr;
                 if (!newCaseForm.caseType) {
                   nextErrors.caseType = "Case type is required.";
@@ -864,6 +796,14 @@ export function DashboardPage() {
                 setNewCaseErrors(nextErrors);
                 if (Object.keys(nextErrors).length > 0) return;
 
+                let evidenceItems = [];
+                try {
+                  evidenceItems = [await fileToEvidenceItem(newCaseEvidence)];
+                } catch (err) {
+                  setNewCaseErrors({ evidence: err?.message || "Could not read evidence file." });
+                  return;
+                }
+
                 try {
                   const caseDescription = [
                     newCaseForm.school ? `School: ${newCaseForm.school}` : "",
@@ -875,14 +815,14 @@ export function DashboardPage() {
 
                   await createCase({
                     student: newCaseForm.student,
-                    studentId: newCaseForm.studentId,
+                    studentId: sanitizeDoStudentIdInput(newCaseForm.studentId.trim()),
                     caseType: newCaseForm.caseType,
                     description: caseDescription,
                     program: newCaseForm.program,
+                    school: newCaseForm.school,
+                    offenseType: newCaseForm.offenseType,
                     reportedBy: newCaseForm.reportedBy,
-                    evidence: [
-                      { name: newCaseEvidence.name, kind: "upload" },
-                    ],
+                    evidence: evidenceItems,
                     officer: "Discipline Office",
                   });
                   setIsNewCaseOpen(false);
@@ -940,10 +880,15 @@ export function DashboardPage() {
                     <input
                       id="nf-sid"
                       className={`cc-input${newCaseErrors.studentId ? " cc-input-error" : ""}`}
-                      placeholder="Numeric ID only (e.g., 202310234)"
+                      placeholder="Enter Student ID"
+                      inputMode="numeric"
+                      autoComplete="off"
                       value={newCaseForm.studentId}
                       onChange={(e) =>
-                        setNewCaseForm((p) => ({ ...p, studentId: sanitizeDigitsOnlyInput(e.target.value) }))
+                        setNewCaseForm((p) => ({
+                          ...p,
+                          studentId: sanitizeDoStudentIdInput(e.target.value),
+                        }))
                       }
                       aria-invalid={Boolean(newCaseErrors.studentId)}
                     />
@@ -1000,7 +945,31 @@ export function DashboardPage() {
                   />
                 </div>
 
-                <div className="do-form-grid2">
+                <div className="do-form-grid2 do-form-grid2--tight">
+                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                    <label className="do-form-label" htmlFor="nf-offense-type">
+                      Offense Type <span className="req">*</span>
+                    </label>
+                    <CustomSelect
+                      id="nf-offense-type"
+                      value={newCaseForm.offenseType}
+                      onChange={(v) => {
+                        setNewCaseForm((p) => ({ ...p, offenseType: v, caseType: "" }));
+                        setOpenDropdownId(null);
+                      }}
+                      options={DO_OFFENSE_TYPE_OPTIONS}
+                      placeholder="Select offense type"
+                      error={Boolean(newCaseErrors.offenseType)}
+                      isOpen={openDropdownId === "nf-offense-type"}
+                      onOpen={() => setOpenDropdownId("nf-offense-type")}
+                      onClose={() => setOpenDropdownId(null)}
+                    />
+                    {newCaseErrors.offenseType && (
+                      <div className="cc-form-error" role="alert">
+                        {newCaseErrors.offenseType}
+                      </div>
+                    )}
+                  </div>
                   <div className="do-form-cell" style={{ marginBottom: 0 }}>
                     <label className="do-form-label" htmlFor="nf-ctype">
                       Case Type <span className="req">*</span>
@@ -1024,30 +993,6 @@ export function DashboardPage() {
                     {newCaseErrors.caseType && (
                       <div className="cc-form-error" role="alert">
                         {newCaseErrors.caseType}
-                      </div>
-                    )}
-                  </div>
-                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                    <label className="do-form-label" htmlFor="nf-offense-type">
-                      Offense Type <span className="req">*</span>
-                    </label>
-                    <CustomSelect
-                      id="nf-offense-type"
-                      value={newCaseForm.offenseType}
-                      onChange={(v) => {
-                        setNewCaseForm((p) => ({ ...p, offenseType: v, caseType: "" }));
-                        setOpenDropdownId(null);
-                      }}
-                      options={DO_OFFENSE_TYPE_OPTIONS}
-                      placeholder="Select offense type"
-                      error={Boolean(newCaseErrors.offenseType)}
-                      isOpen={openDropdownId === "nf-offense-type"}
-                      onOpen={() => setOpenDropdownId("nf-offense-type")}
-                      onClose={() => setOpenDropdownId(null)}
-                    />
-                    {newCaseErrors.offenseType && (
-                      <div className="cc-form-error" role="alert">
-                        {newCaseErrors.offenseType}
                       </div>
                     )}
                   </div>
@@ -1169,11 +1114,9 @@ const CM_StatusBadge = ({ status }) => (
 export function CaseManagementPage() {
   const [activeTab, setActiveTab] = useState("all");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [dateFilterIso, setDateFilterIso] = useState("");
-  const [departmentFilter, setDepartmentFilter] = useState("");
   const [selectedCase, setSelectedCase] = useState(null);
   const [isNewCaseOpen, setIsNewCaseOpen] = useState(false);
+  const [openDropdownIdCm, setOpenDropdownIdCm] = useState(null);
   const [searchField, setSearchField] = useState("all");
   const {
     cases,
@@ -1187,28 +1130,23 @@ export function CaseManagementPage() {
   const [newCaseForm, setNewCaseForm] = useState({
     student: "",
     studentId: "",
+    school: "",
     program: "",
     caseType: "",
+    offenseType: "",
     description: "",
+    reportedBy: "",
   });
   const [newCaseEvidence, setNewCaseEvidence] = useState(null);
   const [newCaseErrors, setNewCaseErrors] = useState({});
   const [statusUpdate, setStatusUpdate] = useState("pending");
   const [statusNote, setStatusNote] = useState("");
   const [caseModalError, setCaseModalError] = useState(null);
+  const selectedMetaCm = selectedCase ? parseCaseMeta(selectedCase) : null;
 
   useEffect(() => {
     setCaseModalError(null);
   }, [selectedCase]);
-
-  const departmentOptions = useMemo(() => {
-    const set = new Set();
-    for (const c of cases) {
-      const p = String(c.program || "").trim();
-      if (p) set.add(p);
-    }
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [cases]);
 
   const filtered = useMemo(() => {
     return cases.filter((c) => {
@@ -1228,22 +1166,9 @@ export function CaseManagementPage() {
         return c.student.toLowerCase().includes(q) || c.id.toLowerCase().includes(q) || c.caseType.toLowerCase().includes(q);
       })();
 
-      const matchesStatus = !statusFilter || String(c.status) === statusFilter;
-      const matchesDepartment =
-        !departmentFilter || String(c.program || "").trim() === String(departmentFilter).trim();
-
-      const matchesDate = (() => {
-        if (!dateFilterIso) return true;
-        const d =
-          c.reportedAt ? new Date(c.reportedAt) : c.updatedAt ? new Date(c.updatedAt) : new Date(String(c.date || ""));
-        if (Number.isNaN(d.getTime())) return false;
-        const ck = dateKey(d);
-        return ck === dateFilterIso;
-      })();
-
-      return matchesTab && matchesSearch && matchesStatus && matchesDepartment && matchesDate;
+      return matchesTab && matchesSearch;
     });
-  }, [cases, activeTab, search, searchField, statusFilter, departmentFilter, dateFilterIso]);
+  }, [cases, activeTab, search, searchField]);
 
   const stats = useMemo(() => {
     return {
@@ -1309,14 +1234,7 @@ export function CaseManagementPage() {
               type="button"
               onClick={() => setIsNewCaseOpen(true)}
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path
-                  d="M8 3.333v9.334M3.333 8h9.334"
-                  stroke="white"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
+              <Plus size={16} strokeWidth={2} aria-hidden />
               New Case
             </button>
           </div>
@@ -1434,49 +1352,6 @@ export function CaseManagementPage() {
                 </div>
               </div>
 
-              <div className="cc-filters-row" aria-label="Case filters">
-                <div className="cc-filter">
-                  <label htmlFor="cm-filter-status">Status</label>
-                  <select
-                    id="cm-filter-status"
-                    className="cc-input"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                  >
-                    <option value="">All</option>
-                    <option value="new">New / Unreviewed</option>
-                    <option value="pending">Pending</option>
-                    <option value="closed">Completed</option>
-                  </select>
-                </div>
-                <div className="cc-filter">
-                  <label htmlFor="cm-filter-date">Date</label>
-                  <input
-                    id="cm-filter-date"
-                    type="date"
-                    className="cc-input"
-                    value={dateFilterIso}
-                    onChange={(e) => setDateFilterIso(e.target.value)}
-                  />
-                </div>
-                <div className="cc-filter">
-                  <label htmlFor="cm-filter-dept">Department</label>
-                  <select
-                    id="cm-filter-dept"
-                    className="cc-input"
-                    value={departmentFilter}
-                    onChange={(e) => setDepartmentFilter(e.target.value)}
-                  >
-                    <option value="">All</option>
-                    {departmentOptions.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
               <div className="tab-list">
                 {TABS.map((tab) => (
                   <button
@@ -1501,7 +1376,7 @@ export function CaseManagementPage() {
                     <th>Status</th>
                     <th>Reported Date</th>
                     <th>Reporting Officer</th>
-                    <th>Action</th>
+                    <th className="cases-table-col-action">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1518,9 +1393,9 @@ export function CaseManagementPage() {
                       </td>
                       <td className="cell-date">{c.date}</td>
                       <td className="cell-text">{c.officer}</td>
-                      <td>
+                      <td className="cases-table-col-action">
                         <button
-                          className="btn-view"
+                          className="btn-view btn-view--fixed"
                           type="button"
                           onClick={() => {
                             setSelectedCase(c);
@@ -1528,28 +1403,7 @@ export function CaseManagementPage() {
                             setStatusNote("");
                           }}
                         >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 16 16"
-                            fill="none"
-                            aria-hidden="true"
-                          >
-                            <path
-                              d="M1.333 8S3.333 3.333 8 3.333 14.667 8 14.667 8 12.667 12.667 8 12.667 1.333 8 1.333 8z"
-                              stroke="#374151"
-                              strokeWidth="1.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                            <circle
-                              cx="8"
-                              cy="8"
-                              r="1.667"
-                              stroke="#374151"
-                              strokeWidth="1.5"
-                            />
-                          </svg>
+                          <Eye size={16} strokeWidth={2} aria-hidden />
                           View
                         </button>
                       </td>
@@ -1586,96 +1440,102 @@ export function CaseManagementPage() {
           onMouseDown={() => setSelectedCase(null)}
         >
           <div
-            className="cc-modal do-modal do-modal--lg"
+            className="cc-modal do-modal do-modal--lg do-modal--case-detail"
             onMouseDown={(e) => e.stopPropagation()}
-            style={{ display: "flex", flexDirection: "column", maxHeight: "min(90vh, 760px)" }}
           >
-            <div className="cc-modal-header">
-              <div className="cc-modal-title">Case Details</div>
+            <div className="do-modal-head">
               <button
-                className="cc-modal-close"
+                className="do-modal-x"
                 type="button"
                 aria-label="Close"
                 onClick={() => setSelectedCase(null)}
               >
-                ✕
+                ×
               </button>
+              <div className="do-modal-head-row">
+                <div className="do-modal-icon-wrap" aria-hidden>
+                  <FileText size={22} strokeWidth={2} />
+                </div>
+                <div>
+                  <h2 className="do-modal-heading">Case Details</h2>
+                  <p className="do-modal-sub">Complete information about the disciplinary case</p>
+                </div>
+              </div>
             </div>
 
-            <div className="cc-modal-body" style={{ display: "flex", flexDirection: "column", gap: 0, overflowY: "auto", flex: 1, minHeight: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-                <div>
-                  <div className="cc-label">Case ID</div>
-                  <div style={{ fontWeight: 700, fontSize: 18, color: "#0f172a", marginTop: 2 }}>
-                    {formatCaseId(selectedCase.id)}
+            <div className="do-modal-body-scroll">
+              {selectedMetaCm && (
+                <>
+                  <div className="do-case-banner">
+                    <div>
+                      <p className="do-case-banner-id">{formatCaseId(selectedCase.id)}</p>
+                      <p className="do-case-banner-type">{selectedCase.caseType}</p>
+                    </div>
+                    <div className="do-banner-badges">
+                      <CM_StatusBadge status={selectedCase.status} />
+                    </div>
                   </div>
-                </div>
-                <CM_StatusBadge status={selectedCase.status} />
-              </div>
 
-              <div style={{ borderTop: "1px solid #e2e8f0", marginBottom: 16 }} />
-
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-                  Student Information
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px" }}>
-                  <div>
-                    <div className="cc-label">Name</div>
-                    <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 4 }}>{selectedCase.student}</div>
-                  </div>
-                  <div>
-                    <div className="cc-label">Student ID</div>
-                    <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 4 }}>{selectedCase.studentId}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ borderTop: "1px solid #f1f5f9", marginBottom: 16 }} />
-
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-                  Case Information
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px", marginBottom: 12 }}>
-                  <div>
-                    <div className="cc-label">Case Type</div>
-                    <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 4 }}>{selectedCase.caseType}</div>
-                  </div>
-                  <div>
-                    <div className="cc-label">Reporting Officer</div>
-                    <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 4 }}>{selectedCase.officer || "—"}</div>
-                  </div>
-                </div>
-                <div>
-                  <div className="cc-label">Case Description</div>
-                  <div style={{ color: "#334155", fontSize: 14, lineHeight: "20px", marginTop: 6, whiteSpace: "pre-wrap", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px" }}>
-                    {selectedCase.description || "No description provided."}
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ borderTop: "1px solid #f1f5f9", marginBottom: 16 }} />
-
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-                  Evidence Submitted
-                </div>
-                {selectedCase.evidence && selectedCase.evidence.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {selectedCase.evidence.map((ev, idx) => (
-                      <div key={`${ev.name}-${idx}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 7, fontSize: 13, color: "#166534", fontWeight: 500 }}>
-                        <CheckCircle2 size={14} strokeWidth={2} aria-hidden />
-                        {ev.name}
+                  <div className="do-info-grid">
+                    <div className="do-info-card">
+                      <div className="do-info-card-top">
+                        <User size={18} strokeWidth={2} aria-hidden />
+                        Student Information
                       </div>
-                    ))}
+                      <div className="do-info-row">
+                        <p className="do-info-dt">Name</p>
+                        <p className="do-info-dd">{selectedCase.student}</p>
+                      </div>
+                      <div className="do-info-row">
+                        <p className="do-info-dt">Student ID</p>
+                        <p className="do-info-dd">{selectedCase.studentId}</p>
+                      </div>
+                      <div className="do-info-row">
+                        <p className="do-info-dt">Program</p>
+                        <p className="do-info-dd">{selectedMetaCm.program}</p>
+                      </div>
+                      <div className="do-info-row">
+                        <p className="do-info-dt">School</p>
+                        <p className="do-info-dd">{selectedMetaCm.school}</p>
+                      </div>
+                    </div>
+                    <div className="do-info-card">
+                      <div className="do-info-card-top">
+                        <FileText size={18} strokeWidth={2} aria-hidden />
+                        Case Information
+                      </div>
+                      <div className="do-info-row">
+                        <p className="do-info-dt">Offense type</p>
+                        <p className="do-info-dd">{selectedMetaCm.offenseType}</p>
+                      </div>
+                      <div className="do-info-row">
+                        <p className="do-info-dt">Filed Date</p>
+                        <p className="do-info-dd">{selectedCase.date}</p>
+                      </div>
+                      <div className="do-info-row">
+                        <p className="do-info-dt">Assigned To</p>
+                        <p className="do-info-dd">{selectedCase.officer || "—"}</p>
+                      </div>
+                      <div className="do-info-row">
+                        <p className="do-info-dt">Next Hearing</p>
+                        <p className="do-info-dd">—</p>
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <div style={{ color: "#94a3b8", fontSize: 14 }}>No evidence submitted.</div>
-                )}
-              </div>
 
-              <div style={{ borderTop: "1px solid #e2e8f0", marginBottom: 16 }} />
+                  <div className="do-section-card">
+                    <h4>Case Description</h4>
+                    <p>{selectedMetaCm.body || "No description provided."}</p>
+                  </div>
+
+                  <div className="do-section-card">
+                    <h4>Evidence Submitted</h4>
+                    <DOEvidenceViewer evidence={selectedCase.evidence} />
+                  </div>
+                </>
+              )}
+
+              <div style={{ borderTop: "1px solid #e2e8f0", marginBottom: 16, marginTop: 8 }} />
 
               <div>
                 <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
@@ -1751,61 +1611,82 @@ export function CaseManagementPage() {
             className="cc-modal do-modal do-modal--lg do-modal--new-case"
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="cc-modal-header">
-              <div className="cc-modal-title">New Case</div>
+            <div className="do-modal-head">
               <button
-                className="cc-modal-close"
+                className="do-modal-x"
                 type="button"
                 aria-label="Close"
                 onClick={() => setIsNewCaseOpen(false)}
               >
-                ✕
+                ×
               </button>
+              <div className="do-modal-head-row">
+                <div className="do-modal-icon-wrap do-modal-icon-wrap--accent" aria-hidden>
+                  <Plus size={22} strokeWidth={2} />
+                </div>
+                <div>
+                  <h2 className="do-modal-heading do-modal-heading--blue">File New Disciplinary Case</h2>
+                  <p className="do-modal-sub">Enter the details of the disciplinary case to be filed</p>
+                </div>
+              </div>
             </div>
 
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
                 const nextErrors = {};
-
                 const nmErr = validatePersonName(newCaseForm.student, "Student name");
                 if (nmErr) nextErrors.student = nmErr;
-
-                const sidErr = validateStrictNumericStudentId(newCaseForm.studentId, "Student ID");
+                const sidErr = validateDoStudentId(newCaseForm.studentId, "Student ID");
                 if (sidErr) nextErrors.studentId = sidErr;
-                if (!newCaseForm.caseType)
-                  nextErrors.caseType = "Case Type is required.";
-                if (!newCaseForm.description.trim())
-                  nextErrors.description = "Description is required.";
-                if (!newCaseEvidence)
-                  nextErrors.evidence = "Evidence file is required.";
-
+                if (!newCaseForm.caseType) nextErrors.caseType = "Case type is required.";
+                if (!newCaseForm.school) nextErrors.school = "School is required.";
+                if (!newCaseForm.offenseType) nextErrors.offenseType = "Offense type is required.";
+                if (!newCaseForm.description.trim()) nextErrors.description = "Case description is required.";
+                if (!newCaseEvidence) nextErrors.evidence = "Attach an evidence document (PDF, Word, image, etc.).";
                 setNewCaseErrors(nextErrors);
                 if (Object.keys(nextErrors).length > 0) return;
 
+                let evidenceItems = [];
                 try {
+                  evidenceItems = [await fileToEvidenceItem(newCaseEvidence)];
+                } catch (err) {
+                  setNewCaseErrors({ evidence: err?.message || "Could not read evidence file." });
+                  return;
+                }
+
+                try {
+                  const caseDescription = [
+                    newCaseForm.school ? `School: ${newCaseForm.school}` : "",
+                    newCaseForm.offenseType ? `Offense Type: ${newCaseForm.offenseType}` : "",
+                    newCaseForm.description,
+                  ]
+                    .filter(Boolean)
+                    .join("\n\n");
+
                   await createCase({
                     student: newCaseForm.student,
-                    studentId: newCaseForm.studentId,
+                    studentId: sanitizeDoStudentIdInput(newCaseForm.studentId.trim()),
                     caseType: newCaseForm.caseType,
-                    description: newCaseForm.description,
+                    description: caseDescription,
                     program: newCaseForm.program,
-                    evidence: [
-                      {
-                        name: newCaseEvidence.name,
-                        kind: "upload",
-                      },
-                    ],
+                    school: newCaseForm.school,
+                    offenseType: newCaseForm.offenseType,
+                    reportedBy: newCaseForm.reportedBy,
+                    evidence: evidenceItems,
                     officer: "Discipline Office",
                   });
-
                   setIsNewCaseOpen(false);
+                  setOpenDropdownIdCm(null);
                   setNewCaseForm({
                     student: "",
                     studentId: "",
+                    school: "",
                     program: "",
                     caseType: "",
+                    offenseType: "",
                     description: "",
+                    reportedBy: "",
                   });
                   setNewCaseEvidence(null);
                   setNewCaseErrors({});
@@ -1816,26 +1697,24 @@ export function CaseManagementPage() {
                 }
               }}
             >
-              <div className="cc-modal-body">
+              <div className="do-modal-body-scroll do-form-stack">
                 {newCaseErrors._submit && (
                   <div className="cc-form-error" role="alert" style={{ marginBottom: 12 }}>
                     {newCaseErrors._submit}
                   </div>
                 )}
-                <div className="cc-modal-row">
-                  <div className="cc-field">
-                    <div className="cc-label">Student Name</div>
+                <div className="do-form-grid2">
+                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                    <label className="do-form-label" htmlFor="cm-nf-student">
+                      Student Name <span className="req">*</span>
+                    </label>
                     <input
-                      className={`cc-input${
-                        newCaseErrors.student ? " cc-input-error" : ""
-                      }`}
-                      placeholder="e.g., Michael Tan"
+                      id="cm-nf-student"
+                      className={`cc-input${newCaseErrors.student ? " cc-input-error" : ""}`}
+                      placeholder="Enter student name"
                       value={newCaseForm.student}
                       onChange={(e) =>
-                        setNewCaseForm((prev) => ({
-                          ...prev,
-                          student: sanitizePersonNameInput(e.target.value),
-                        }))
+                        setNewCaseForm((p) => ({ ...p, student: sanitizePersonNameInput(e.target.value) }))
                       }
                       aria-invalid={Boolean(newCaseErrors.student)}
                     />
@@ -1845,18 +1724,21 @@ export function CaseManagementPage() {
                       </div>
                     )}
                   </div>
-                  <div className="cc-field">
-                    <div className="cc-label">Student ID</div>
+                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                    <label className="do-form-label" htmlFor="cm-nf-sid">
+                      Student ID <span className="req">*</span>
+                    </label>
                     <input
-                      className={`cc-input${
-                        newCaseErrors.studentId ? " cc-input-error" : ""
-                      }`}
-                      placeholder="2023-12345"
+                      id="cm-nf-sid"
+                      className={`cc-input${newCaseErrors.studentId ? " cc-input-error" : ""}`}
+                      placeholder="Enter Student ID"
+                      inputMode="numeric"
+                      autoComplete="off"
                       value={newCaseForm.studentId}
                       onChange={(e) =>
-                        setNewCaseForm((prev) => ({
-                          ...prev,
-                          studentId: sanitizeDigitsOnlyInput(e.target.value),
+                        setNewCaseForm((p) => ({
+                          ...p,
+                          studentId: sanitizeDoStudentIdInput(e.target.value),
                         }))
                       }
                       aria-invalid={Boolean(newCaseErrors.studentId)}
@@ -1869,45 +1751,98 @@ export function CaseManagementPage() {
                   </div>
                 </div>
 
-                <div className="cc-modal-row">
-                  <div className="cc-field">
-                    <div className="cc-label">Program / Course</div>
-                    <ProgramSelect
-                      value={newCaseForm.program}
-                      onChange={(v) =>
-                        setNewCaseForm((prev) => ({
-                          ...prev,
-                          program: v,
-                        }))
-                      }
-                      options={NU_PROGRAM_OPTIONS}
-                    />
-                  </div>
+                <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                  <label className="do-form-label" htmlFor="cm-nf-school">
+                    School <span className="req">*</span>
+                  </label>
+                  <CustomSelect
+                    id="cm-nf-school"
+                    value={newCaseForm.school}
+                    onChange={(v) => {
+                      setNewCaseForm((p) => ({ ...p, school: v, program: "" }));
+                      setOpenDropdownIdCm(null);
+                    }}
+                    options={DO_SCHOOL_OPTIONS}
+                    placeholder="Select school"
+                    error={Boolean(newCaseErrors.school)}
+                    isOpen={openDropdownIdCm === "cm-nf-school"}
+                    onOpen={() => setOpenDropdownIdCm("cm-nf-school")}
+                    onClose={() => setOpenDropdownIdCm(null)}
+                  />
+                  {newCaseErrors.school && (
+                    <div className="cc-form-error" role="alert">
+                      {newCaseErrors.school}
+                    </div>
+                  )}
                 </div>
 
-                <div className="cc-modal-row">
-                  <div className="cc-field">
-                    <div className="cc-label">Case Type</div>
-                    <select
-                      className={`cc-input${
-                        newCaseErrors.caseType ? " cc-input-error" : ""
-                      }`}
+                <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                  <label className="do-form-label" htmlFor="cm-nf-program">
+                    Program / Course
+                  </label>
+                  <CustomSelect
+                    id="cm-nf-program"
+                    value={newCaseForm.program}
+                    onChange={(v) => {
+                      setNewCaseForm((p) => ({ ...p, program: v }));
+                      setOpenDropdownIdCm(null);
+                    }}
+                    options={newCaseForm.school ? getProgramsForSchool(newCaseForm.school) : NU_PROGRAM_OPTIONS}
+                    placeholder="Select program / course"
+                    error={false}
+                    isOpen={openDropdownIdCm === "cm-nf-program"}
+                    onOpen={() => setOpenDropdownIdCm("cm-nf-program")}
+                    onClose={() => setOpenDropdownIdCm(null)}
+                  />
+                </div>
+
+                <div className="do-form-grid2 do-form-grid2--tight">
+                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                    <label className="do-form-label" htmlFor="cm-nf-offense-type">
+                      Offense Type <span className="req">*</span>
+                    </label>
+                    <CustomSelect
+                      id="cm-nf-offense-type"
+                      value={newCaseForm.offenseType}
+                      onChange={(v) => {
+                        setNewCaseForm((p) => ({ ...p, offenseType: v, caseType: "" }));
+                        setOpenDropdownIdCm(null);
+                      }}
+                      options={DO_OFFENSE_TYPE_OPTIONS}
+                      placeholder="Select offense type"
+                      error={Boolean(newCaseErrors.offenseType)}
+                      isOpen={openDropdownIdCm === "cm-nf-offense-type"}
+                      onOpen={() => setOpenDropdownIdCm("cm-nf-offense-type")}
+                      onClose={() => setOpenDropdownIdCm(null)}
+                    />
+                    {newCaseErrors.offenseType && (
+                      <div className="cc-form-error" role="alert">
+                        {newCaseErrors.offenseType}
+                      </div>
+                    )}
+                  </div>
+                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                    <label className="do-form-label" htmlFor="cm-nf-ctype">
+                      Case Type <span className="req">*</span>
+                    </label>
+                    <CustomSelect
+                      id="cm-nf-ctype"
                       value={newCaseForm.caseType}
-                      onChange={(e) =>
-                        setNewCaseForm((prev) => ({
-                          ...prev,
-                          caseType: e.target.value,
-                        }))
+                      onChange={(v) => {
+                        setNewCaseForm((p) => ({ ...p, caseType: v }));
+                        setOpenDropdownIdCm(null);
+                      }}
+                      options={
+                        newCaseForm.offenseType
+                          ? getCaseTypesForOffenseType(newCaseForm.offenseType)
+                          : CASE_TYPE_OPTIONS
                       }
-                      aria-invalid={Boolean(newCaseErrors.caseType)}
-                    >
-                      <option value="">Select case type</option>
-                      {CASE_TYPE_OPTIONS.map((opt) => (
-                        <option value={opt} key={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="Select case type"
+                      error={Boolean(newCaseErrors.caseType)}
+                      isOpen={openDropdownIdCm === "cm-nf-ctype"}
+                      onOpen={() => setOpenDropdownIdCm("cm-nf-ctype")}
+                      onClose={() => setOpenDropdownIdCm(null)}
+                    />
                     {newCaseErrors.caseType && (
                       <div className="cc-form-error" role="alert">
                         {newCaseErrors.caseType}
@@ -1916,18 +1851,16 @@ export function CaseManagementPage() {
                   </div>
                 </div>
 
-                <div className="cc-field">
-                  <div className="cc-label">Case Description *</div>
+                <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                  <label className="do-form-label" htmlFor="cm-nf-desc">
+                    Case Description <span className="req">*</span>
+                  </label>
                   <textarea
-                    className="cc-textarea"
-                    placeholder="Provide a detailed description of the incident…"
+                    id="cm-nf-desc"
+                    className={`cc-textarea${newCaseErrors.description ? " cc-input-error" : ""}`}
+                    placeholder="Provide detailed description of the incident…"
                     value={newCaseForm.description}
-                    onChange={(e) =>
-                      setNewCaseForm((prev) => ({
-                        ...prev,
-                        description: e.target.value,
-                      }))
-                    }
+                    onChange={(e) => setNewCaseForm((p) => ({ ...p, description: e.target.value }))}
                     aria-invalid={Boolean(newCaseErrors.description)}
                   />
                   {newCaseErrors.description && (
@@ -1937,21 +1870,42 @@ export function CaseManagementPage() {
                   )}
                 </div>
 
-                <div className="cc-field" style={{ marginTop: 12 }}>
-                  <div className="cc-label">Evidence / Documents *</div>
+                <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                  <label className="do-form-label" htmlFor="cm-nf-reporter">
+                    Reported By
+                  </label>
                   <input
-                    className={`cc-input${
-                      newCaseErrors.evidence ? " cc-input-error" : ""
-                    }`}
+                    id="cm-nf-reporter"
+                    className="cc-input"
+                    placeholder="Name of reporting person/office"
+                    value={newCaseForm.reportedBy}
+                    onChange={(e) => setNewCaseForm((p) => ({ ...p, reportedBy: e.target.value }))}
+                  />
+                </div>
+
+                <div className="do-form-cell do-file-field" style={{ marginBottom: 0 }}>
+                  <label className="do-form-label" htmlFor="cm-nf-ev">
+                    Evidence / Documents <span className="req">*</span>
+                  </label>
+                  <input
+                    id="cm-nf-ev"
+                    className={`cc-input${newCaseErrors.evidence ? " cc-input-error" : ""}`}
                     type="file"
-                    accept=".pdf,.doc,.docx,.txt,.eml,image/*,application/pdf"
-                    onChange={(e) => setNewCaseEvidence(e.target.files?.[0] || null)}
+                    accept=".pdf,.doc,.docx,.txt,image/*,.eml,application/pdf"
+                    onChange={(e) => {
+                      setNewCaseEvidence(e.target.files?.[0] || null);
+                      setNewCaseErrors((err) => {
+                        const next = { ...err };
+                        delete next.evidence;
+                        return next;
+                      });
+                    }}
                     aria-invalid={Boolean(newCaseErrors.evidence)}
                   />
-                  {newCaseEvidence && (
-                    <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>
-                      Selected: <span style={{ color: "#0f172a" }}>{newCaseEvidence.name}</span>
-                    </div>
+                  {newCaseEvidence ? (
+                    <p className="do-file-name">Selected: {newCaseEvidence.name}</p>
+                  ) : (
+                    <p className="do-file-name">Upload supporting documents only.</p>
                   )}
                   {newCaseErrors.evidence && (
                     <div className="cc-form-error" role="alert">
@@ -1965,12 +1919,15 @@ export function CaseManagementPage() {
                 <button
                   className="cc-btn-secondary"
                   type="button"
-                  onClick={() => setIsNewCaseOpen(false)}
+                  onClick={() => {
+                    setIsNewCaseOpen(false);
+                    setOpenDropdownIdCm(null);
+                  }}
                 >
                   Cancel
                 </button>
                 <button className="cc-btn-primary" type="submit">
-                  Create Case
+                  File Case
                 </button>
               </div>
             </form>
@@ -2050,6 +2007,18 @@ export function CaseConferencePage() {
   // ── Schedule modal: Case ID search state ──────────────────────────────────
   const [caseIdInput, setCaseIdInput] = useState("");
   const [caseIdError, setCaseIdError] = useState("");
+  const caseIdPrefix = useMemo(() => {
+    const raw = String(defaultCaseId || "").trim().toUpperCase();
+    const m = raw.match(/^(DC-\d{4}-)\d+$/);
+    if (m) return m[1];
+    return `DC-${new Date().getFullYear()}-`;
+  }, [defaultCaseId]);
+
+  function composeCaseIdFromSuffixInput(val) {
+    const digits = String(val || "").replace(/\D+/g, "");
+    if (!digits) return "";
+    return `${caseIdPrefix}${String(Number.parseInt(digits, 10)).padStart(2, "0")}`;
+  }
 
   const [scheduleForm, setScheduleForm] = useState({
     caseId: "",
@@ -2077,7 +2046,10 @@ export function CaseConferencePage() {
       const attendeeText = Array.isArray(conf?.attendees) ? conf.attendees.join(", ") : "";
       setScheduleEditId(String(conf.conferenceId));
       setScheduleErrors({});
-      setCaseIdInput(conf.caseId || defaultCaseId || "");
+      const suffixMatch = String(conf.caseId || defaultCaseId || "")
+        .toUpperCase()
+        .match(/^DC-\d{4}-(\d+)$/);
+      setCaseIdInput(suffixMatch ? suffixMatch[1] : "");
       setCaseIdError("");
       // Convert stored timeLabel (e.g. "10:00 AM") back to HH:MM for input[type=time]
       const storedTime = conf.timeLabel || "";
@@ -2121,19 +2093,35 @@ export function CaseConferencePage() {
     return `${h}:${m} ${ampm}`;
   }
 
-  /** Validate Case ID search field: must exactly match a known case */
+  /** Validate Case ID input suffix: must map to a known full case ID */
   function validateCaseIdInput(val) {
-    const trimmed = val.trim();
-    if (!trimmed) return "Case ID is required.";
-    // Accept either raw ID or formatted (e.g. "CASE-001" vs stored id)
+    const normalized = composeCaseIdFromSuffixInput(val);
+    if (!normalized) return "Case ID number is required.";
     const match = caseOptions.find(
       (x) =>
-        x.caseId === trimmed ||
-        formatCaseId(x.caseId) === trimmed,
+        String(x.caseId).toUpperCase() === normalized ||
+        formatCaseId(x.caseId).toUpperCase() === normalized,
     );
-    if (!match) return "Can't find case ID";
+    if (!match) return `Case ID not found`;
     return "";
   }
+
+  const scheduleCasePreview = useMemo(() => {
+    const up = composeCaseIdFromSuffixInput(caseIdInput);
+    if (!up) return null;
+    const c = cases.find(
+      (x) => String(x.id).toUpperCase() === up || formatCaseId(x.id).toUpperCase() === up,
+    );
+    if (!c) return null;
+    const meta = parseCaseMeta(c);
+    return {
+      student: c.student,
+      studentId: c.studentId,
+      program: meta.program,
+      school: meta.school,
+      caseType: c.caseType,
+    };
+  }, [caseIdInput, caseIdPrefix, cases]);
 
   const dataFetchError = confFetchError || casesFetchError;
   const dataLoading = confLoading || casesLoading;
@@ -2616,7 +2604,7 @@ export function CaseConferencePage() {
           onMouseDown={() => setIsScheduleOpen(false)}
         >
           <div
-            className="cc-modal do-modal do-modal--lg"
+            className="cc-modal do-modal do-modal--lg do-modal--schedule"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="do-modal-head">
@@ -2657,9 +2645,11 @@ export function CaseConferencePage() {
                 }
 
                 // Resolve matched case
-                const trimmedInput = caseIdInput.trim();
+                const trimmedInput = composeCaseIdFromSuffixInput(caseIdInput);
                 const matchedCase = caseOptions.find(
-                  (x) => x.caseId === trimmedInput || formatCaseId(x.caseId) === trimmedInput,
+                  (x) =>
+                    String(x.caseId).toUpperCase() === trimmedInput ||
+                    formatCaseId(x.caseId).toUpperCase() === trimmedInput,
                 );
                 const effectiveCaseId = matchedCase?.caseId || "";
 
@@ -2747,24 +2737,43 @@ export function CaseConferencePage() {
                   <label className="do-form-label" htmlFor="sch-case">
                     Case ID
                   </label>
-                  <input
-                    id="sch-case"
-                    className={`cc-input${caseIdError || scheduleErrors.caseId ? " cc-input-error" : ""}`}
-                    placeholder="Enter exact Case ID (e.g. CASE-001)"
-                    value={caseIdInput}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setCaseIdInput(val);
-                      // Live validation
-                      if (val.trim()) {
-                        const err = validateCaseIdInput(val);
-                        setCaseIdError(err);
-                      } else {
-                        setCaseIdError("");
-                      }
-                    }}
-                    aria-invalid={Boolean(caseIdError || scheduleErrors.caseId)}
-                  />
+                  <div style={{ position: "relative" }}>
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        position: "absolute",
+                        left: 12,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        color: "#334155",
+                        fontFamily: "monospace",
+                        fontSize: 13,
+                        pointerEvents: "none",
+                      }}
+                    >
+                      {caseIdPrefix}
+                    </span>
+                    <input
+                      id="sch-case"
+                      className={`cc-input${caseIdError || scheduleErrors.caseId ? " cc-input-error" : ""}`}
+                      placeholder="Case ID Number"
+                      autoComplete="off"
+                      inputMode="numeric"
+                      value={caseIdInput}
+                      style={{ paddingLeft: `${Math.max(96, caseIdPrefix.length * 8 + 18)}px` }}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D+/g, "");
+                        setCaseIdInput(val);
+                        if (val.trim()) {
+                          const err = validateCaseIdInput(val);
+                          setCaseIdError(err);
+                        } else {
+                          setCaseIdError("");
+                        }
+                      }}
+                      aria-invalid={Boolean(caseIdError || scheduleErrors.caseId)}
+                    />
+                  </div>
                   {(caseIdError || scheduleErrors.caseId) && (
                     <div className="cc-form-error" role="alert">
                       {caseIdError || scheduleErrors.caseId}
@@ -2772,29 +2781,26 @@ export function CaseConferencePage() {
                   )}
                 </div>
 
-                <div className="do-form-grid2">
-                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                    <label className="do-form-label" htmlFor="sch-date">
-                      Date
-                    </label>
-                    <input
-                      id="sch-date"
-                      type="date"
-                      className={`cc-input${scheduleErrors.date ? " cc-input-error" : ""}`}
-                      value={scheduleForm.dateIso}
-                      onChange={(e) =>
-                        setScheduleForm((prev) => ({ ...prev, dateIso: e.target.value }))
-                      }
-                      aria-invalid={Boolean(scheduleErrors.date)}
-                    />
-                    {scheduleErrors.date && (
-                      <div className="cc-form-error" role="alert">
-                        {scheduleErrors.date}
-                      </div>
-                    )}
+                {scheduleCasePreview ? (
+                  <div
+                    className="do-section-card"
+                    style={{ marginBottom: 0, padding: "12px 14px", background: "#eff6ff", borderColor: "#bfdbfe" }}
+                  >
+                    <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Student matched to this case</h4>
+                    <p style={{ margin: 0, fontSize: 14, color: "#0f172a" }}>
+                      <strong>{scheduleCasePreview.student}</strong>
+                      <span style={{ color: "#64748b" }}> · ID {scheduleCasePreview.studentId}</span>
+                    </p>
+                    <p style={{ margin: "6px 0 0", fontSize: 13, color: "#475569" }}>
+                      Program: {scheduleCasePreview.program} · School: {scheduleCasePreview.school}
+                    </p>
+                    <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569" }}>
+                      Case type: {scheduleCasePreview.caseType}
+                    </p>
                   </div>
+                ) : null}
 
-                  {/* ── Start Time input ── */}
+                <div className="do-form-grid2 do-form-grid2--tight">
                   <div className="do-form-cell" style={{ marginBottom: 0 }}>
                     <label className="do-form-label" htmlFor="sch-start-time">
                       Start Time
@@ -2816,7 +2822,6 @@ export function CaseConferencePage() {
                     )}
                   </div>
 
-                  {/* ── End Time input ── */}
                   <div className="do-form-cell" style={{ marginBottom: 0 }}>
                     <label className="do-form-label" htmlFor="sch-end-time">
                       End Time
@@ -2837,6 +2842,27 @@ export function CaseConferencePage() {
                       </div>
                     )}
                   </div>
+                </div>
+
+                <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                  <label className="do-form-label" htmlFor="sch-date">
+                    Date
+                  </label>
+                  <input
+                    id="sch-date"
+                    type="date"
+                    className={`cc-input${scheduleErrors.date ? " cc-input-error" : ""}`}
+                    value={scheduleForm.dateIso}
+                    onChange={(e) =>
+                      setScheduleForm((prev) => ({ ...prev, dateIso: e.target.value }))
+                    }
+                    aria-invalid={Boolean(scheduleErrors.date)}
+                  />
+                  {scheduleErrors.date && (
+                    <div className="cc-form-error" role="alert">
+                      {scheduleErrors.date}
+                    </div>
+                  )}
                 </div>
 
                 <div className="do-form-cell" style={{ marginBottom: 0 }}>
@@ -3024,8 +3050,11 @@ export function CaseConferencePage() {
                     className="cc-btn-secondary"
                     type="button"
                     onClick={() => {
+                      const conf = selectedConference;
                       setSelectedConference(null);
-                      openReschedule(selectedConference);
+                      if (conf) {
+                        window.setTimeout(() => openReschedule(conf), 0);
+                      }
                     }}
                   >
                     Reschedule
@@ -3075,12 +3104,6 @@ export function CaseConferencePage() {
 
 
 
-function categoryToDbFields(category) {
-  if (category === "good_standing") return { status: "good", riskLevel: "low" };
-  if (category === "high_risk") return { status: "active", riskLevel: "high" };
-  return { status: "active", riskLevel: "medium" };
-}
-
 const StandingPill = ({ category }) => {
   const cls =
     category === "good_standing"
@@ -3092,27 +3115,103 @@ const StandingPill = ({ category }) => {
   return <span className={`cc-pill ${cls}`}>{label}</span>;
 };
 
+function StudentRecordCaseDetailCard({ c }) {
+  const isMajor = c.offenseCategory === "major";
+  return (
+    <div className="do-student-record-case-detail">
+      <div
+        className="do-student-record-case-detail-title"
+        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 10px" }}
+      >
+        <span>
+          {formatCaseId(c.id)} — {c.caseType}
+        </span>
+        <span
+          className={`do-student-record-severity-pill${isMajor ? " do-student-record-severity-pill--major" : " do-student-record-severity-pill--minor"}`}
+        >
+          {isMajor ? "Major offense" : "Minor offense"}
+        </span>
+      </div>
+      <p className="do-student-record-case-detail-meta">
+        Filed {c.dateLabel} · Status: {c.status}
+        {c.priority && c.priority !== "—" ? ` · Priority: ${c.priority}` : ""}
+      </p>
+      <div className="do-student-record-case-detail-label">Offense type (major / minor classification)</div>
+      <p className="do-student-record-case-detail-body" style={{ margin: 0 }}>
+        {c.offenseType || "—"}
+      </p>
+      <div className="do-student-record-case-detail-label">Assigned to</div>
+      <p className="do-student-record-case-detail-body" style={{ margin: 0 }}>
+        {c.officer || "—"}
+      </p>
+      <div className="do-student-record-case-detail-label">Description</div>
+      <p className="do-student-record-case-detail-body">{c.body || "—"}</p>
+      {c.evidenceNames && c.evidenceNames.length > 0 ? (
+        <>
+          <div className="do-student-record-case-detail-label">Evidence submitted</div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#334155" }}>
+            {c.evidenceNames.map((name, idx) => (
+              <li key={`${c.id}-ev-${idx}-${name}`}>{name}</li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <>
+          <div className="do-student-record-case-detail-label">Evidence submitted</div>
+          <p className="do-student-record-case-detail-body" style={{ margin: 0, color: "#94a3b8" }}>
+            None listed
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Minor (amber) and major (red) capsule trackers; 3 minor cases roll into 1 major fill. */
+function StudentCasesCapsules({ minorFilled, majorFilled, slots = 3 }) {
+  const mf = Math.max(0, Math.min(slots, Number(minorFilled) || 0));
+  const Mf = Math.max(0, Math.min(slots, Number(majorFilled) || 0));
+  return (
+    <div
+      className="do-cases-capsules"
+      role="img"
+      aria-label={`Minor progress ${mf} of ${slots} toward the next major offense; major level ${Mf} of ${slots}. Three minors count as one major.`}
+    >
+      <div className="do-cases-capsules-title">Cases</div>
+      <div className="do-cases-capsules-grid">
+        <div className="do-cases-capsules-col">
+          <span className="do-cases-capsules-label">Minor</span>
+          <div className="do-cases-capsules-pills">
+            {Array.from({ length: slots }, (_, i) => (
+              <span
+                key={`sr-min-${i}`}
+                className={`do-cases-pill do-cases-pill--minor${i < mf ? " do-cases-pill--filled" : ""}`}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="do-cases-capsules-col">
+          <span className="do-cases-capsules-label">Major</span>
+          <div className="do-cases-capsules-pills">
+            {Array.from({ length: slots }, (_, i) => (
+              <span
+                key={`sr-maj-${i}`}
+                className={`do-cases-pill do-cases-pill--major${i < Mf ? " do-cases-pill--filled" : ""}`}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function StudentRecordsPage() {
   const { cases, loading: casesLoading } = useCases([]);
-  const { records, loading: recordsLoading, fetchError, refresh, insertStudent, updateStudent } =
-    useStudentRecords(DO_STUDENT_RECORDS_SEED);
+  const { records, loading: recordsLoading, fetchError, refresh } = useStudentRecords(DO_STUDENT_RECORDS_SEED);
   const [search, setSearch] = useState("");
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [isViewOpen, setIsViewOpen] = useState(false);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isManageOpen, setIsManageOpen] = useState(false);
-
-  const [createForm, setCreateForm] = useState({
-    studentName: "",
-    studentId: "",
-    program: "",
-    notes: "",
-  });
-  const [createErrors, setCreateErrors] = useState({});
-
-  const [manageCategory, setManageCategory] = useState("on_probation");
-  const [manageNotes, setManageNotes] = useState("");
-  const [manageSaving, setManageSaving] = useState(false);
 
   const mergedRows = useMemo(
     () => mergeStudentRecordsFromCases(cases, records),
@@ -3126,7 +3225,8 @@ export function StudentRecordsPage() {
       return (
         r.studentName.toLowerCase().includes(q) ||
         r.studentId.toLowerCase().includes(q) ||
-        String(r.program).toLowerCase().includes(q)
+        String(r.program).toLowerCase().includes(q) ||
+        String(r.school || "").toLowerCase().includes(q)
       );
     });
   }, [search, mergedRows]);
@@ -3178,23 +3278,11 @@ export function StudentRecordsPage() {
           <div className="page-title-row">
             <div>
               <h1>Student Records</h1>
-              <p>Manage student disciplinary records and monitoring</p>
+              <p>
+                One row per student with cases from the dashboard and case management. Cases show minor progress
+                (amber) and major level (red); every three minor offenses fill one major slot.
+              </p>
             </div>
-            <button
-              className="cc-btn-primary"
-              type="button"
-              onClick={() => setIsCreateOpen(true)}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path
-                  d="M8 2.667V13.333M2.667 8H13.333"
-                  stroke="white"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              New Record
-            </button>
           </div>
 
           <div className="stats-grid">
@@ -3265,11 +3353,12 @@ export function StudentRecordsPage() {
                   <tr>
                     <th>Student ID</th>
                     <th>Name</th>
+                    <th>School</th>
                     <th>Program</th>
-                    <th>Cases</th>
-                    <th>Last Incident</th>
-                    <th>Status</th>
-                    <th>Action</th>
+                    <th style={{ minWidth: 200 }}>Cases</th>
+                    <th>Last incident</th>
+                    <th>Standing</th>
+                    <th className="cases-table-col-action">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3279,45 +3368,37 @@ export function StudentRecordsPage() {
                       <td>
                         <div style={{ fontWeight: 600 }}>{r.studentName}</div>
                       </td>
-                      <td>{r.program}</td>
-                      <td>{r.casesDisplay}</td>
+                      <td>{r.school || "—"}</td>
+                      <td style={{ maxWidth: 200, fontSize: 13 }}>{r.program}</td>
+                      <td>
+                        <StudentCasesCapsules
+                          minorFilled={r.capsuleMinorFilled ?? 0}
+                          majorFilled={r.capsuleMajorFilled ?? 0}
+                          slots={r.capsuleSlots ?? 3}
+                        />
+                      </td>
                       <td>{r.lastIncident}</td>
                       <td>
                         <StandingPill category={r.category} />
                       </td>
-                      <td>
-                        <div style={{ display: "flex", gap: 10 }}>
-                          <button
-                            className="cc-btn-secondary"
-                            type="button"
-                            onClick={() => {
-                              setSelectedStudent(r);
-                              setIsViewOpen(true);
-                            }}
-                          >
-                            View
-                          </button>
-                          <button
-                            className="cc-btn-secondary"
-                            type="button"
-                            onClick={() => {
-                              setSelectedStudent(r);
-                              setIsViewOpen(false);
-                              setManageCategory(r.category);
-                              setManageNotes(r.notes);
-                              setIsManageOpen(true);
-                            }}
-                          >
-                            Manage
-                          </button>
-                        </div>
+                      <td className="cases-table-col-action">
+                        <button
+                          className="cc-btn-secondary btn-view--fixed"
+                          type="button"
+                          onClick={() => {
+                            setSelectedStudent(r);
+                            setIsViewOpen(true);
+                          }}
+                        >
+                          View
+                        </button>
                       </td>
                     </tr>
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
-                        No student records yet. File cases in Case Management or add a record manually.
+                      <td colSpan={8} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
+                        No student records yet. File a disciplinary case on the dashboard or in Case Management.
                       </td>
                     </tr>
                   )}
@@ -3328,24 +3409,30 @@ export function StudentRecordsPage() {
         </main>
       </div>
 
-      {selectedStudent && isViewOpen && !isManageOpen && (
+      {selectedStudent && isViewOpen && (
         <div
           className="cc-modal-overlay do-modal-overlay"
           role="dialog"
           aria-modal="true"
-          onMouseDown={() => setSelectedStudent(null)}
+          onMouseDown={() => {
+            setSelectedStudent(null);
+            setIsViewOpen(false);
+          }}
         >
           <div
-            className="cc-modal do-modal do-modal--lg"
+            className="cc-modal do-modal do-modal--lg do-modal--case-detail"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="cc-modal-header">
-              <div className="cc-modal-title">Student Record Details</div>
+              <div className="cc-modal-title">Student record</div>
               <button
                 className="cc-modal-close"
                 type="button"
                 aria-label="Close"
-                onClick={() => setSelectedStudent(null)}
+                onClick={() => {
+                  setSelectedStudent(null);
+                  setIsViewOpen(false);
+                }}
               >
                 ✕
               </button>
@@ -3365,10 +3452,17 @@ export function StudentRecordsPage() {
 
               <div className="cc-modal-row">
                 <div className="cc-field">
+                  <div className="cc-label">School</div>
+                  <div style={{ fontWeight: 600, color: "#0f172a" }}>{selectedStudent.school || "—"}</div>
+                </div>
+                <div className="cc-field">
                   <div className="cc-label">Program</div>
                   <div style={{ fontWeight: 600, color: "#0f172a" }}>{selectedStudent.program}</div>
                 </div>
-                <div className="cc-field">
+              </div>
+
+              <div className="cc-modal-row">
+                <div className="cc-field" style={{ flex: 1, minWidth: 0 }}>
                   <div className="cc-label">Standing</div>
                   <div style={{ marginTop: 6 }}>
                     <StandingPill category={selectedStudent.category} />
@@ -3377,16 +3471,53 @@ export function StudentRecordsPage() {
               </div>
 
               <div style={{ marginTop: 12 }}>
-                <div className="cc-label">Case Summary</div>
+                <div className="cc-label">Summary</div>
                 <div style={{ color: "#0f172a", fontSize: 14, marginTop: 6 }}>
                   {selectedStudent.casesDisplay}. Last incident on {selectedStudent.lastIncident}.
                 </div>
+                <p className="do-student-record-counts-line">
+                  {selectedStudent.majorCases ?? 0} major case{selectedStudent.majorCases !== 1 ? "s" : ""},{" "}
+                  {selectedStudent.minorCases ?? 0} minor — {selectedStudent.equivalentMajorTotal ?? 0} total major
+                  equivalent{selectedStudent.equivalentMajorTotal !== 1 ? "s" : ""} (3 minor = 1 major).
+                </p>
               </div>
 
-              <div style={{ marginTop: 12 }}>
-                <div className="cc-label">Notes</div>
-                <div style={{ color: "#0f172a", fontSize: 14 }}>{selectedStudent.notes || "—"}</div>
-              </div>
+              {(() => {
+                const all = selectedStudent.caseSummaries || [];
+                const majorList = all.filter((c) => c.offenseCategory === "major");
+                const minorList = all.filter((c) => c.offenseCategory === "minor");
+                return (
+                  <>
+                    <div className="do-student-record-offense-block">
+                      <h4 className="do-student-record-offense-heading do-student-record-offense-heading--major">
+                        Major offenses ({majorList.length}) — newest first
+                      </h4>
+                      {majorList.length === 0 ? (
+                        <p style={{ color: "#64748b", fontSize: 14, margin: 0 }}>No major offense cases recorded.</p>
+                      ) : (
+                        majorList.map((c) => <StudentRecordCaseDetailCard key={c.id} c={c} />)
+                      )}
+                    </div>
+                    <div className="do-student-record-offense-block">
+                      <h4 className="do-student-record-offense-heading do-student-record-offense-heading--minor">
+                        Minor offenses ({minorList.length}) — newest first
+                      </h4>
+                      {minorList.length === 0 ? (
+                        <p style={{ color: "#64748b", fontSize: 14, margin: 0 }}>No minor offense cases recorded.</p>
+                      ) : (
+                        minorList.map((c) => <StudentRecordCaseDetailCard key={c.id} c={c} />)
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+
+              {selectedStudent.notes ? (
+                <div style={{ marginTop: 12 }}>
+                  <div className="cc-label">Welfare notes (legacy record)</div>
+                  <div style={{ color: "#0f172a", fontSize: 14 }}>{selectedStudent.notes}</div>
+                </div>
+              ) : null}
             </div>
 
             <div className="cc-modal-actions">
@@ -3394,293 +3525,13 @@ export function StudentRecordsPage() {
                 className="cc-btn-secondary"
                 type="button"
                 onClick={() => {
+                  setSelectedStudent(null);
                   setIsViewOpen(false);
-                  setIsManageOpen(true);
-                  setManageCategory(selectedStudent.category);
-                  setManageNotes(selectedStudent.notes);
                 }}
               >
-                Manage Record
-              </button>
-              <button className="cc-btn-secondary" type="button" onClick={() => {
-                setSelectedStudent(null);
-                setIsViewOpen(false);
-              }}>
                 Close
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {isManageOpen && selectedStudent && (
-        <div
-          className="cc-modal-overlay do-modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          onMouseDown={() => setIsManageOpen(false)}
-        >
-          <div
-            className="cc-modal do-modal do-modal--lg"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div className="cc-modal-header">
-              <div className="cc-modal-title">Manage Student Record</div>
-              <button
-                className="cc-modal-close"
-                type="button"
-                aria-label="Close"
-                onClick={() => setIsManageOpen(false)}
-              >
-                ✕
-              </button>
-            </div>
-
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const { status, riskLevel } = categoryToDbFields(manageCategory);
-                try {
-                  setManageSaving(true);
-                  if (selectedStudent.hasManualRecord && selectedStudent.manualRecordId) {
-                    await updateStudent(selectedStudent.manualRecordId, {
-                      status,
-                      notes: manageNotes,
-                      riskLevel,
-                      program: selectedStudent.program,
-                      openCasesCount: selectedStudent.casesActive,
-                    });
-                    setSelectedStudent((s) =>
-                      s ? { ...s, category: manageCategory, notes: manageNotes } : null,
-                    );
-                  } else {
-                    const saved = await insertStudent({
-                      studentName: selectedStudent.studentName,
-                      studentId: selectedStudent.studentId,
-                      program: selectedStudent.program,
-                      notes: manageNotes,
-                      cases: selectedStudent.casesActive,
-                      status,
-                      riskLevel,
-                    });
-                    setSelectedStudent((s) =>
-                      s
-                        ? {
-                            ...s,
-                            category: manageCategory,
-                            notes: manageNotes,
-                            hasManualRecord: true,
-                            manualRecordId: saved.id,
-                            id: saved.id,
-                          }
-                        : null,
-                    );
-                  }
-                  showToast("Student record saved.", { variant: "success" });
-                  setIsManageOpen(false);
-                } catch (err) {
-                  showToast(err?.message || "Could not save record.", { variant: "error" });
-                } finally {
-                  setManageSaving(false);
-                }
-              }}
-            >
-              <div className="cc-modal-body">
-                <p style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
-                  When a formal welfare record exists for this student, standing and notes come from Supabase;
-                  otherwise standing is derived from cases until you save.
-                </p>
-                <div className="cc-modal-row">
-                  <div className="cc-field">
-                    <div className="cc-label">Monitoring standing</div>
-                    <select
-                      className="cc-input"
-                      value={manageCategory}
-                      onChange={(e) => setManageCategory(e.target.value)}
-                    >
-                      <option value="good_standing">Good Standing</option>
-                      <option value="on_probation">On Probation</option>
-                      <option value="high_risk">High Risk</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="cc-field">
-                  <div className="cc-label">Monitoring Notes</div>
-                  <textarea
-                    className="cc-textarea"
-                    value={manageNotes}
-                    onChange={(e) => setManageNotes(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="cc-modal-actions">
-                <button className="cc-btn-secondary" type="button" onClick={() => setIsManageOpen(false)}>
-                  Cancel
-                </button>
-                <button className="cc-btn-primary" type="submit" disabled={manageSaving}>
-                  {manageSaving ? "Saving…" : "Save Changes"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {isCreateOpen && (
-        <div
-          className="cc-modal-overlay do-modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          onMouseDown={() => setIsCreateOpen(false)}
-        >
-          <div
-            className="cc-modal do-modal do-modal--lg"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div className="cc-modal-header">
-              <div className="cc-modal-title">New Student Record</div>
-              <button
-                className="cc-modal-close"
-                type="button"
-                aria-label="Close"
-                onClick={() => setIsCreateOpen(false)}
-              >
-                ✕
-              </button>
-            </div>
-
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const nextErrors = {};
-                if (!createForm.studentName.trim()) nextErrors.studentName = "Student Name is required.";
-                if (!createForm.studentId.trim()) nextErrors.studentId = "Student ID is required.";
-                if (!createForm.program.trim()) nextErrors.program = "Program is required.";
-
-                setCreateErrors(nextErrors);
-                if (Object.keys(nextErrors).length > 0) return;
-
-                try {
-                  await insertStudent({
-                    studentName: createForm.studentName.trim(),
-                    studentId: createForm.studentId.trim(),
-                    program: createForm.program.trim(),
-                    notes: createForm.notes.trim(),
-                    cases: 0,
-                    status: "good",
-                    riskLevel: "low",
-                  });
-                  setIsCreateOpen(false);
-                  setCreateForm({
-                    studentName: "",
-                    studentId: "",
-                    program: "",
-                    notes: "",
-                  });
-                  setCreateErrors({});
-                } catch (err) {
-                  setCreateErrors({
-                    _submit: err?.message || "Could not create record (duplicate student ID?).",
-                  });
-                }
-              }}
-            >
-              <div className="cc-modal-body">
-                {createErrors._submit && (
-                  <div className="cc-form-error" role="alert" style={{ marginBottom: 12 }}>
-                    {createErrors._submit}
-                  </div>
-                )}
-                <div className="cc-modal-row">
-                  <div className="cc-field">
-                    <div className="cc-label">Student Name</div>
-                    <input
-                      className={`cc-input${createErrors.studentName ? " cc-input-error" : ""}`}
-                      placeholder="e.g., Michael Tan"
-                      value={createForm.studentName}
-                      onChange={(e) =>
-                        setCreateForm((prev) => ({
-                          ...prev,
-                          studentName: sanitizePersonNameInput(e.target.value),
-                        }))
-                      }
-                      aria-invalid={Boolean(createErrors.studentName)}
-                    />
-                    {createErrors.studentName && (
-                      <div className="cc-form-error" role="alert">
-                        {createErrors.studentName}
-                      </div>
-                    )}
-                  </div>
-                  <div className="cc-field">
-                    <div className="cc-label">Student ID</div>
-                    <input
-                      className={`cc-input${createErrors.studentId ? " cc-input-error" : ""}`}
-                      placeholder="2023-10234"
-                      value={createForm.studentId}
-                      onChange={(e) =>
-                        setCreateForm((prev) => ({
-                          ...prev,
-                          studentId: sanitizeDigitsOnlyInput(e.target.value),
-                        }))
-                      }
-                      aria-invalid={Boolean(createErrors.studentId)}
-                    />
-                    {createErrors.studentId && (
-                      <div className="cc-form-error" role="alert">
-                        {createErrors.studentId}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="cc-field">
-                  <div className="cc-label">Program</div>
-                  <ProgramSelect
-                    error={Boolean(createErrors.program)}
-                    value={createForm.program}
-                    onChange={(v) =>
-                      setCreateForm((prev) => ({
-                        ...prev,
-                        program: v,
-                      }))
-                    }
-                    options={NU_PROGRAM_OPTIONS}
-                  />
-                  {createErrors.program && (
-                    <div className="cc-form-error" role="alert">
-                      {createErrors.program}
-                    </div>
-                  )}
-                </div>
-
-                <div className="cc-field" style={{ marginTop: 12 }}>
-                  <div className="cc-label">Notes</div>
-                  <textarea
-                    className="cc-textarea"
-                    placeholder="Initial record notes..."
-                    value={createForm.notes}
-                    onChange={(e) =>
-                      setCreateForm((prev) => ({
-                        ...prev,
-                        notes: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="cc-modal-actions">
-                <button className="cc-btn-secondary" type="button" onClick={() => setIsCreateOpen(false)}>
-                  Cancel
-                </button>
-                <button className="cc-btn-primary" type="submit">
-                  Create Record
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
@@ -3691,8 +3542,10 @@ export function StudentRecordsPage() {
 
 
 const statusColor = (status) => {
-  if (String(status).toLowerCase().includes("approved")) return "completed";
-  if (String(status).toLowerCase().includes("pending")) return "scheduled";
+  const s = String(status).toLowerCase();
+  if (s.includes("declined") || s.includes("rejected")) return "closed";
+  if (s.includes("approved")) return "completed";
+  if (s.includes("pending")) return "scheduled";
   return "scheduled";
 };
 
@@ -3707,11 +3560,7 @@ export function DocumentRequestsPage() {
   const [acceptingUploadBusy, setAcceptingUploadBusy] = useState(false);
 
   const session = useMemo(() => {
-    try {
-      return JSON.parse(window.localStorage.getItem("campuscare_session_v1") || "null");
-    } catch {
-      return null;
-    }
+    return readCampusCareSession();
   }, []);
 
   const filtered = useMemo(() => {
@@ -3732,10 +3581,70 @@ export function DocumentRequestsPage() {
     });
   }, [requests, search]);
 
+  const outgoingDoc = useMemo(() => filtered.filter((r) => r.direction === "outgoing"), [filtered]);
+  const incomingDoc = useMemo(() => filtered.filter((r) => r.direction === "incoming"), [filtered]);
+
+  const renderDocTable = (rows) => (
+    <div className="cc-table-wrapper">
+      <table className="cc-table">
+        <thead>
+          <tr>
+            <th>Request ID</th>
+            <th>Partner office</th>
+            <th>Document Type</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Requested Date</th>
+            <th className="cases-table-col-action">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.requestId}>
+              <td style={{ fontWeight: 600 }}>{r.requestId}</td>
+              <td style={{ fontSize: 13, color: "#334155", maxWidth: 220 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    marginRight: 8,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "#64748b",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {r.direction === "outgoing" ? "To" : "From"}
+                </span>
+                {labelForOfficeKey(r.partnerOffice)}
+              </td>
+              <td>{r.documentType}</td>
+              <td>
+                <span className={`cc-pill ${statusColor(r.status)}`}>{r.status}</span>
+              </td>
+              <td>
+                <span className={`badge badge-${r.priority}`}>{r.priority}</span>
+              </td>
+              <td>{r.requestedDate}</td>
+              <td className="cases-table-col-action">
+                <button className="cc-btn-secondary btn-view--fixed" type="button" onClick={() => setSelectedRequest(r)}>
+                  View
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
   const handleAcceptingOfficeAttachment = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !selectedRequest || selectedRequest.direction !== "incoming") return;
+    if (!canReceivingOfficeUploadDoc(selectedRequest.status)) {
+      showToast("Approve this request before uploading a file.", { variant: "warning" });
+      return;
+    }
     const existing = selectedRequest.evidence || [];
     try {
       setAcceptingUploadBusy(true);
@@ -3845,7 +3754,9 @@ export function DocumentRequestsPage() {
           <div className="page-title-row">
             <div>
               <h1>Document Requests</h1>
-              <p>Inter-office requests between HSO, DO, and SDAO only — same form as partner offices.</p>
+              <p>
+                Inter-office requests between the student welfare offices.
+              </p>
             </div>
             <button
               className="cc-btn-primary"
@@ -3877,10 +3788,10 @@ export function DocumentRequestsPage() {
                   <input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search by name, ID, program, or document type..."
+                    placeholder="Search by request ID, partner office, or document type..."
                   />
                 </div>
-                <div style={{ width: 240, textAlign: "right" }}>
+                <div style={{ width: 280, textAlign: "right" }}>
                   <div
                     style={{
                       fontFamily: "Inter, sans-serif",
@@ -3889,79 +3800,34 @@ export function DocumentRequestsPage() {
                       fontSize: 14,
                     }}
                   >
-                    Requests ({filtered.length})
+                    Outgoing {outgoingDoc.length} · Incoming {incomingDoc.length}
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="cc-table-wrapper">
-              <table className="cc-table">
-                <thead>
-                  <tr>
-                    <th>Request ID</th>
-                    <th>Student</th>
-                    <th>Program</th>
-                    <th>Partner office</th>
-                    <th>Document Type</th>
-                    <th>Status</th>
-                    <th>Priority</th>
-                    <th>Requested Date</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((r) => (
-                    <tr key={r.requestId}>
-                      <td style={{ fontWeight: 600 }}>{r.requestId}</td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{r.studentName}</div>
-                        <div style={{ color: "#64748b", fontSize: 12 }}>{r.studentId}</div>
-                      </td>
-                      <td style={{ fontSize: 13, color: "#334155", maxWidth: 220 }}>{r.program || "—"}</td>
-                      <td style={{ fontSize: 13, color: "#334155", maxWidth: 220 }}>
-                        <span
-                          style={{
-                            display: "inline-block",
-                            marginRight: 8,
-                            fontSize: 11,
-                            fontWeight: 600,
-                            color: "#64748b",
-                            textTransform: "uppercase",
-                          }}
-                        >
-                          {r.direction === "outgoing" ? "To" : "From"}
-                        </span>
-                        {labelForOfficeKey(r.partnerOffice)}
-                      </td>
-                      <td>{r.documentType}</td>
-                      <td>
-                        <span className={`cc-pill ${statusColor(r.status)}`}>{r.status}</span>
-                      </td>
-                      <td>
-                        <span className={`badge badge-${r.priority}`}>{r.priority}</span>
-                      </td>
-                      <td>{r.requestedDate}</td>
-                      <td>
-                        <button
-                          className="cc-btn-secondary"
-                          type="button"
-                          onClick={() => setSelectedRequest(r)}
-                        >
-                          View
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {filtered.length === 0 && (
-                    <tr>
-                      <td colSpan={9} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
-                        No document requests found.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+            <div style={{ padding: "0 20px 20px" }}>
+              <h3 style={{ fontSize: 15, margin: "16px 0 8px", color: "#0f172a" }}>
+                Requests from Discipline Office to HSO / SDAO
+              </h3>
+              <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 12px", lineHeight: 1.5 }}>
+                You only file these requests here. The partner office (HSO or SDAO) approves or declines; if they approve,
+                they attach the document. Discipline Office does not approve its own outgoing requests.
+              </p>
+              {outgoingDoc.length === 0 ? (
+                <p style={{ color: "#64748b", padding: "12px 0" }}>No outgoing document requests.</p>
+              ) : (
+                renderDocTable(outgoingDoc)
+              )}
+
+              <h3 style={{ fontSize: 15, margin: "28px 0 8px", color: "#0f172a" }}>
+                Requests from partner offices to Discipline Office
+              </h3>
+              {incomingDoc.length === 0 ? (
+                <p style={{ color: "#64748b", padding: "12px 0" }}>No incoming document requests.</p>
+              ) : (
+                renderDocTable(incomingDoc)
+              )}
             </div>
           </section>
         </main>
@@ -3998,17 +3864,6 @@ export function DocumentRequestsPage() {
               </div>
 
               <div style={{ marginTop: 12 }}>
-                <div className="cc-label">Student Information</div>
-                <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>{selectedRequest.studentName}</div>
-                <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>{selectedRequest.studentId}</div>
-              </div>
-
-              <div style={{ marginTop: 12 }}>
-                <div className="cc-label">Program</div>
-                <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>{selectedRequest.program || "—"}</div>
-              </div>
-
-              <div style={{ marginTop: 12 }}>
                 <div className="cc-label">
                   {selectedRequest.direction === "outgoing" ? "Request document from" : "Request from office"}
                 </div>
@@ -4026,6 +3881,53 @@ export function DocumentRequestsPage() {
                 <div className="cc-label">Description</div>
                 <div style={{ color: "#0f172a", fontSize: 14, marginTop: 6 }}>{selectedRequest.description}</div>
               </div>
+
+              {selectedRequest.direction === "outgoing" && isDocRequestPendingApproval(selectedRequest.status) ? (
+                <p
+                  style={{
+                    color: "#1e40af",
+                    fontSize: 13,
+                    marginTop: 12,
+                    lineHeight: 1.45,
+                    background: "#eff6ff",
+                    padding: 10,
+                    borderRadius: 8,
+                    border: "1px solid #bfdbfe",
+                  }}
+                >
+                  <strong>No approval step on your side.</strong>{" "}
+                  {labelForOfficeKey(selectedRequest.partnerOffice)} will approve or decline this request. After they
+                  approve, they will attach the document here for Discipline Office.
+                </p>
+              ) : null}
+              {selectedRequest.direction === "outgoing" && isDocRequestApprovedForFulfillment(selectedRequest.status) ? (
+                <p
+                  style={{
+                    color: "#14532d",
+                    fontSize: 13,
+                    marginTop: 12,
+                    lineHeight: 1.45,
+                    background: "#f0fdf4",
+                    padding: 10,
+                    borderRadius: 8,
+                    border: "1px solid #bbf7d0",
+                  }}
+                >
+                  This request was approved by {labelForOfficeKey(selectedRequest.partnerOffice)}. They can attach the
+                  file; you will see it under Attachments when it is uploaded.
+                </p>
+              ) : null}
+              {selectedRequest.direction === "outgoing" && isDocRequestDeclined(selectedRequest.status) ? (
+                <p style={{ color: "#991b1b", fontSize: 13, marginTop: 12 }}>
+                  {labelForOfficeKey(selectedRequest.partnerOffice)} declined this request.
+                </p>
+              ) : null}
+              {selectedRequest.direction === "outgoing" &&
+              normalizeInterOfficeDocStatus(selectedRequest.status) === "fulfilled" ? (
+                <p style={{ color: "#14532d", fontSize: 13, marginTop: 12 }}>
+                  This request was fulfilled — the document should appear in Attachments below.
+                </p>
+              ) : null}
 
               <div style={{ marginTop: 12 }}>
                 <div className="cc-label">Attachments</div>
@@ -4062,7 +3964,15 @@ export function DocumentRequestsPage() {
                 </div>
               </div>
 
-              {selectedRequest.direction === "incoming" ? (
+              {selectedRequest.direction === "incoming" && isDocRequestPendingApproval(selectedRequest.status) ? (
+                <p style={{ color: "#92400e", fontSize: 13, marginTop: 12, lineHeight: 1.45, background: "#fffbeb", padding: 10, borderRadius: 8, border: "1px solid #fde68a" }}>
+                  Approve this request first. After approval, you can attach the file for the requesting office.
+                </p>
+              ) : null}
+              {selectedRequest.direction === "incoming" && isDocRequestDeclined(selectedRequest.status) ? (
+                <p style={{ color: "#991b1b", fontSize: 13, marginTop: 12 }}>This request was declined. No file upload is required.</p>
+              ) : null}
+              {selectedRequest.direction === "incoming" && canReceivingOfficeUploadDoc(selectedRequest.status) ? (
                 <div style={{ marginTop: 16 }}>
                   <div className="cc-label">Add attachment (your office)</div>
                   <p style={{ color: "#64748b", fontSize: 13, margin: "6px 0 8px", lineHeight: 1.45 }}>
@@ -4085,25 +3995,45 @@ export function DocumentRequestsPage() {
               <button className="cc-btn-secondary" type="button" onClick={() => setSelectedRequest(null)}>
                 Close
               </button>
-              {selectedRequest.direction === "incoming" ? (
-                <button
-                  className="cc-btn-primary"
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await updateRequest(selectedRequest.requestId, { status: "Approved" });
-                      setSelectedRequest((prev) =>
-                        prev ? { ...prev, status: "Approved" } : prev,
-                      );
-                      await refresh();
-                      showToast("Request approved.", { variant: "success" });
-                    } catch (err) {
-                      showToast(err?.message || "Could not update request.", { variant: "error" });
-                    }
-                  }}
-                >
-                  Approve
-                </button>
+              {selectedRequest.direction === "incoming" && isDocRequestPendingApproval(selectedRequest.status) ? (
+                <>
+                  <button
+                    className="cc-btn-secondary"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await updateRequest(selectedRequest.requestId, { status: INTER_OFFICE_DOC_STATUS.DECLINED });
+                        setSelectedRequest((prev) =>
+                          prev ? { ...prev, status: INTER_OFFICE_DOC_STATUS.DECLINED } : prev,
+                        );
+                        await refresh();
+                        showToast("Request declined.", { variant: "success" });
+                      } catch (err) {
+                        showToast(err?.message || "Could not update request.", { variant: "error" });
+                      }
+                    }}
+                  >
+                    Decline
+                  </button>
+                  <button
+                    className="cc-btn-primary"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await updateRequest(selectedRequest.requestId, { status: INTER_OFFICE_DOC_STATUS.APPROVED });
+                        setSelectedRequest((prev) =>
+                          prev ? { ...prev, status: INTER_OFFICE_DOC_STATUS.APPROVED } : prev,
+                        );
+                        await refresh();
+                        showToast("Request approved. You can now attach the file.", { variant: "success" });
+                      } catch (err) {
+                        showToast(err?.message || "Could not update request.", { variant: "error" });
+                      }
+                    }}
+                  >
+                    Approve
+                  </button>
+                </>
               ) : null}
             </div>
           </div>
@@ -4130,9 +4060,9 @@ export function DocumentRequestsPage() {
               targetOffice: payload.targetOffice,
               documentType: docLabel,
               priority: payload.priority,
-              status: "Pending",
+              status: INTER_OFFICE_DOC_STATUS.PENDING_APPROVAL,
               description: payload.description,
-              evidence: [{ name: payload.evidenceFile.name }],
+              evidence: payload.evidenceFile ? [{ name: payload.evidenceFile.name }] : [],
             });
             setSelectedRequest(next);
             setIsNewOpen(false);
@@ -4147,7 +4077,15 @@ export function DocumentRequestsPage() {
 
 
 
-const ALLOWED_REFERRAL_TYPES = ["HSO", "SDAO", "DO"];
+const DO_REFERRAL_TARGETS = [
+  { value: "HSO", targetOffice: "health", label: "Health Services (HSO)" },
+  { value: "SDAO", targetOffice: "development", label: "SDAO — Student Development" },
+];
+
+function referralPartnerLabel(targetOfficeKey) {
+  const m = DO_REFERRAL_TARGETS.find((t) => t.targetOffice === targetOfficeKey);
+  return m?.label || targetOfficeKey || "—";
+}
 
 export function ReferralsPage() {
   const {
@@ -4158,15 +4096,7 @@ export function ReferralsPage() {
     insertReferral,
     updateReferral,
   } = useReferrals(DO_REFERRALS_SEED);
-  const { records: disciplineStudentRecords } = useStudentRecords(DO_STUDENT_RECORDS_SEED);
-  const referralStudentOptions = useMemo(
-    () =>
-      disciplineStudentRecords.map((r) => ({
-        value: r.studentId,
-        label: `${r.studentName} (${r.studentId})`,
-      })),
-    [disciplineStudentRecords],
-  );
+  const { cases } = useCases([]);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const [isNewOpen, setIsNewOpen] = useState(false);
@@ -4178,19 +4108,77 @@ export function ReferralsPage() {
   });
   const [evidenceFile, setEvidenceFile] = useState(null);
   const [errors, setErrors] = useState({});
+  const [partnerHealthReferrals, setPartnerHealthReferrals] = useState([]);
+  const [partnerSdaoReferrals, setPartnerSdaoReferrals] = useState([]);
+  const [selectedPartnerReferral, setSelectedPartnerReferral] = useState(null);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !supabase) return undefined;
+    let cancelled = false;
+    (async () => {
+      const [hRes, sRes] = await Promise.all([
+        supabase
+          .from("health_referrals")
+          .select("*")
+          .or("receiving_office.ilike.%Discipline%,receiving_office.ilike.%DO%")
+          .order("referral_date", { ascending: false }),
+        supabase
+          .from("sdao_referrals")
+          .select("*")
+          .or("receiving_office.ilike.%Discipline%,receiving_office.ilike.%DO%")
+          .order("created_at", { ascending: false }),
+      ]);
+      if (cancelled) return;
+      setPartnerHealthReferrals(hRes.data || []);
+      setPartnerSdaoReferrals(sRes.data || []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const referralStudentPreview = useMemo(() => {
+    const sidDigits = studentIdDigitsOnly(form.studentId);
+    if (sidDigits.length < 10) return null;
+    const matches = cases.filter((c) => studentIdDigitsOnly(c.studentId) === sidDigits);
+    if (!matches.length) return null;
+    const last = matches.sort((a, b) => {
+      const ta = a.reportedAt ? new Date(a.reportedAt).getTime() : 0;
+      const tb = b.reportedAt ? new Date(b.reportedAt).getTime() : 0;
+      return tb - ta;
+    })[0];
+    const meta = parseCaseMeta(last);
+    return {
+      studentName: last.student,
+      studentId: last.studentId,
+      program: meta.program,
+      school: meta.school,
+    };
+  }, [form.studentId, cases]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return referrals;
-    return referrals.filter((r) => {
-      return (
-        r.studentName.toLowerCase().includes(q) ||
-        r.studentId.toLowerCase().includes(q) ||
-        r.referralId.toLowerCase().includes(q) ||
-        r.referralType.toLowerCase().includes(q)
-      );
-    });
+    const base = !q
+      ? referrals
+      : referrals.filter((r) => {
+          return (
+            r.studentName.toLowerCase().includes(q) ||
+            r.studentId.toLowerCase().includes(q) ||
+            r.referralId.toLowerCase().includes(q) ||
+            r.referralType.toLowerCase().includes(q)
+          );
+        });
+    return base;
   }, [referrals, search]);
+
+  const outgoingReferrals = useMemo(
+    () => filtered.filter((r) => r.referringOffice === "discipline"),
+    [filtered],
+  );
+  const incomingReferrals = useMemo(
+    () => filtered.filter((r) => r.targetOffice === "discipline"),
+    [filtered],
+  );
 
   const statusPill = (status) => {
     const s = String(status).toLowerCase();
@@ -4198,6 +4186,61 @@ export function ReferralsPage() {
     if (s.includes("pending")) return "scheduled";
     return "scheduled";
   };
+
+  const renderReferralTable = (rows, emptyMsg) => (
+    <div className="cc-table-wrapper">
+      <table className="cc-table">
+        <thead>
+          <tr>
+            <th>Referral ID</th>
+            <th>Student</th>
+            <th>To / From</th>
+            <th>Status</th>
+            <th>Date</th>
+            <th className="cases-table-col-action">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.referralId}>
+              <td style={{ fontWeight: 600 }}>{r.referralId}</td>
+              <td>
+                <div style={{ fontWeight: 600 }}>{r.studentName}</div>
+                <div style={{ color: "#64748b", fontSize: 12 }}>{r.studentId}</div>
+              </td>
+              <td>
+                {r.referringOffice === "discipline" ? (
+                  <span>
+                    To <strong>{referralPartnerLabel(r.targetOffice)}</strong>
+                  </span>
+                ) : (
+                  <span>
+                    From <strong>{referralPartnerLabel(r.referringOffice)}</strong>
+                  </span>
+                )}
+              </td>
+              <td>
+                <span className={`cc-pill ${statusPill(r.status)}`}>{r.status}</span>
+              </td>
+              <td>{r.date}</td>
+              <td className="cases-table-col-action">
+                <button className="cc-btn-secondary btn-view--fixed" type="button" onClick={() => setSelected(r)}>
+                  View
+                </button>
+              </td>
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={6} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
+                {emptyMsg}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
     <div className="dashboard-layout do-office-layout">
@@ -4267,59 +4310,298 @@ export function ReferralsPage() {
                   </div>
                   <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name, ID, or type..." />
                 </div>
-                <div style={{ width: 240, textAlign: "right" }}>
+                <div style={{ width: 280, textAlign: "right" }}>
                   <div style={{ fontFamily: "Inter, sans-serif", fontWeight: 500, color: "#0f172a", fontSize: 14 }}>
-                    Referrals ({filtered.length})
+                    Outgoing {outgoingReferrals.length} · Incoming {incomingReferrals.length}
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="cc-table-wrapper">
-              <table className="cc-table">
-                <thead>
-                  <tr>
-                    <th>Referral ID</th>
-                    <th>Student</th>
-                    <th>Referral Type</th>
-                    <th>Status</th>
-                    <th>Date</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((r) => (
-                    <tr key={r.referralId}>
-                      <td style={{ fontWeight: 600 }}>{r.referralId}</td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{r.studentName}</div>
-                        <div style={{ color: "#64748b", fontSize: 12 }}>{r.studentId}</div>
-                      </td>
-                      <td>{r.referralType}</td>
-                      <td>
-                        <span className={`cc-pill ${statusPill(r.status)}`}>{r.status}</span>
-                      </td>
-                      <td>{r.date}</td>
-                      <td>
-                        <button className="cc-btn-secondary" type="button" onClick={() => setSelected(r)}>
-                          View
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {filtered.length === 0 && (
+            <div style={{ padding: "0 20px 20px" }}>
+              <h3 style={{ fontSize: 15, margin: "16px 0 8px", color: "#0f172a" }}>
+                Referrals from Discipline Office to partner offices
+              </h3>
+              <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 12px" }}>
+                Referrals are sent directly to Health Services or SDAO for review and approval.
+              </p>
+              {renderReferralTable(
+                outgoingReferrals,
+                "No outgoing referrals. Partner approvals happen in HSO/SDAO portals.",
+              )}
+
+              <h3 style={{ fontSize: 15, margin: "28px 0 8px", color: "#0f172a" }}>
+                Referrals from other offices to Discipline Office
+              </h3>
+              <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 12px" }}>
+                Approve or decline referrals from partner offices sent to Discipline Office.
+              </p>
+              {renderReferralTable(incomingReferrals, "No incoming referrals from partner offices.")}
+
+              <h3 style={{ fontSize: 15, margin: "28px 0 8px", color: "#0f172a" }}>
+                Incoming from Health Services (inter-office)
+              </h3>
+              <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 12px" }}>
+                These rows live in the HSO referrals table. Approve or decline referrals sent to Discipline Office.
+              </p>
+              <div className="cc-table-wrapper">
+                <table className="cc-table">
+                  <thead>
                     <tr>
-                      <td colSpan={6} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
-                        No referrals found.
-                      </td>
+                      <th>ID</th>
+                      <th>Student</th>
+                      <th>Status</th>
+                      <th>Date</th>
+                      <th className="cases-table-col-action">Action</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {partnerHealthReferrals.map((row) => (
+                      <tr key={row.id}>
+                        <td style={{ fontWeight: 600 }}>{String(row.reference_id || row.id).slice(0, 24)}</td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{row.student_name}</div>
+                          <div style={{ color: "#64748b", fontSize: 12 }}>{row.student_id}</div>
+                        </td>
+                        <td>
+                          <span className={`cc-pill ${statusPill(row.status)}`}>{row.status}</span>
+                        </td>
+                        <td>{row.referral_date || "—"}</td>
+                        <td className="cases-table-col-action">
+                          <button
+                            type="button"
+                            className="cc-btn-secondary btn-view--fixed"
+                            onClick={() => setSelectedPartnerReferral({ kind: "health", row })}
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {partnerHealthReferrals.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: "center", padding: "20px 8px", color: "#64748b" }}>
+                          No incoming HSO referrals to Discipline Office.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+
+              <h3 style={{ fontSize: 15, margin: "28px 0 8px", color: "#0f172a" }}>
+                Incoming from SDAO (inter-office)
+              </h3>
+              <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 12px" }}>
+                These rows live in the SDAO referrals table. Approve or decline referrals sent to Discipline Office.
+              </p>
+              <div className="cc-table-wrapper">
+                <table className="cc-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Student</th>
+                      <th>Status</th>
+                      <th>Created</th>
+                      <th className="cases-table-col-action">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {partnerSdaoReferrals.map((row) => (
+                      <tr key={row.id}>
+                        <td style={{ fontWeight: 600 }}>{String(row.reference_id || row.id).slice(0, 24)}</td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{row.student_name}</div>
+                          <div style={{ color: "#64748b", fontSize: 12 }}>{row.student_id}</div>
+                        </td>
+                        <td>
+                          <span className={`cc-pill ${statusPill(row.status)}`}>{row.status}</span>
+                        </td>
+                        <td>{row.created_at ? String(row.created_at).slice(0, 10) : "—"}</td>
+                        <td className="cases-table-col-action">
+                          <button
+                            type="button"
+                            className="cc-btn-secondary btn-view--fixed"
+                            onClick={() => setSelectedPartnerReferral({ kind: "sdao", row })}
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {partnerSdaoReferrals.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: "center", padding: "20px 8px", color: "#64748b" }}>
+                          No incoming SDAO referrals to Discipline Office.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </section>
         </main>
       </div>
+
+      {selectedPartnerReferral && (
+        <div
+          className="cc-modal-overlay do-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={() => setSelectedPartnerReferral(null)}
+        >
+          <div
+            className="cc-modal do-modal do-modal--lg"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="cc-modal-header">
+              <div className="cc-modal-title">
+                {selectedPartnerReferral.kind === "health" ? "HSO referral to DO" : "SDAO referral to DO"}
+              </div>
+              <button
+                className="cc-modal-close"
+                type="button"
+                aria-label="Close"
+                onClick={() => setSelectedPartnerReferral(null)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="cc-modal-body">
+              <div className="cc-modal-row">
+                <div className="cc-field" style={{ flex: 1 }}>
+                  <div className="cc-label">Student</div>
+                  <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>
+                    {selectedPartnerReferral.row.student_name}
+                  </div>
+                  <div style={{ color: "#64748b", fontSize: 12 }}>{selectedPartnerReferral.row.student_id}</div>
+                </div>
+                <div className="cc-field" style={{ flex: 1 }}>
+                  <div className="cc-label">Status</div>
+                  <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>{selectedPartnerReferral.row.status}</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <div className="cc-label">Reason</div>
+                <div style={{ color: "#0f172a", fontSize: 14, marginTop: 6 }}>{selectedPartnerReferral.row.reason}</div>
+              </div>
+              {canReceivingOfficeReviewReferral(selectedPartnerReferral.row.status) ? (
+                <p style={{ fontSize: 13, color: "#64748b", marginTop: 12, lineHeight: 1.5 }}>
+                  You may approve or decline this referral for Discipline Office.
+                </p>
+              ) : null}
+            </div>
+            <div className="cc-modal-actions">
+              <button className="cc-btn-secondary" type="button" onClick={() => setSelectedPartnerReferral(null)}>
+                Close
+              </button>
+              {canReceivingOfficeReviewReferral(selectedPartnerReferral.row.status) ? (
+                <>
+                  <button
+                    className="cc-btn-secondary"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        if (!isSupabaseConfigured() || !supabase) return;
+                        const table =
+                          selectedPartnerReferral.kind === "health" ? "health_referrals" : "sdao_referrals";
+                        const { error } = await supabase
+                          .from(table)
+                          .update({
+                            status: DISCIPLINE_REFERRAL_STATUS.DECLINED,
+                            updated_at: new Date().toISOString(),
+                          })
+                          .eq("id", selectedPartnerReferral.row.id);
+                        if (error) throw error;
+                        if (selectedPartnerReferral.kind === "health") {
+                          setPartnerHealthReferrals((prev) =>
+                            prev.map((r) =>
+                              r.id === selectedPartnerReferral.row.id
+                                ? { ...r, status: DISCIPLINE_REFERRAL_STATUS.DECLINED }
+                                : r,
+                            ),
+                          );
+                        } else {
+                          setPartnerSdaoReferrals((prev) =>
+                            prev.map((r) =>
+                              r.id === selectedPartnerReferral.row.id
+                                ? { ...r, status: DISCIPLINE_REFERRAL_STATUS.DECLINED }
+                                : r,
+                            ),
+                          );
+                        }
+                        setSelectedPartnerReferral((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                row: { ...prev.row, status: DISCIPLINE_REFERRAL_STATUS.DECLINED },
+                              }
+                            : null,
+                        );
+                        showToast("Referral declined.", { variant: "success" });
+                      } catch (err) {
+                        showToast(err?.message || "Could not update referral.", { variant: "error" });
+                      }
+                    }}
+                  >
+                    Decline
+                  </button>
+                  <button
+                    className="cc-btn-primary"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        if (!isSupabaseConfigured() || !supabase) return;
+                        const table =
+                          selectedPartnerReferral.kind === "health" ? "health_referrals" : "sdao_referrals";
+                        const { error } = await supabase
+                          .from(table)
+                          .update({
+                            status: DISCIPLINE_REFERRAL_STATUS.APPROVED,
+                            updated_at: new Date().toISOString(),
+                          })
+                          .eq("id", selectedPartnerReferral.row.id);
+                        if (error) throw error;
+                        if (selectedPartnerReferral.kind === "health") {
+                          setPartnerHealthReferrals((prev) =>
+                            prev.map((r) =>
+                              r.id === selectedPartnerReferral.row.id
+                                ? { ...r, status: DISCIPLINE_REFERRAL_STATUS.APPROVED }
+                                : r,
+                            ),
+                          );
+                        } else {
+                          setPartnerSdaoReferrals((prev) =>
+                            prev.map((r) =>
+                              r.id === selectedPartnerReferral.row.id
+                                ? { ...r, status: DISCIPLINE_REFERRAL_STATUS.APPROVED }
+                                : r,
+                            ),
+                          );
+                        }
+                        setSelectedPartnerReferral((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                row: { ...prev.row, status: DISCIPLINE_REFERRAL_STATUS.APPROVED },
+                              }
+                            : null,
+                        );
+                        showToast("Referral approved.", { variant: "success" });
+                      } catch (err) {
+                        showToast(err?.message || "Could not update referral.", { variant: "error" });
+                      }
+                    }}
+                  >
+                    Approve
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
 
       {selected && (
         <div
@@ -4358,8 +4640,12 @@ export function ReferralsPage() {
               </div>
 
               <div style={{ marginTop: 12 }}>
-                <div className="cc-label">Referral Type</div>
-                <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>{selected.referralType}</div>
+                <div className="cc-label">Referral destination</div>
+                <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>
+                  {selected.referringOffice === "discipline"
+                    ? referralPartnerLabel(selected.targetOffice)
+                    : `Discipline Office (from ${referralPartnerLabel(selected.referringOffice)})`}
+                </div>
               </div>
 
               <div style={{ marginTop: 12 }}>
@@ -4367,15 +4653,17 @@ export function ReferralsPage() {
                 <div style={{ color: "#0f172a", fontSize: 14, marginTop: 6 }}>{selected.reason}</div>
               </div>
 
+              {selected.referringOffice === "discipline" &&
+              (isReferralPendingPartnerReview(selected.status) ||
+                isReferralPendingReferringReview(selected.status)) ? (
+                <p style={{ fontSize: 13, color: "#64748b", marginTop: 12, lineHeight: 1.5 }}>
+                  Waiting for {referralPartnerLabel(selected.targetOffice)} to approve or decline.
+                </p>
+              ) : null}
+
               <div style={{ marginTop: 12 }}>
                 <div className="cc-label">Attachments</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                  {(selected.evidence || []).map((ev, idx) => (
-                    <div key={`${ev.name}-${idx}`} style={{ color: "#0f172a", fontSize: 14 }}>
-                      <span style={{ fontWeight: 600 }}>{ev.name}</span>
-                    </div>
-                  ))}
-                </div>
+                <DOEvidenceViewer evidence={selected.evidence} />
               </div>
             </div>
 
@@ -4383,21 +4671,44 @@ export function ReferralsPage() {
               <button className="cc-btn-secondary" type="button" onClick={() => setSelected(null)}>
                 Close
               </button>
-              <button
-                className="cc-btn-primary"
-                type="button"
-                onClick={async () => {
-                  try {
-                    await updateReferral(selected.referralId, { status: "Approved" });
-                    setSelected((prev) => (prev ? { ...prev, status: "Approved" } : prev));
-                    showToast("Referral approved.", { variant: "success" });
-                  } catch (err) {
-                    showToast(err?.message || "Could not update referral.", { variant: "error" });
-                  }
-                }}
-              >
-                Approve
-              </button>
+              {selected.targetOffice === "discipline" &&
+              selected.referringOffice !== "discipline" &&
+              canReceivingOfficeReviewReferral(selected.status) ? (
+                <>
+                  <button
+                    className="cc-btn-primary"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await updateReferral(selected.referralId, { status: DISCIPLINE_REFERRAL_STATUS.APPROVED });
+                        setSelected((prev) => (prev ? { ...prev, status: DISCIPLINE_REFERRAL_STATUS.APPROVED } : prev));
+                        showToast("Referral approved.", { variant: "success" });
+                        await refresh();
+                      } catch (err) {
+                        showToast(err?.message || "Could not update referral.", { variant: "error" });
+                      }
+                    }}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    className="cc-btn-secondary"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await updateReferral(selected.referralId, { status: DISCIPLINE_REFERRAL_STATUS.DECLINED });
+                        setSelected((prev) => (prev ? { ...prev, status: DISCIPLINE_REFERRAL_STATUS.DECLINED } : prev));
+                        showToast("Referral declined.", { variant: "success" });
+                        await refresh();
+                      } catch (err) {
+                        showToast(err?.message || "Could not update referral.", { variant: "error" });
+                      }
+                    }}
+                  >
+                    Decline
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
         </div>
@@ -4411,7 +4722,7 @@ export function ReferralsPage() {
           onMouseDown={() => setIsNewOpen(false)}
         >
           <div
-            className="cc-modal do-modal do-modal--lg"
+            className="cc-modal do-modal do-modal--lg do-modal--new-case"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="cc-modal-header">
@@ -4425,27 +4736,39 @@ export function ReferralsPage() {
               onSubmit={async (e) => {
                 e.preventDefault();
                 const nextErrors = {};
-                const sid = form.studentId.trim();
-                const recordMatch = disciplineStudentRecords.find((r) => r.studentId === sid);
-                if (!sid) nextErrors.studentId = "Select a student with a discipline record.";
-                else if (!recordMatch) nextErrors.studentId = "Only students with an existing record can be selected.";
-                if (!form.referralType || !ALLOWED_REFERRAL_TYPES.includes(form.referralType)) {
-                  nextErrors.referralType = "Select HSO, SDAO, or DO.";
+                const sidErr = validateDoStudentId(form.studentId, "Student ID");
+                if (sidErr) nextErrors.studentId = sidErr;
+                else if (!referralStudentPreview) {
+                  nextErrors.studentId = "No student found with this ID in case records.";
                 }
+                const target = DO_REFERRAL_TARGETS.find((t) => t.value === form.referralType);
+                if (!target) nextErrors.referralType = "Select Health Services or SDAO.";
                 if (!form.reason.trim()) nextErrors.reason = "Reason is required.";
-                if (!evidenceFile) nextErrors.evidence = "Attachment is required (mock).";
+                if (!evidenceFile) nextErrors.evidence = "Attachment is required.";
 
                 setErrors(nextErrors);
                 if (Object.keys(nextErrors).length > 0) return;
 
+                const sid = sanitizeDoStudentIdInput(form.studentId.trim());
+
+                let evItems = [];
+                try {
+                  evItems = [await fileToEvidenceItem(evidenceFile)];
+                } catch (err) {
+                  setErrors({ evidence: err?.message || "Could not read file." });
+                  return;
+                }
+
                 try {
                   const created = await insertReferral({
-                    studentName: recordMatch.studentName.trim(),
+                    studentName: referralStudentPreview.studentName.trim(),
                     studentId: sid,
-                    referralType: form.referralType,
+                    referralType: target.label,
+                    targetOffice: target.targetOffice,
+                    referringOffice: "discipline",
                     reason: form.reason.trim(),
-                    status: "Pending",
-                    evidence: [{ name: evidenceFile.name }],
+                    status: DISCIPLINE_REFERRAL_STATUS.PENDING_PARTNER,
+                    evidence: evItems,
                   });
                   setSelected(created);
                   setIsNewOpen(false);
@@ -4453,6 +4776,7 @@ export function ReferralsPage() {
                   setEvidenceFile(null);
                   setForm({ studentId: "", referralType: "", reason: "" });
                   showToast("Referral created.", { variant: "success" });
+                  await refresh();
                 } catch (err) {
                   showToast(err?.message || "Could not create referral.", { variant: "error" });
                 }
@@ -4460,42 +4784,62 @@ export function ReferralsPage() {
             >
               <div className="cc-modal-body">
                 <div className="cc-field">
-                  <div className="cc-label">Select Student</div>
-                  <select
+                  <div className="cc-label">Student ID</div>
+                  <input
                     className={`cc-input${errors.studentId ? " cc-input-error" : ""}`}
+                    placeholder="e.g. "
+                    inputMode="numeric"
+                    autoComplete="off"
                     value={form.studentId}
-                    onChange={(e) => setForm((p) => ({ ...p, studentId: e.target.value }))}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, studentId: sanitizeDoStudentIdInput(e.target.value) }))
+                    }
                     aria-invalid={Boolean(errors.studentId)}
-                  >
-                    <option value="">Choose a student</option>
-                    {referralStudentOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   {errors.studentId && <div className="cc-form-error" role="alert">{errors.studentId}</div>}
                 </div>
 
-                <div className="cc-field" style={{ marginTop: 12 }}>
-                  <div className="cc-label">Referral Type</div>
+                {referralStudentPreview ? (
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRadius: 10,
+                      background: "#eff6ff",
+                      border: "1px solid #bfdbfe",
+                    }}
+                  >
+                    <div className="cc-label" style={{ marginBottom: 6 }}>
+                      Student information
+                    </div>
+                    <div style={{ fontWeight: 600, color: "#0f172a" }}>{referralStudentPreview.studentName}</div>
+                    <div style={{ fontSize: 13, color: "#475569", marginTop: 4 }}>
+                      Program: {referralStudentPreview.program}
+                    </div>
+                    <div style={{ fontSize: 13, color: "#475569", marginTop: 2 }}>
+                      School: {referralStudentPreview.school}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="cc-field">
+                  <div className="cc-label">Refer to office</div>
                   <select
                     className={`cc-input${errors.referralType ? " cc-input-error" : ""}`}
-                    value={ALLOWED_REFERRAL_TYPES.includes(form.referralType) ? form.referralType : ""}
+                    value={DO_REFERRAL_TARGETS.some((t) => t.value === form.referralType) ? form.referralType : ""}
                     onChange={(e) => setForm((p) => ({ ...p, referralType: e.target.value }))}
                     aria-invalid={Boolean(errors.referralType)}
                   >
-                    <option value="">Select office</option>
-                    {ALLOWED_REFERRAL_TYPES.map((t) => (
-                      <option value={t} key={t}>
-                        {t}
+                    <option value="">Select office (DO is not listed)</option>
+                    {DO_REFERRAL_TARGETS.map((t) => (
+                      <option value={t.value} key={t.value}>
+                        {t.label}
                       </option>
                     ))}
                   </select>
                   {errors.referralType && <div className="cc-form-error" role="alert">{errors.referralType}</div>}
                 </div>
 
-                <div className="cc-field" style={{ marginTop: 12 }}>
+                <div className="cc-field">
                   <div className="cc-label">Reason</div>
                   <textarea
                     className="cc-textarea"
@@ -4507,7 +4851,7 @@ export function ReferralsPage() {
                   {errors.reason && <div className="cc-form-error" role="alert">{errors.reason}</div>}
                 </div>
 
-                <div className="cc-field" style={{ marginTop: 12 }}>
+                <div className="cc-field">
                   <div className="cc-label">Attachment</div>
                   <input
                     className={`cc-input${errors.evidence ? " cc-input-error" : ""}`}
@@ -4545,6 +4889,14 @@ const SANCTION_TYPES = [
   "Other",
 ];
 
+const SANCTION_CORRESPONDING_OFFICES = [
+  { value: "", label: "Select office" },
+  { value: "Treasury", label: "Treasury" },
+  { value: "Registrar", label: "Registrar" },
+  { value: "Community Extension", label: "Community Extension" },
+  { value: "Others", label: "Others" },
+];
+
 const statusClass = (status) => {
   const s = String(status).toLowerCase();
   if (s.includes("approved")) return "completed";
@@ -4560,15 +4912,7 @@ export function SanctionsPage() {
     insertSanction,
     updateSanction,
   } = useSanctions(DO_SANCTIONS_SEED);
-  const { records: disciplineStudentRecords } = useStudentRecords(DO_STUDENT_RECORDS_SEED);
-  const sanctionStudentOptions = useMemo(
-    () =>
-      disciplineStudentRecords.map((r) => ({
-        value: r.studentId,
-        label: `${r.studentName} (${r.studentId})`,
-      })),
-    [disciplineStudentRecords],
-  );
+  const { cases } = useCases([]);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const [isNewOpen, setIsNewOpen] = useState(false);
@@ -4582,9 +4926,38 @@ export function SanctionsPage() {
     studentId: "",
     sanctionType: "",
     notes: "",
+    hours: "",
+    correspondingOffice: "",
+    correspondingOfficeOther: "",
+    completionDate: "",
+    communityServiceDetail: "",
   });
   const [evidenceFile, setEvidenceFile] = useState(null);
   const [errors, setErrors] = useState({});
+
+  const sanctionStudentPreview = useMemo(() => {
+    const sidDigits = studentIdDigitsOnly(form.studentId);
+    if (sidDigits.length < 10) return null;
+    const matches = cases.filter((c) => studentIdDigitsOnly(c.studentId) === sidDigits);
+    if (!matches.length) return null;
+    const last = matches.sort((a, b) => {
+      const ta = a.reportedAt ? new Date(a.reportedAt).getTime() : 0;
+      const tb = b.reportedAt ? new Date(b.reportedAt).getTime() : 0;
+      return tb - ta;
+    })[0];
+    const meta = parseCaseMeta(last);
+    const offensesSummary = matches
+      .map((c) => `${c.caseType} (${c.status})`)
+      .slice(0, 8)
+      .join("; ");
+    return {
+      studentName: last.student,
+      studentId: last.studentId,
+      program: meta.program,
+      school: meta.school,
+      offensesSummary,
+    };
+  }, [form.studentId, cases]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -4640,7 +5013,16 @@ export function SanctionsPage() {
               className="cc-btn-primary"
               type="button"
               onClick={() => {
-                setForm({ studentId: "", sanctionType: "", notes: "" });
+                setForm({
+                  studentId: "",
+                  sanctionType: "",
+                  notes: "",
+                  hours: "",
+                  correspondingOffice: "",
+                  correspondingOfficeOther: "",
+                  completionDate: "",
+                  communityServiceDetail: "",
+                });
                 setEvidenceFile(null);
                 setErrors({});
                 setIsNewOpen(true);
@@ -4674,9 +5056,10 @@ export function SanctionsPage() {
                     <th>Sanction ID</th>
                     <th>Student</th>
                     <th>Sanction Type</th>
+                    <th>Hours</th>
                     <th>Status</th>
                     <th>Due Date</th>
-                    <th>Action</th>
+                    <th className="cases-table-col-action">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -4688,12 +5071,13 @@ export function SanctionsPage() {
                         <div style={{ color: "#64748b", fontSize: 12 }}>{i.studentId}</div>
                       </td>
                       <td>{i.sanctionType}</td>
+                      <td>{i.hours != null && i.hours !== "" ? i.hours : "—"}</td>
                       <td>
                         <span className={`cc-pill ${statusClass(i.status)}`}>{i.status}</span>
                       </td>
                       <td>{i.dueDate}</td>
-                      <td>
-                        <button className="cc-btn-secondary" type="button" onClick={() => setSelected(i)}>
+                      <td className="cases-table-col-action">
+                        <button className="cc-btn-secondary btn-view--fixed" type="button" onClick={() => setSelected(i)}>
                           View
                         </button>
                       </td>
@@ -4701,7 +5085,7 @@ export function SanctionsPage() {
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={6} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
+                      <td colSpan={7} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
                         No sanctions found.
                       </td>
                     </tr>
@@ -4754,6 +5138,42 @@ export function SanctionsPage() {
                 <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>{selected.sanctionType}</div>
               </div>
 
+              <div className="cc-modal-row" style={{ marginTop: 12 }}>
+                <div className="cc-field">
+                  <div className="cc-label">Hours</div>
+                  <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>
+                    {selected.hours != null && selected.hours !== "" ? selected.hours : "—"}
+                  </div>
+                </div>
+                <div className="cc-field">
+                  <div className="cc-label">Completion / end date</div>
+                  <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>{selected.completionDate || "—"}</div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <div className="cc-label">Corresponding office</div>
+                <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>
+                  {selected.correspondingOffice === "Others"
+                    ? selected.correspondingOfficeOther || "Others"
+                    : selected.correspondingOffice || "—"}
+                </div>
+              </div>
+
+              {selected.communityServiceDetail ? (
+                <div style={{ marginTop: 12 }}>
+                  <div className="cc-label">Community service detail</div>
+                  <div style={{ color: "#0f172a", fontSize: 14, marginTop: 6 }}>{selected.communityServiceDetail}</div>
+                </div>
+              ) : null}
+
+              {selected.offensesSummary ? (
+                <div style={{ marginTop: 12 }}>
+                  <div className="cc-label">Related offenses (from cases)</div>
+                  <div style={{ color: "#0f172a", fontSize: 14, marginTop: 6 }}>{selected.offensesSummary}</div>
+                </div>
+              ) : null}
+
               <div style={{ marginTop: 12 }}>
                 <div className="cc-label">Compliance Notes</div>
                 <div style={{ color: "#0f172a", fontSize: 14, marginTop: 6 }}>{selected.notes}</div>
@@ -4761,13 +5181,7 @@ export function SanctionsPage() {
 
               <div style={{ marginTop: 12 }}>
                 <div className="cc-label">Evidence</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                  {(selected.evidence || []).map((ev, idx) => (
-                    <div key={`${ev.name}-${idx}`} style={{ color: "#0f172a", fontSize: 14 }}>
-                      <span style={{ fontWeight: 600 }}>{ev.name}</span>
-                    </div>
-                  ))}
-                </div>
+                <DOEvidenceViewer evidence={selected.evidence} />
               </div>
             </div>
 
@@ -4803,7 +5217,7 @@ export function SanctionsPage() {
           onMouseDown={() => setIsNewOpen(false)}
         >
           <div
-            className="cc-modal do-modal do-modal--lg"
+            className="cc-modal do-modal do-modal--lg do-modal--new-case"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="cc-modal-header">
@@ -4817,34 +5231,74 @@ export function SanctionsPage() {
               onSubmit={async (e) => {
                 e.preventDefault();
                 const nextErrors = {};
-                const sid = form.studentId.trim();
-                const recordMatch = disciplineStudentRecords.find((r) => r.studentId === sid);
-                if (!sid) nextErrors.studentId = "Select a student with a discipline record.";
-                else if (!recordMatch) nextErrors.studentId = "Only students with an existing record can be selected.";
+                const sidErr = validateDoStudentId(form.studentId, "Student ID");
+                if (sidErr) nextErrors.studentId = sidErr;
+                else if (!sanctionStudentPreview) {
+                  nextErrors.studentId = "No student found with this ID in case records.";
+                }
                 if (!form.sanctionType) nextErrors.sanctionType = "Sanction Type is required.";
                 if (!sanctionFiledDateLabel) nextErrors.dueDate = "Sanction date could not be set. Close and try again.";
+                if (!form.hours.trim()) nextErrors.hours = "How many hours is required.";
+                if (!form.correspondingOffice) nextErrors.correspondingOffice = "Select the corresponding office.";
+                if (form.correspondingOffice === "Others" && !form.correspondingOfficeOther.trim()) {
+                  nextErrors.correspondingOfficeOther = "Specify the office.";
+                }
+                if (!form.completionDate.trim()) nextErrors.completionDate = "Completion or sanction end date is required.";
+                if (form.sanctionType === "Community Service" && !form.communityServiceDetail.trim()) {
+                  nextErrors.communityServiceDetail = "Describe the community service.";
+                }
                 if (!form.notes.trim()) nextErrors.notes = "Notes are required.";
-                if (!evidenceFile) nextErrors.evidence = "Evidence attachment is required (mock).";
+                if (!evidenceFile) nextErrors.evidence = "Evidence attachment is required.";
 
                 setErrors(nextErrors);
                 if (Object.keys(nextErrors).length > 0) return;
 
+                const sid = sanitizeDoStudentIdInput(form.studentId.trim());
+
+                let evItems = [];
+                try {
+                  evItems = [await fileToEvidenceItem(evidenceFile)];
+                } catch (err) {
+                  setErrors({ evidence: err?.message || "Could not read file." });
+                  return;
+                }
+
                 try {
                   const newItem = await insertSanction({
-                    studentName: recordMatch.studentName.trim(),
+                    studentName: sanctionStudentPreview.studentName.trim(),
                     studentId: sid,
                     sanctionType: form.sanctionType,
                     status: "In Review",
                     dueDate: sanctionFiledDateLabel,
                     notes: form.notes.trim(),
-                    evidence: [{ name: evidenceFile.name }],
+                    hours: form.hours.trim(),
+                    correspondingOffice: form.correspondingOffice,
+                    correspondingOfficeOther:
+                      form.correspondingOffice === "Others" ? form.correspondingOfficeOther.trim() : "",
+                    completionDate: form.completionDate.trim(),
+                    communityServiceDetail:
+                      form.sanctionType === "Community Service" ? form.communityServiceDetail.trim() : "",
+                    program: sanctionStudentPreview.program,
+                    school: sanctionStudentPreview.school,
+                    offensesSummary: sanctionStudentPreview.offensesSummary,
+                    evidence: evItems,
                   });
                   setSelected(newItem);
                   setIsNewOpen(false);
                   setErrors({});
                   setEvidenceFile(null);
-                  setForm({ studentId: "", sanctionType: "", notes: "" });
+                  setForm({
+                    studentId: "",
+                    sanctionType: "",
+                    notes: "",
+                    hours: "",
+                    correspondingOffice: "",
+                    correspondingOfficeOther: "",
+                    completionDate: "",
+                    communityServiceDetail: "",
+                  });
                   showToast("Sanction created.", { variant: "success" });
+                  await refresh();
                 } catch (err) {
                   showToast(err?.message || "Could not create sanction.", { variant: "error" });
                 }
@@ -4852,24 +5306,44 @@ export function SanctionsPage() {
             >
               <div className="cc-modal-body">
                 <div className="cc-field">
-                  <div className="cc-label">Select Student</div>
-                  <select
+                  <div className="cc-label">Student ID</div>
+                  <input
                     className={`cc-input${errors.studentId ? " cc-input-error" : ""}`}
+                    placeholder="Enter Student ID"
+                    inputMode="numeric"
+                    autoComplete="off"
                     value={form.studentId}
-                    onChange={(e) => setForm((p) => ({ ...p, studentId: e.target.value }))}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, studentId: sanitizeDoStudentIdInput(e.target.value) }))
+                    }
                     aria-invalid={Boolean(errors.studentId)}
-                  >
-                    <option value="">Choose a student</option>
-                    {sanctionStudentOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   {errors.studentId && <div className="cc-form-error" role="alert">{errors.studentId}</div>}
                 </div>
 
-                <div className="cc-modal-row" style={{ marginTop: 12 }}>
+                {sanctionStudentPreview ? (
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRadius: 10,
+                      background: "#f0fdf4",
+                      border: "1px solid #bbf7d0",
+                    }}
+                  >
+                    <div className="cc-label" style={{ marginBottom: 6 }}>
+                      Student
+                    </div>
+                    <div style={{ fontWeight: 600, color: "#0f172a" }}>{sanctionStudentPreview.studentName}</div>
+                    <div style={{ fontSize: 13, color: "#475569", marginTop: 4 }}>
+                      Program: {sanctionStudentPreview.program} · School: {sanctionStudentPreview.school}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>
+                      Offenses: {sanctionStudentPreview.offensesSummary}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="cc-modal-row">
                   <div className="cc-field">
                     <div className="cc-label">Sanction Type</div>
                     <select
@@ -4888,21 +5362,98 @@ export function SanctionsPage() {
                     {errors.sanctionType && <div className="cc-form-error" role="alert">{errors.sanctionType}</div>}
                   </div>
                   <div className="cc-field">
-                    <div className="cc-label">Sanction date</div>
+                    <div className="cc-label">Filed date</div>
                     <input
                       className="cc-input"
                       readOnly
                       value={sanctionFiledDateLabel || "—"}
                       aria-readonly="true"
                     />
-                    <p style={{ fontSize: 12, color: "#64748b", margin: "6px 0 0" }}>
-                      Set automatically to today&apos;s date when the sanction is filed.
-                    </p>
                     {errors.dueDate && <div className="cc-form-error" role="alert">{errors.dueDate}</div>}
                   </div>
                 </div>
 
-                <div className="cc-field" style={{ marginTop: 12 }}>
+                <div className="cc-modal-row">
+                  <div className="cc-field">
+                    <div className="cc-label">How many hours</div>
+                    <input
+                      className={`cc-input${errors.hours ? " cc-input-error" : ""}`}
+                      inputMode="decimal"
+                      placeholder="Enter Hours of Service"
+                      value={form.hours}
+                      onChange={(e) => setForm((p) => ({ ...p, hours: e.target.value }))}
+                    />
+                    {errors.hours && <div className="cc-form-error" role="alert">{errors.hours}</div>}
+                  </div>
+                  <div className="cc-field">
+                    <div className="cc-label">Completion / sanction end date</div>
+                    <input
+                      type="date"
+                      className={`cc-input${errors.completionDate ? " cc-input-error" : ""}`}
+                      value={form.completionDate}
+                      onChange={(e) => setForm((p) => ({ ...p, completionDate: e.target.value }))}
+                    />
+                    {errors.completionDate && (
+                      <div className="cc-form-error" role="alert">
+                        {errors.completionDate}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="cc-field">
+                  <div className="cc-label">Corresponding office</div>
+                  <select
+                    className={`cc-input${errors.correspondingOffice ? " cc-input-error" : ""}`}
+                    value={form.correspondingOffice}
+                    onChange={(e) => setForm((p) => ({ ...p, correspondingOffice: e.target.value }))}
+                  >
+                    {SANCTION_CORRESPONDING_OFFICES.map((o) => (
+                      <option value={o.value} key={o.value || "empty"}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.correspondingOffice && (
+                    <div className="cc-form-error" role="alert">
+                      {errors.correspondingOffice}
+                    </div>
+                  )}
+                </div>
+
+                {form.correspondingOffice === "Others" ? (
+                  <div className="cc-field">
+                    <div className="cc-label">Specify office</div>
+                    <input
+                      className={`cc-input${errors.correspondingOfficeOther ? " cc-input-error" : ""}`}
+                      value={form.correspondingOfficeOther}
+                      onChange={(e) => setForm((p) => ({ ...p, correspondingOfficeOther: e.target.value }))}
+                    />
+                    {errors.correspondingOfficeOther && (
+                      <div className="cc-form-error" role="alert">
+                        {errors.correspondingOfficeOther}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                {form.sanctionType === "Community Service" ? (
+                  <div className="cc-field">
+                    <div className="cc-label">Community service details</div>
+                    <textarea
+                      className={`cc-textarea${errors.communityServiceDetail ? " cc-input-error" : ""}`}
+                      value={form.communityServiceDetail}
+                      onChange={(e) => setForm((p) => ({ ...p, communityServiceDetail: e.target.value }))}
+                    />
+                    {errors.communityServiceDetail && (
+                      <div className="cc-form-error" role="alert">
+                        {errors.communityServiceDetail}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                <div className="cc-field">
                   <div className="cc-label">Notes</div>
                   <textarea
                     className="cc-textarea"
@@ -4913,7 +5464,7 @@ export function SanctionsPage() {
                   {errors.notes && <div className="cc-form-error" role="alert">{errors.notes}</div>}
                 </div>
 
-                <div className="cc-field" style={{ marginTop: 12 }}>
+                <div className="cc-field">
                   <div className="cc-label">Evidence Attachment</div>
                   <input
                     className={`cc-input${errors.evidence ? " cc-input-error" : ""}`}
@@ -5072,30 +5623,15 @@ export function ReportsPage({ standalone = false } = {}) {
               <p className="reports-kpi-label">Resolution rate</p>
             </div>
             <div className="reports-kpi-card">
-              <p className="reports-kpi-value">
-                {analytics.avgResolutionDays}
-                <span style={{ fontSize: 16, fontWeight: 600, color: "#64748b" }}> days</span>
-              </p>
-              <p className="reports-kpi-label">Avg. resolution time</p>
-            </div>
-            <div className="reports-kpi-card">
               <p className="reports-kpi-value">{analytics.studentsMonitored.toLocaleString()}</p>
               <p className="reports-kpi-label">Students monitored</p>
             </div>
             <div className="reports-kpi-card">
               <p className="reports-kpi-value" style={{ fontSize: 18, lineHeight: "24px" }}>
-                {analytics.topDepartment?.department || "—"}
+                {analytics.topSchool?.school || "—"}
               </p>
               <p className="reports-kpi-label">
-                Top department ({Number(analytics.topDepartment?.count || 0).toLocaleString()})
-              </p>
-            </div>
-            <div className="reports-kpi-card">
-              <p className="reports-kpi-value" style={{ fontSize: 18, lineHeight: "24px" }}>
-                {analytics.peakPeriod?.label || "—"}
-              </p>
-              <p className="reports-kpi-label">
-                Peak period ({Number(analytics.peakPeriod?.count || 0).toLocaleString()})
+                School with most cases ({Number(analytics.topSchool?.count || 0).toLocaleString()})
               </p>
             </div>
           </section>
@@ -5213,7 +5749,7 @@ export function ReportsPage({ standalone = false } = {}) {
                 <ResponsiveContainer>
                   <BarChart
                     layout="vertical"
-                    data={(analytics.departmentCounts || []).slice(0, 10)}
+                    data={(analytics.departmentStats || []).slice(0, 10)}
                     margin={{ top: 4, right: 16, left: 8, bottom: 4 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
@@ -5241,25 +5777,25 @@ export function ReportsPage({ standalone = false } = {}) {
             </div>
 
             <div className="reports-chart-card reports-chart-card--tall">
-              <h2 className="reports-chart-title">Resolution time</h2>
-              <p className="reports-chart-hint">Closed cases by time to resolve</p>
+              <h2 className="reports-chart-title">Cases by school</h2>
+              <p className="reports-chart-hint">SECA, SASE, and SBMA (from School on case records)</p>
               <div style={{ width: "100%", height: 280 }} className="reports-hbar">
                 <ResponsiveContainer>
                   <BarChart
                     layout="vertical"
-                    data={analytics.resolutionBuckets}
+                    data={analytics.schoolStats || []}
                     margin={{ top: 4, right: 16, left: 8, bottom: 4 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
                     <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
-                    <YAxis type="category" dataKey="label" width={88} tick={{ fontSize: 12 }} stroke="#64748b" />
+                    <YAxis type="category" dataKey="school" width={56} tick={{ fontSize: 12 }} stroke="#64748b" />
                     <Tooltip contentStyle={{ borderRadius: 8 }} />
                     <Bar
                       dataKey="count"
                       name="Cases"
-                      fill="#16a34a"
+                      fill="#0d9488"
                       radius={[0, 6, 6, 0]}
-                      barSize={20}
+                      barSize={22}
                       animationDuration={CHART_ANIMATION_DURATION}
                       animationEasing={CHART_ANIMATION_EASING}
                     />
@@ -5270,49 +5806,6 @@ export function ReportsPage({ standalone = false } = {}) {
               </>
             ) : null}
           </div>
-
-          <section className="cc-card" style={{ marginBottom: 20 }}>
-            <div className="cc-card-header" style={{ paddingBottom: 8 }}>
-              <h2 className="reports-chart-title" style={{ margin: 0 }}>
-                Repeat offenders
-              </h2>
-              <p className="reports-chart-hint" style={{ margin: "4px 0 0 0" }}>
-                Students with more than one case in this period
-              </p>
-            </div>
-            <div className="cc-table-wrapper reports-repeat-table-wrap">
-              <table className="cc-table">
-                <thead>
-                  <tr>
-                    <th>Student name</th>
-                    <th>Student ID</th>
-                    <th>Violations</th>
-                    <th>Last violation</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {analytics.repeatOffenders.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} style={{ textAlign: "center", padding: "20px 8px", color: "#64748b" }}>
-                        No repeat offenders in this period.
-                      </td>
-                    </tr>
-                  ) : (
-                    analytics.repeatOffenders.map((r) => (
-                      <tr key={r.studentId}>
-                        <td style={{ fontWeight: 600 }}>{r.student}</td>
-                        <td>{r.studentId}</td>
-                        <td>
-                          <span className="reports-badge-violations">{r.violations}</span>
-                        </td>
-                        <td>{r.lastDate}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
 
           <section className="reports-insights-grid" aria-label="Key insights">
             {analytics.insights.map((ins) => (
@@ -5325,21 +5818,7 @@ export function ReportsPage({ standalone = false } = {}) {
               </div>
             ))}
           </section>
-
-          <p
-            style={{
-              fontSize: 12,
-              color: "#94a3b8",
-              marginTop: 16,
-              lineHeight: 1.5,
-            }}
-          >
-            Data source:{" "}
-            <strong>Supabase PostgREST</strong> via{" "}
-            <code style={{ fontSize: 11 }}>@supabase/supabase-js</code> — table{" "}
-            <code style={{ fontSize: 11 }}>public.discipline_cases</code> (same data as Case Management).
-            Sample metrics appear when no cases fall in the selected period.
-          </p>
+          
         </main>
   );
 

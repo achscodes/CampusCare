@@ -5,6 +5,7 @@ import CCModal from "../common/CCModal";
 import { logoutCampusCare } from "../../utils/campusCareAuth";
 import { DO_NAV_ITEMS } from "./deanOfficeNav";
 import { canCreateDocumentRequest } from "../../constants/documentRequestAccess";
+import { readCampusCareSession } from "../../utils/campusCareSession";
 import "./Sidebar.css";
 
 /**
@@ -40,12 +41,7 @@ function Sidebar({
   const [logoutOpen, setLogoutOpen] = useState(false);
 
   const sessionOffice = useMemo(() => {
-    try {
-      const raw = window.localStorage.getItem("campuscare_session_v1");
-      return raw ? JSON.parse(raw)?.office : null;
-    } catch {
-      return null;
-    }
+    return readCampusCareSession()?.office ?? null;
   }, []);
 
   const deanOfficeNavItems = useMemo(() => {

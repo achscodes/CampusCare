@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Bell, KeyRound, Mail, Phone, Shield, User } from "lucide-react";
 import { labelForOfficeKey, normalizeOfficeKey } from "../../constants/documentRequestAccess";
+import { readCampusCareSession } from "../../utils/campusCareSession";
 import "../../pages/DODashboard/DO.css";
 
 /**
@@ -41,11 +42,7 @@ const NOTIFICATION_COPY = {
  */
 export default function OfficeProfileSettings({ workflow }) {
   const session = useMemo(() => {
-    try {
-      return JSON.parse(window.localStorage.getItem("campuscare_session_v1") || "null");
-    } catch {
-      return null;
-    }
+    return readCampusCareSession();
   }, []);
 
   const officeKey = normalizeOfficeKey(session?.office);

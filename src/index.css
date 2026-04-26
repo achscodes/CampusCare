@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* Inter is loaded from index.html (non-blocking) to avoid delaying first paint */
 
 * {
   margin: 0;

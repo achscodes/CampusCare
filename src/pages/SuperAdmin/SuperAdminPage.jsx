@@ -11,6 +11,7 @@ import UserManagement from "./UserManagement";
 import { logoutCampusCare } from "../../utils/campusCareAuth";
 import { getHomeRouteForOffice } from "../../utils/officeRoutes";
 import { isSuperAdminForOffice } from "../../utils/superAdmin";
+import { readCampusCareSession } from "../../utils/campusCareSession";
 import { showToast } from "../../utils/toast";
 import "../DODashboard/DO.css";
 import "../HealthServices/HealthServices.css";
@@ -45,11 +46,7 @@ export default function SuperAdminPage({ officeKey }) {
   const [logoutOpen, setLogoutOpen] = useState(false);
 
   const session = useMemo(() => {
-    try {
-      return JSON.parse(window.localStorage.getItem("campuscare_session_v1") || "null");
-    } catch {
-      return null;
-    }
+    return readCampusCareSession();
   }, []);
 
   const cfg = OFFICE_CONFIG[officeKey] ?? OFFICE_CONFIG.health;

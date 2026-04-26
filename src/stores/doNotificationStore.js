@@ -6,6 +6,19 @@ export const useDONotificationStore = create(
   persist(
     (set) => ({
       notifications: DEFAULT_NOTIFICATIONS,
+      prependNotification: (n) =>
+        set((s) => ({
+          notifications: [
+            {
+              id: n.id,
+              title: n.title,
+              body: n.body,
+              createdAt: n.createdAt || new Date().toLocaleString(),
+              unread: n.unread !== false,
+            },
+            ...s.notifications,
+          ].slice(0, 80),
+        })),
       markNotificationRead: (id) =>
         set((s) => ({
           notifications: s.notifications.map((n) =>
@@ -18,7 +31,7 @@ export const useDONotificationStore = create(
         })),
     }),
     {
-      name: "campuscare-do-notifications",
+      name: "campuscare-do-notifications-v2",
       partialize: (state) => ({ notifications: state.notifications }),
     },
   ),

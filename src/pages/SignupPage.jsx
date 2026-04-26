@@ -25,6 +25,7 @@ import {
   validateStaffPassword,
 } from "../utils/signupFieldValidation";
 import { showToast } from "../utils/toast";
+import { clearCampusCareSession, writeCampusCareSession } from "../utils/campusCareSession";
 
 const SignupPage = () => {
   const navigate = useNavigate();
@@ -153,7 +154,7 @@ const SignupPage = () => {
         });
         if (!sync.ok) {
           await supabase.auth.signOut();
-          window.localStorage.removeItem("campuscare_session_v1");
+          clearCampusCareSession();
           setFormError(
             sync.accountStatus === "rejected"
               ? "Your account was rejected. Contact your office administrator."
@@ -196,7 +197,7 @@ const SignupPage = () => {
           rememberMe: false,
           accountStatus: created.accountStatus ?? "approved",
         };
-        window.localStorage.setItem("campuscare_session_v1", JSON.stringify(session));
+        writeCampusCareSession(session, false);
         showToast("Account created. Welcome to CampusCare.", { variant: "success" });
         navigate(getSuperAdminRouteForOffice(officeKey), { replace: true, state: {} });
       } else {

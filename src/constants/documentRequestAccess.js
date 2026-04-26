@@ -92,3 +92,18 @@ export function isAllowedInterOfficePair(requestingOffice, targetOffice) {
   const allowed = getDocumentRequestTargetOptionsForOffice(req).map((x) => x.value);
   return allowed.includes(tgt);
 }
+
+/**
+ * Map free-text referral / office labels (from forms or legacy rows) to an office key.
+ * @param {string | null | undefined} text
+ * @returns {"" | "discipline" | "health" | "development"}
+ */
+export function officeKeyFromInterOfficeLabel(text) {
+  const t = String(text || "").toLowerCase();
+  if (!t) return "";
+  if (t.includes("discipline") || t.includes("(do)")) return "discipline";
+  if (t.includes("health") || t.includes("hso")) return "health";
+  if (t.includes("sdao") || t.includes("student development") || t.includes("development & activities"))
+    return "development";
+  return "";
+}

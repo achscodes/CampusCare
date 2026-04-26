@@ -25,11 +25,14 @@ import {
 import { showToast } from "../../utils/toast";
 import Sidebar from "../../components/Sidebar/Sidebar";
 import OfficeHeader from "../../components/OfficeHeader/OfficeHeader";
+import StaffNotificationBell from "../../components/common/StaffNotificationBell";
 import CCModal from "../../components/common/CCModal";
+import { useDONotificationsRealtime } from "../../hooks/useDONotificationsRealtime";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
 import { logoutCampusCare } from "../../utils/campusCareAuth";
 import { canCreateDocumentRequest, labelForOfficeKey } from "../../constants/documentRequestAccess";
 import { isStudentLikeCampusRole } from "../../utils/officeSession";
+import { readCampusCareSession } from "../../utils/campusCareSession";
 import { NU_PROGRAM_OPTIONS } from "../../data/nuPrograms";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import { interOfficeDocumentRequestToInsert } from "../../services/interOfficeDocumentRequests";
@@ -45,6 +48,18 @@ import { PROFILE_SETTINGS_PATH_DEVELOPMENT } from "../../utils/profileSettingsRo
 import "../DODashboard/DO.css";
 import "./SDAO.css";
 import { sanitizeDigitsOnlyInput, sanitizePersonNameInput } from "../../utils/signupFieldValidation";
+import {
+  INTER_OFFICE_DOC_STATUS,
+  DISCIPLINE_REFERRAL_STATUS,
+  isDocRequestPendingApproval,
+  isDocRequestDeclined,
+  isDocRequestApprovedForFulfillment,
+  normalizeInterOfficeDocStatus,
+  canReceivingOfficeUploadDoc,
+  canReceivingOfficeReviewReferral,
+  isReferralPendingPartnerReview,
+  normalizeReferralStatus,
+} from "../../utils/interOfficeWorkflow";
 import "../HealthServices/HealthServices.css";
 
 const iconProps = { size: 16, strokeWidth: 1.5 };
@@ -107,7 +122,8 @@ const SCHOLARSHIP_TYPE_OPTIONS = [
 
 const YEAR_LEVEL_OPTIONS = ["1st Year", "2nd Year", "3rd Year", "4th Year", "5th Year"];
 
-const RECEIVING_OFFICE_OPTIONS = ["Guidance Office", "Health Services", "OSCA", "Admissions Office", "External partner"];
+/** Inter-office referrals only (parity with HSO / DO). */
+const SDAO_INTER_OFFICE_REFERRALS = ["Discipline Office (DO)", "Health Services (HSO)"];
 
 const URGENCY_OPTIONS = [
   { value: "normal", label: "Normal — Routine referral" },
@@ -129,6 +145,8 @@ function pillClass(status) {
   if (s.includes("disbursed")) return "badge badge-pending";
   if (s.includes("uploaded")) return "badge badge-ongoing";
   if (s.includes("received")) return "badge badge-closed";
+  if (s.includes("declined") || s.includes("rejected")) return "badge badge-pending";
+  if (s.includes("approved")) return "badge badge-closed";
   return "badge badge-new";
 }
 
@@ -157,9 +175,12 @@ function clearanceBarTone(statusKey, progress) {
 
 function docRequestStatusLabel(status) {
   const s = String(status).toLowerCase();
+  if (s.includes("declined") || s.includes("rejected")) return "Declined";
+  if (s.includes("fulfilled")) return "Fulfilled";
+  if (s.includes("approved")) return "Approved";
+  if (s.includes("pending approval") || s === "pending") return "Pending approval";
   if (s === "ready") return "Ready";
   if (s === "processing") return "Processing";
-  if (s === "pending") return "Pending";
   return status;
 }
 
@@ -218,6 +239,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
   const [clearanceRecords, setClearanceRecords] = useState([]);
   const [docRequests, setDocRequests] = useState([]);
   const [referralsList, setReferralsList] = useState([]);
+  const [disciplineIncomingReferrals, setDisciplineIncomingReferrals] = useState([]);
   const [sdaoLoading, setSdaoLoading] = useState(true);
   const [sdaoError, setSdaoError] = useState(null);
   const [sdaoDocAcceptingUploadBusy, setSdaoDocAcceptingUploadBusy] = useState(false);
@@ -234,6 +256,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
         setClearanceRecords([]);
         setDocRequests([]);
         setReferralsList([]);
+        setDisciplineIncomingReferrals([]);
         return;
       }
       setSdaoError(null);
@@ -249,6 +272,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
       setClearanceRecords(res.clearanceRecords);
       setDocRequests(res.documentRequests);
       setReferralsList(res.referrals);
+      setDisciplineIncomingReferrals(res.disciplineReferralsIncoming || []);
     };
   }, []);
 
@@ -357,15 +381,9 @@ function SDAO({ embedDashboardOnly = false } = {}) {
 
   const docRequestStats = useMemo(() => {
     const total = docRequests.length;
-    const pending = docRequests.filter((d) => String(d.status).toLowerCase() === "pending").length;
-    const processing = docRequests.filter((d) => {
-      const s = String(d.status).toLowerCase();
-      return s === "processing" || s === "uploaded";
-    }).length;
-    const received = docRequests.filter((d) => {
-      const s = String(d.status).toLowerCase();
-      return s === "ready" || s === "received" || s === "completed";
-    }).length;
+    const pending = docRequests.filter((d) => isDocRequestPendingApproval(d.status)).length;
+    const processing = docRequests.filter((d) => isDocRequestApprovedForFulfillment(d.status)).length;
+    const received = docRequests.filter((d) => normalizeInterOfficeDocStatus(d.status) === "fulfilled").length;
     return { total, pending, processing, received };
   }, [docRequests]);
 
@@ -381,12 +399,10 @@ function SDAO({ embedDashboardOnly = false } = {}) {
   }, [referralsList]);
 
   const session = useMemo(() => {
-    try {
-      return JSON.parse(window.localStorage.getItem("campuscare_session_v1") || "null");
-    } catch {
-      return null;
-    }
+    return readCampusCareSession();
   }, []);
+
+  useDONotificationsRealtime();
 
   const canInterOfficeDocRequest = canCreateDocumentRequest(session?.office);
   const isStudentSession = isStudentLikeCampusRole(session?.role);
@@ -538,9 +554,9 @@ function SDAO({ embedDashboardOnly = false } = {}) {
         targetOffice: payload.targetOffice,
         documentType: docLabel,
         priority: payload.priority,
-        status: "Pending",
+        status: INTER_OFFICE_DOC_STATUS.PENDING_APPROVAL,
         description: payload.description,
-        evidence: [{ name: payload.evidenceFile.name }],
+        evidence: payload.evidenceFile ? [{ name: payload.evidenceFile.name }] : [],
         notes: null,
       },
       "development",
@@ -567,6 +583,10 @@ function SDAO({ embedDashboardOnly = false } = {}) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !selectedDocRequest || selectedDocRequest.direction !== "incoming") return;
+    if (!canReceivingOfficeUploadDoc(selectedDocRequest.status)) {
+      showToast("Approve the request first before attaching a file.", { variant: "warning" });
+      return;
+    }
     try {
       setSdaoDocAcceptingUploadBusy(true);
       if (isSupabaseConfigured() && supabase) {
@@ -620,6 +640,10 @@ function SDAO({ embedDashboardOnly = false } = {}) {
     }
     if (!referralForm.receivingOffice.trim()) {
       showToast("Please select a receiving office.", { variant: "warning" });
+      return;
+    }
+    if (!SDAO_INTER_OFFICE_REFERRALS.includes(referralForm.receivingOffice.trim())) {
+      showToast("Receiving office must be Discipline Office (DO) or Health Services (HSO).", { variant: "warning" });
       return;
     }
     if (!referralForm.urgency) {
@@ -1149,7 +1173,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
           </span>
           <input
             className="search-input"
-            placeholder="Search by student, ID, office, or document type..."
+            placeholder="Search by request ID, office, or document type..."
             value={docSearch}
             onChange={(e) => setDocSearch(e.target.value)}
           />
@@ -1168,7 +1192,6 @@ function SDAO({ embedDashboardOnly = false } = {}) {
             <thead>
               <tr>
                 <th>Request ID</th>
-                <th>Student</th>
                 <th>Partner office</th>
                 <th>Document</th>
                 <th>Priority</th>
@@ -1181,10 +1204,6 @@ function SDAO({ embedDashboardOnly = false } = {}) {
               {filteredDocs.map((d) => (
                 <tr key={d.id}>
                   <td className="cell-case-id">{d.id}</td>
-                  <td>
-                    <p className="cell-student-name">{d.student}</p>
-                    <p className="cell-student-id">{d.sid}</p>
-                  </td>
                   <td className="cell-text" style={{ fontSize: 13 }}>
                     <span className="sdao-pill sdao-pill--muted" style={{ marginRight: 8 }}>
                       {d.direction === "incoming" ? "From" : "To"}
@@ -1261,7 +1280,10 @@ function SDAO({ embedDashboardOnly = false } = {}) {
       </div>
       <div className="cases-panel">
         <div className="cases-panel-header">
-          <div className="cases-panel-title">All Referrals ({filteredRef.length})</div>
+          <div className="cases-panel-title">Outgoing referrals (SDAO) ({filteredRef.length})</div>
+          <p className="hs-list-sub" style={{ margin: "4px 0 0" }}>
+            Referrals are sent directly to the partner office for review.
+          </p>
         </div>
         <div className="cases-table-wrapper">
           {filteredRef.map((r) => (
@@ -1288,6 +1310,61 @@ function SDAO({ embedDashboardOnly = false } = {}) {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="cases-panel" style={{ marginTop: 24 }}>
+        <div className="cases-panel-header">
+          <div className="cases-panel-title">Incoming from Discipline Office ({disciplineIncomingReferrals.length})</div>
+          <p className="hs-list-sub" style={{ margin: "4px 0 0" }}>
+            Approve or decline referrals from Discipline Office sent to SDAO.
+          </p>
+        </div>
+        <div className="cases-table-wrapper">
+          <table className="cases-table">
+            <thead>
+              <tr>
+                <th>Referral ID</th>
+                <th>Student</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {disciplineIncomingReferrals.map((r) => (
+                <tr key={r.referralId}>
+                  <td className="cell-case-id">{r.referralId}</td>
+                  <td>
+                    <p className="cell-student-name">{r.studentName}</p>
+                    <p className="cell-student-id">{r.studentId}</p>
+                  </td>
+                  <td>
+                    <span className={pillClass(r.status)}>{r.status}</span>
+                  </td>
+                  <td className="cell-date">{r.date}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="hs-link-action sdao-link-referral"
+                      onClick={() => {
+                        setSelectedReferral({ ...r, disciplineIncoming: true });
+                        setActiveModal("referralDetails");
+                      }}
+                    >
+                      <Eye size={14} strokeWidth={1.5} aria-hidden />
+                      View
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {disciplineIncomingReferrals.length === 0 ? (
+            <p className="hs-list-sub" style={{ padding: "16px 12px", margin: 0 }}>
+              No incoming referrals from Discipline Office.
+            </p>
+          ) : null}
         </div>
       </div>
     </>
@@ -1394,7 +1471,12 @@ function SDAO({ embedDashboardOnly = false } = {}) {
             profileSettingsPath={PROFILE_SETTINGS_PATH_DEVELOPMENT}
           />
           <div className="dashboard-main">
-            <OfficeHeader userName={userName} userRole={userRole} notifications={SDAO_NOTIFICATIONS} />
+            <OfficeHeader
+              userName={userName}
+              userRole={userRole}
+              notifications={SDAO_NOTIFICATIONS}
+              notificationSlot={<StaffNotificationBell />}
+            />
             {sdaoPageMain}
           </div>
         </div>
@@ -1908,7 +1990,15 @@ function SDAO({ embedDashboardOnly = false } = {}) {
               </div>
             </div>
             <div className="cc-modal-body sdao-figma-modal-body">
-              {selectedDocRequest.status === "ready" && selectedDocRequest.uploadedAt ? (
+              {isDocRequestDeclined(selectedDocRequest.status) ? (
+                <div className="sdao-doc-pending-banner" style={{ borderColor: "#fecaca", background: "#fef2f2" }}>
+                  <Clock size={22} strokeWidth={2} aria-hidden />
+                  <div>
+                    <p className="sdao-doc-ready-title">Request declined</p>
+                    <p className="sdao-doc-ready-sub">This inter-office request was declined. No further uploads.</p>
+                  </div>
+                </div>
+              ) : selectedDocRequest.status === "ready" && selectedDocRequest.uploadedAt ? (
                 <div className="sdao-doc-ready-banner">
                   <CheckCircle2 size={22} strokeWidth={2} aria-hidden />
                   <div>
@@ -1923,8 +2013,12 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                     <p className="sdao-doc-ready-title">Request In Progress</p>
                     <p className="sdao-doc-ready-sub">
                       {selectedDocRequest.direction === "outgoing"
-                        ? `${labelForOfficeKey(selectedDocRequest.partnerOffice)} is processing this request.`
-                        : `${labelForOfficeKey(selectedDocRequest.partnerOffice)} initiated this request — SDAO is the target office.`}
+                        ? isDocRequestPendingApproval(selectedDocRequest.status)
+                          ? `${labelForOfficeKey(selectedDocRequest.partnerOffice)} must approve before fulfilling this request.`
+                          : `${labelForOfficeKey(selectedDocRequest.partnerOffice)} is processing this request.`
+                        : isDocRequestPendingApproval(selectedDocRequest.status)
+                          ? `Approve this request first, then attach the file for ${labelForOfficeKey(selectedDocRequest.partnerOffice)}.`
+                          : `${labelForOfficeKey(selectedDocRequest.partnerOffice)} initiated this request — SDAO is the target office.`}
                     </p>
                   </div>
                 </div>
@@ -1941,12 +2035,6 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                   </p>
                 </div>
                 <div>
-                  <span className="sdao-dl-label">Name</span>
-                  <p className="sdao-dl-value">{selectedDocRequest.student}</p>
-                  <span className="sdao-dl-label">Student ID</span>
-                  <p className="sdao-dl-value">{selectedDocRequest.sid}</p>
-                  <span className="sdao-dl-label">Program</span>
-                  <p className="sdao-dl-value">{selectedDocRequest.program}</p>
                   <span className="sdao-dl-label">
                     {selectedDocRequest.direction === "outgoing" ? "Request to" : "Request from"}
                   </span>
@@ -1983,6 +2071,11 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                 )}
                 {selectedDocRequest.direction === "incoming" ? (
                   <div style={{ marginTop: 12 }}>
+                    {isDocRequestPendingApproval(selectedDocRequest.status) ? (
+                      <p className="hs-stat-meta" style={{ marginBottom: 8 }}>
+                        Approve this request first; then you can attach the file for the requesting office.
+                      </p>
+                    ) : null}
                     <label htmlFor="sdao-doc-accept-upload" className="sdao-dl-label" style={{ display: "block" }}>
                       Add attachment (your office)
                     </label>
@@ -1990,7 +2083,9 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                       id="sdao-doc-accept-upload"
                       type="file"
                       className="cc-input"
-                      disabled={sdaoDocAcceptingUploadBusy}
+                      disabled={
+                        sdaoDocAcceptingUploadBusy || !canReceivingOfficeUploadDoc(selectedDocRequest.status)
+                      }
                       onChange={handleSdaoAcceptingOfficeUpload}
                       style={{ marginTop: 8, maxWidth: 400 }}
                     />
@@ -2007,13 +2102,67 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                 <p className="sdao-notes-text">{selectedDocRequest.notes}</p>
               </div>
             </div>
-            <div className="cc-modal-actions sdao-figma-modal-actions sdao-doc-detail-footer">
+            <div className="cc-modal-actions sdao-figma-modal-actions sdao-doc-detail-footer" style={{ flexWrap: "wrap", gap: 8 }}>
               <p className="sdao-doc-requested-by">
                 Requested by: <strong>{selectedDocRequest.requestedBy}</strong>
               </p>
-              <button type="button" className="sdao-btn-outline" onClick={closeFeatureModal}>
-                Close
-              </button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {selectedDocRequest.direction === "incoming" && isDocRequestPendingApproval(selectedDocRequest.status) ? (
+                  <>
+                    <button
+                      type="button"
+                      className="sdao-btn-outline"
+                      onClick={async () => {
+                        try {
+                          if (!isSupabaseConfigured() || !supabase) return;
+                          const { error } = await supabase
+                            .from("inter_office_document_requests")
+                            .update({ status: INTER_OFFICE_DOC_STATUS.DECLINED, updated_at: new Date().toISOString() })
+                            .eq("id", selectedDocRequest.id);
+                          if (error) throw error;
+                          const next = INTER_OFFICE_DOC_STATUS.DECLINED.toLowerCase();
+                          setDocRequests((prev) =>
+                            prev.map((d) => (d.id === selectedDocRequest.id ? { ...d, status: next } : d)),
+                          );
+                          setSelectedDocRequest((prev) => (prev ? { ...prev, status: next } : null));
+                          showToast("Request declined.", { variant: "success" });
+                        } catch (err) {
+                          showToast(err?.message || "Could not update request.", { variant: "error" });
+                        }
+                      }}
+                    >
+                      Decline
+                    </button>
+                    <button
+                      type="button"
+                      className="sdao-btn-solid"
+                      onClick={async () => {
+                        try {
+                          if (!isSupabaseConfigured() || !supabase) return;
+                          const { error } = await supabase
+                            .from("inter_office_document_requests")
+                            .update({ status: INTER_OFFICE_DOC_STATUS.APPROVED, updated_at: new Date().toISOString() })
+                            .eq("id", selectedDocRequest.id);
+                          if (error) throw error;
+                          const next = INTER_OFFICE_DOC_STATUS.APPROVED.toLowerCase();
+                          setDocRequests((prev) =>
+                            prev.map((d) => (d.id === selectedDocRequest.id ? { ...d, status: next } : d)),
+                          );
+                          setSelectedDocRequest((prev) => (prev ? { ...prev, status: next } : null));
+                          showToast("Request approved. You can now attach the file.", { variant: "success" });
+                        } catch (err) {
+                          showToast(err?.message || "Could not update request.", { variant: "error" });
+                        }
+                      }}
+                    >
+                      Approve
+                    </button>
+                  </>
+                ) : null}
+                <button type="button" className="sdao-btn-outline" onClick={closeFeatureModal}>
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         ) : null}
@@ -2096,7 +2245,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                   onChange={(e) => setReferralForm((f) => ({ ...f, receivingOffice: e.target.value }))}
                 >
                   <option value="">Select office</option>
-                  {RECEIVING_OFFICE_OPTIONS.map((o) => (
+                  {SDAO_INTER_OFFICE_REFERRALS.map((o) => (
                     <option key={o} value={o}>
                       {o}
                     </option>
@@ -2168,7 +2317,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                 <p className="sdao-figma-modal-sub">Complete referral information and tracking</p>
               </div>
               <div className="sdao-ref-id-pill">
-                {selectedReferral.refId}
+                {selectedReferral.disciplineIncoming ? selectedReferral.referralId : selectedReferral.refId}
                 <button type="button" className="sdao-ref-id-close" aria-label="Close" onClick={closeFeatureModal}>
                   ✕
                 </button>
@@ -2178,59 +2327,101 @@ function SDAO({ embedDashboardOnly = false } = {}) {
               <div className="sdao-ref-banner">
                 <div className="sdao-ref-banner-left">
                   <Info size={18} strokeWidth={2} aria-hidden />
-                  <span>Standard Referral</span>
+                  <span>{selectedReferral.disciplineIncoming ? "Discipline referral" : "Standard Referral"}</span>
                 </div>
-                <span className="sdao-ref-status-purple">{selectedReferral.statusDetail || selectedReferral.status}</span>
+                <span className="sdao-ref-status-purple">
+                  {selectedReferral.disciplineIncoming
+                    ? selectedReferral.status
+                    : selectedReferral.statusDetail || selectedReferral.status}
+                </span>
               </div>
               <div className="sdao-ref-student-box">
                 <div className="sdao-ref-student-grid">
                   <div>
                     <span className="sdao-dl-label">Name</span>
-                    <p className="sdao-dl-value">{selectedReferral.student}</p>
+                    <p className="sdao-dl-value">{selectedReferral.student || selectedReferral.studentName}</p>
                   </div>
                   <div>
                     <span className="sdao-dl-label">Student ID</span>
                     <p className="sdao-dl-value">{selectedReferral.studentId}</p>
                   </div>
-                  <div>
-                    <span className="sdao-dl-label">Email</span>
-                    <p className="sdao-dl-value">{selectedReferral.email}</p>
-                  </div>
-                  <div className="sdao-ref-span-2">
-                    <span className="sdao-dl-label">Program</span>
-                    <p className="sdao-dl-value">{selectedReferral.program}</p>
-                  </div>
+                  {!selectedReferral.disciplineIncoming ? (
+                    <>
+                      <div>
+                        <span className="sdao-dl-label">Email</span>
+                        <p className="sdao-dl-value">{selectedReferral.email}</p>
+                      </div>
+                      <div className="sdao-ref-span-2">
+                        <span className="sdao-dl-label">Program</span>
+                        <p className="sdao-dl-value">{selectedReferral.program}</p>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               </div>
               <div className="sdao-ref-info-grid">
                 <div>
                   <span className="sdao-dl-label">From (Referring Office)</span>
-                  <p className="sdao-dl-value">{selectedReferral.referringOffice}</p>
+                  <p className="sdao-dl-value">
+                    {selectedReferral.disciplineIncoming
+                      ? labelForOfficeKey(selectedReferral.referringOffice)
+                      : selectedReferral.referringOffice}
+                  </p>
                 </div>
                 <div>
                   <span className="sdao-dl-label">To (Receiving Office)</span>
-                  <p className="sdao-dl-value">{selectedReferral.receivingOffice}</p>
+                  <p className="sdao-dl-value">
+                    {selectedReferral.disciplineIncoming
+                      ? "SDAO — Student Development"
+                      : selectedReferral.receivingOffice}
+                  </p>
                 </div>
                 <div>
-                  <span className="sdao-dl-label">Date Created</span>
-                  <p className="sdao-dl-value">{selectedReferral.createdAt}</p>
+                  <span className="sdao-dl-label">Date</span>
+                  <p className="sdao-dl-value">
+                    {selectedReferral.disciplineIncoming ? selectedReferral.date : selectedReferral.createdAt}
+                  </p>
                 </div>
-                <div>
-                  <span className="sdao-dl-label">Created By</span>
-                  <p className="sdao-dl-value">{selectedReferral.createdBy}</p>
-                </div>
+                {!selectedReferral.disciplineIncoming ? (
+                  <div>
+                    <span className="sdao-dl-label">Created By</span>
+                    <p className="sdao-dl-value">{selectedReferral.createdBy}</p>
+                  </div>
+                ) : null}
               </div>
+              {selectedReferral.disciplineIncoming && canReceivingOfficeReviewReferral(selectedReferral.status) ? (
+                <p className="hs-stat-meta" style={{ margin: "0 0 12px" }}>
+                  Approve or decline this referral for SDAO.
+                </p>
+              ) : null}
+              {!selectedReferral.disciplineIncoming &&
+              (isReferralPendingPartnerReview(selectedReferral.status) ||
+                normalizeReferralStatus(selectedReferral.status).includes("pending referring")) ? (
+                <p className="hs-stat-meta" style={{ margin: "0 0 12px" }}>
+                  Waiting for {selectedReferral.receivingOffice} to approve or decline.
+                </p>
+              ) : null}
               <div className="sdao-ref-text-block">
                 <span className="sdao-dl-label">Reason for Referral</span>
                 <p>{selectedReferral.reason}</p>
               </div>
-              {selectedReferral.developmentDetails ? (
+              {!selectedReferral.disciplineIncoming && selectedReferral.developmentDetails ? (
                 <div className="sdao-ref-text-block">
                   <span className="sdao-dl-label">Notes</span>
                   <p>{selectedReferral.developmentDetails}</p>
                 </div>
               ) : null}
-              {selectedReferral.attachments?.length ? (
+              {selectedReferral.disciplineIncoming && Array.isArray(selectedReferral.evidence) && selectedReferral.evidence.length ? (
+                <div className="sdao-ref-attachments">
+                  <span className="sdao-dl-label">Attachments</span>
+                  <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "#334155", fontSize: 14 }}>
+                    {selectedReferral.evidence.map((ev, i) => (
+                      <li key={i}>{ev.name || ev.label || "File"}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {!selectedReferral.disciplineIncoming && selectedReferral.attachments?.length ? (
                 <div className="sdao-ref-attachments">
                   <span className="sdao-dl-label">Attachments</span>
                   <div className="sdao-ref-attach-row">
@@ -2243,28 +2434,102 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                   </div>
                 </div>
               ) : null}
-              <h3 className="sdao-form-section-title">Referral Timeline</h3>
-              <ul className="sdao-timeline">
-                {(selectedReferral.timeline || []).map((ev) => (
-                  <li key={ev.id} className="sdao-timeline-item">
-                    <span
-                      className={ev.tone === "active" ? "sdao-timeline-dot sdao-timeline-dot--active" : "sdao-timeline-dot"}
-                      aria-hidden
-                    />
-                    <div>
-                      <p className="sdao-timeline-title">{ev.title}</p>
-                      <p className="sdao-timeline-meta">
-                        {ev.date} · {ev.by}
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              {!selectedReferral.disciplineIncoming ? (
+                <>
+                  <h3 className="sdao-form-section-title">Referral Timeline</h3>
+                  <ul className="sdao-timeline">
+                    {(selectedReferral.timeline || []).map((ev) => (
+                      <li key={ev.id} className="sdao-timeline-item">
+                        <span
+                          className={
+                            ev.tone === "active" ? "sdao-timeline-dot sdao-timeline-dot--active" : "sdao-timeline-dot"
+                          }
+                          aria-hidden
+                        />
+                        <div>
+                          <p className="sdao-timeline-title">{ev.title}</p>
+                          <p className="sdao-timeline-meta">
+                            {ev.date} · {ev.by}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
             </div>
-            <div className="cc-modal-actions sdao-figma-modal-actions">
+            <div className="cc-modal-actions sdao-figma-modal-actions" style={{ flexWrap: "wrap", gap: 8 }}>
               <button type="button" className="sdao-btn-outline" onClick={closeFeatureModal}>
                 Close
               </button>
+              {selectedReferral.disciplineIncoming && canReceivingOfficeReviewReferral(selectedReferral.status) ? (
+                <>
+                  <button
+                    type="button"
+                    className="sdao-btn-outline"
+                    onClick={async () => {
+                      try {
+                        if (!isSupabaseConfigured() || !supabase) return;
+                        const { error } = await supabase
+                          .from("discipline_referrals")
+                          .update({
+                            status: DISCIPLINE_REFERRAL_STATUS.DECLINED,
+                            updated_at: new Date().toISOString(),
+                          })
+                          .eq("id", selectedReferral.referralId);
+                        if (error) throw error;
+                        setDisciplineIncomingReferrals((prev) =>
+                          prev.map((x) =>
+                            x.referralId === selectedReferral.referralId
+                              ? { ...x, status: DISCIPLINE_REFERRAL_STATUS.DECLINED }
+                              : x,
+                          ),
+                        );
+                        setSelectedReferral((prev) =>
+                          prev ? { ...prev, status: DISCIPLINE_REFERRAL_STATUS.DECLINED } : null,
+                        );
+                        showToast("Referral declined.", { variant: "success" });
+                      } catch (err) {
+                        showToast(err?.message || "Could not update referral.", { variant: "error" });
+                      }
+                    }}
+                  >
+                    Decline
+                  </button>
+                  <button
+                    type="button"
+                    className="sdao-btn-referral-primary"
+                    onClick={async () => {
+                      try {
+                        if (!isSupabaseConfigured() || !supabase) return;
+                        const { error } = await supabase
+                          .from("discipline_referrals")
+                          .update({
+                            status: DISCIPLINE_REFERRAL_STATUS.APPROVED,
+                            updated_at: new Date().toISOString(),
+                          })
+                          .eq("id", selectedReferral.referralId);
+                        if (error) throw error;
+                        setDisciplineIncomingReferrals((prev) =>
+                          prev.map((x) =>
+                            x.referralId === selectedReferral.referralId
+                              ? { ...x, status: DISCIPLINE_REFERRAL_STATUS.APPROVED }
+                              : x,
+                          ),
+                        );
+                        setSelectedReferral((prev) =>
+                          prev ? { ...prev, status: DISCIPLINE_REFERRAL_STATUS.APPROVED } : null,
+                        );
+                        showToast("Referral approved.", { variant: "success" });
+                      } catch (err) {
+                        showToast(err?.message || "Could not update referral.", { variant: "error" });
+                      }
+                    }}
+                  >
+                    Approve
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
         ) : null}

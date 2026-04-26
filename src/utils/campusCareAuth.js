@@ -1,8 +1,9 @@
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { isSuperAdminSession } from "./superAdmin";
+import { clearCampusCareSession, writeCampusCareSession } from "./campusCareSession";
 
 export async function logoutCampusCare() {
-  window.localStorage.removeItem("campuscare_session_v1");
+  clearCampusCareSession();
   if (isSupabaseConfigured() && supabase) {
     await supabase.auth.signOut();
   }
@@ -58,6 +59,6 @@ export async function syncCampusCareSessionFromSupabaseUser(authUser, opts = {})
     return { ok: false, accountStatus };
   }
 
-  window.localStorage.setItem("campuscare_session_v1", JSON.stringify(session));
+  writeCampusCareSession(session, rememberMe);
   return { ok: true, session };
 }

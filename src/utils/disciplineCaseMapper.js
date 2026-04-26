@@ -45,6 +45,26 @@ function parseProgramFromDescription(description) {
   return "";
 }
 
+function parseSchoolFromDescription(description) {
+  const raw = String(description || "");
+  for (const part of raw.split(/\n\s*\n/g).map((s) => s.trim())) {
+    if (part.startsWith("School: ")) return part.slice(8).trim();
+  }
+  return "";
+}
+
+function parseOffenseTypeFromDescription(description) {
+  const raw = String(description || "");
+  for (const part of raw.split(/\n\s*\n/g).map((s) => s.trim())) {
+    if (part.startsWith("Offense Type: ")) return part.slice(14).trim();
+  }
+  return "";
+}
+
+export function parseCaseDescriptionSchool(description) {
+  return parseSchoolFromDescription(description);
+}
+
 /** @param {Record<string, unknown>} row */
 export function rowToCase(row) {
   const evidence = Array.isArray(row.evidence) ? row.evidence : [];
@@ -52,6 +72,8 @@ export function rowToCase(row) {
   const updatedAt = row.updated_at ? new Date(String(row.updated_at)).toISOString() : null;
   const description = String(row.description ?? "");
   const program = String(row.program ?? "") || parseProgramFromDescription(description);
+  const school = String(row.school ?? "") || parseSchoolFromDescription(description);
+  const offenseType = String(row.offense_type ?? "") || parseOffenseTypeFromDescription(description);
   return {
     id: String(row.id ?? ""),
     student: String(row.student_name ?? ""),
@@ -62,6 +84,8 @@ export function rowToCase(row) {
     date: formatCaseDateFromIso(row.reported_at),
     officer: String(row.reporting_officer ?? ""),
     program: program || "",
+    school: school || "",
+    offenseType: offenseType || "",
     description,
     evidence,
     reportedAt: reportedAt || undefined,
@@ -91,5 +115,8 @@ export function buildCaseInsertRow(id, payload) {
     description: payload.description.trim(),
     evidence: Array.isArray(payload.evidence) ? payload.evidence : [],
     reported_at: new Date().toISOString(),
+    program: String(payload.program || "").trim(),
+    school: String(payload.school || "").trim(),
+    offense_type: String(payload.offenseType || "").trim(),
   };
 }

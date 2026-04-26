@@ -115,7 +115,7 @@ function useDisciplineTable({ table, localKey, seed, mapRow }) {
 export function useStudentRecords(seed) {
   const { items, loading, fetchError, refresh, useRemote, setLocal } = useDisciplineTable({
     table: "discipline_student_records",
-    localKey: "campuscare_do_student_records_v1",
+    localKey: "campuscare_do_student_records_v2",
     seed,
     mapRow: m.rowToStudentRecord,
   });
@@ -186,7 +186,7 @@ export function useStudentRecords(seed) {
 
 export function useDocumentRequests(seed) {
   const useRemote = Boolean(isSupabaseConfigured() && supabase);
-  const [local, setLocal] = usePersistentState("campuscare_do_document_requests_v1", seed);
+  const [local, setLocal] = usePersistentState("campuscare_do_document_requests_v2", seed);
   const [remote, setRemote] = useState([]);
   const [loading, setLoading] = useState(useRemote);
   const [fetchError, setFetchError] = useState(null);
@@ -279,7 +279,7 @@ export function useDocumentRequests(seed) {
 export function useReferrals(seed) {
   const { items, loading, fetchError, refresh, useRemote, setLocal } = useDisciplineTable({
     table: "discipline_referrals",
-    localKey: "campuscare_do_referrals_v1",
+    localKey: "campuscare_do_referrals_v2",
     seed,
     mapRow: m.rowToReferral,
   });
@@ -318,10 +318,11 @@ export function useReferrals(seed) {
         return;
       }
       if (!supabase) throw new Error("Supabase is not configured.");
-      const { error } = await supabase
-        .from("discipline_referrals")
-        .update({ status: patch.status, updated_at: new Date().toISOString() })
-        .eq("id", referralId);
+      const body = { updated_at: new Date().toISOString() };
+      if (patch.status != null) body.status = patch.status;
+      if (patch.reason != null) body.reason = String(patch.reason);
+      if (patch.evidence != null) body.evidence = patch.evidence;
+      const { error } = await supabase.from("discipline_referrals").update(body).eq("id", referralId);
       if (error) throw error;
       await refresh();
     },
@@ -334,7 +335,7 @@ export function useReferrals(seed) {
 export function useSanctions(seed) {
   const { items, loading, fetchError, refresh, useRemote, setLocal } = useDisciplineTable({
     table: "discipline_sanctions",
-    localKey: "campuscare_do_sanctions_v1",
+    localKey: "campuscare_do_sanctions_v2",
     seed,
     mapRow: m.rowToSanction,
   });
@@ -373,10 +374,19 @@ export function useSanctions(seed) {
         return;
       }
       if (!supabase) throw new Error("Supabase is not configured.");
-      const { error } = await supabase
-        .from("discipline_sanctions")
-        .update({ status: patch.status, updated_at: new Date().toISOString() })
-        .eq("id", sanctionId);
+      const body = { updated_at: new Date().toISOString() };
+      if (patch.status != null) body.status = patch.status;
+      if (patch.notes != null) body.notes = String(patch.notes);
+      if (patch.dueDate != null) body.due_date = String(patch.dueDate);
+      if (patch.hours != null) body.hours = patch.hours === "" ? null : Number(patch.hours);
+      if (patch.correspondingOffice != null) body.corresponding_office = String(patch.correspondingOffice);
+      if (patch.correspondingOfficeOther != null)
+        body.corresponding_office_other = String(patch.correspondingOfficeOther);
+      if (patch.communityServiceDetail != null)
+        body.community_service_detail = String(patch.communityServiceDetail);
+      if (patch.completionDate != null) body.completion_date = String(patch.completionDate);
+      if (patch.evidence != null) body.evidence = patch.evidence;
+      const { error } = await supabase.from("discipline_sanctions").update(body).eq("id", sanctionId);
       if (error) throw error;
       await refresh();
     },
@@ -389,7 +399,7 @@ export function useSanctions(seed) {
 export function useCaseConferences(seed) {
   const { items, loading, fetchError, refresh, useRemote, setLocal } = useDisciplineTable({
     table: "discipline_case_conferences",
-    localKey: "campuscare_do_case_conferences_v1",
+    localKey: "campuscare_do_case_conferences_v2",
     seed,
     mapRow: m.rowToCaseConference,
   });

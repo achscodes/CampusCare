@@ -254,6 +254,9 @@
 }
 
 .cases-panel-header {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
   padding: 24px 24px 0;
 }
 
@@ -261,7 +264,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .cases-panel-title {
@@ -271,7 +274,7 @@
   font-family: "Inter", sans-serif;
   font-weight: 400;
   font-size: 16px;
-  line-height: 20px;
+  line-height: 24px;
   color: #0f172a;
 }
 
@@ -303,9 +306,9 @@
   font-family: "Inter", sans-serif;
   font-weight: 400;
   font-size: 14px;
-  line-height: 24px;
+  line-height: 1.5;
   color: #f54900;
-  margin-bottom: 12px;
+  margin-bottom: 0;
 }
 
 /* Search bar */
@@ -1303,20 +1306,127 @@
   min-height: 0;
 }
 
+/* Let the modal body scroll while header + action buttons stay visible */
+.do-modal > .do-modal-head,
+.do-modal > .cc-modal-header {
+  flex-shrink: 0;
+}
+
+/* Case Details (and any modal with head + body-scroll + actions, no <form> wrapper) */
+.do-modal > .do-modal-body-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.do-modal > .cc-form-error[role="alert"] {
+  flex-shrink: 0;
+  padding-left: 22px;
+  padding-right: 22px;
+}
+
+.do-modal > .cc-modal-actions {
+  flex-shrink: 0;
+  background: #fff;
+}
+
+/* Modals that use cc-modal-header + cc-modal-body (e.g. Student record) */
+.do-modal > .cc-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 18px 20px;
+}
+
+.do-modal > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.do-modal > form .do-modal-body-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.do-modal > form .cc-modal-body.do-modal-body-scroll,
+.do-modal > form .cc-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.do-modal > form .cc-modal-actions {
+  flex-shrink: 0;
+  background: #fff;
+}
+
+.do-modal > form > .cc-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 18px 20px;
+}
+
+.do-modal > form > .cc-modal-body .cc-modal-row {
+  margin-bottom: 0;
+}
+
 .do-modal--lg {
   width: min(560px, 100%);
   max-height: min(90vh, 850px);
 }
 
-/* New Case: avoid nested scrollbars; keep full form visible within the viewport */
+/* New Case: scrollable on small viewports */
 .do-modal--new-case {
   width: min(640px, 100%);
-  max-height: none;
+  max-height: min(92vh, 900px);
 }
 
-.do-modal--new-case .cc-modal-body {
-  overflow: visible;
-  max-height: none;
+.do-modal--schedule {
+  width: min(600px, 100%);
+  max-height: min(92vh, 900px);
+}
+
+/* Case Details view — room for banner, grids, description, evidence + actions pinned */
+.do-modal--case-detail {
+  width: min(600px, 100%);
+  max-height: min(92vh, 900px);
+}
+
+.do-form-grid2--tight {
+  gap: 12px 16px;
+}
+
+@media (max-width: 540px) {
+  .do-form-grid2.do-form-grid2--tight {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cases-table-col-action {
+  width: 112px;
+  text-align: right;
+  vertical-align: middle;
+}
+
+.btn-view--fixed {
+  min-width: 88px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 /* Case Conference — calmer stat cards and banner */
@@ -1347,9 +1457,6 @@
 }
 
 .do-modal .do-modal-body-scroll {
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
   padding: 20px 22px;
 }
 
@@ -1601,7 +1708,7 @@
 .do-modal .do-form-stack {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 16px;
 }
 
 .do-modal .do-form-cell {
@@ -1610,11 +1717,15 @@
   gap: 8px;
   width: 100%;
   min-width: 0;
-  margin-bottom: 18px;
+  margin-bottom: 0;
 }
 
 .do-modal .do-form-grid2 .do-form-cell {
-  margin-bottom: 18px;
+  margin-bottom: 0;
+}
+
+.do-modal .do-form-grid2 {
+  gap: 16px 18px;
 }
 
 .do-modal .cc-input,
@@ -1986,21 +2097,182 @@
   color: #334155;
 }
 
-.reports-repeat-table-wrap {
-  margin-top: 8px;
+/* Student Records — Cases capsule trackers (3 minor = 1 major) */
+.do-cases-capsules {
+  padding: 4px 0;
 }
 
-.reports-badge-violations {
-  display: inline-flex;
+.do-cases-capsules-title {
+  font-family: "Inter", sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  color: #0f172a;
+  text-align: center;
+  margin-bottom: 10px;
+  letter-spacing: -0.02em;
+}
+
+.do-cases-capsules-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 20px;
+  align-items: start;
+}
+
+.do-cases-capsules-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.do-cases-capsules-label {
+  font-family: "Inter", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.do-cases-capsules-pills {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 6px;
   align-items: center;
   justify-content: center;
-  min-width: 28px;
-  padding: 2px 8px;
+  width: 100%;
+  max-width: 120px;
+}
+
+.do-cases-pill {
+  flex: 1;
+  min-width: 0;
+  max-width: 34px;
+  height: 12px;
   border-radius: 999px;
+  background: #e2e8f0;
+  box-shadow: inset 0 1px 1px rgba(15, 23, 42, 0.06);
+}
+
+.do-cases-pill--minor.do-cases-pill--filled {
+  background: linear-gradient(180deg, #fbbf24 0%, #ea580c 100%);
+  box-shadow: none;
+}
+
+.do-cases-pill--major.do-cases-pill--filled {
+  background: linear-gradient(180deg, #f87171 0%, #dc2626 100%);
+  box-shadow: none;
+}
+
+.do-cases-capsules-hint {
+  margin: 12px 0 0;
+  font-family: "Inter", sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+/* Student record modal — detailed offense lists */
+.do-student-record-offense-block {
+  margin-top: 20px;
+}
+
+.do-student-record-offense-heading {
+  font-family: "Inter", sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  color: #0f172a;
+  margin: 0 0 10px 0;
+  letter-spacing: -0.01em;
+}
+
+.do-student-record-offense-heading--major {
+  color: #b91c1c;
+}
+
+.do-student-record-offense-heading--minor {
+  color: #c2410c;
+}
+
+.do-student-record-case-detail {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  margin-bottom: 10px;
+}
+
+.do-student-record-case-detail:last-child {
+  margin-bottom: 0;
+}
+
+.do-student-record-case-detail-title {
+  font-family: "Inter", sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  color: #0f172a;
+  line-height: 1.35;
+  margin: 0 0 8px 0;
+}
+
+.do-student-record-case-detail-meta {
+  font-family: "Inter", sans-serif;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0 0 8px 0;
+}
+
+.do-student-record-case-detail-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  margin: 10px 0 4px 0;
+}
+
+.do-student-record-case-detail-label:first-of-type {
+  margin-top: 0;
+}
+
+.do-student-record-case-detail-body {
+  font-family: "Inter", sans-serif;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.do-student-record-severity-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.do-student-record-severity-pill--major {
   background: #fef2f2;
   color: #b91c1c;
-  font-weight: 600;
-  font-size: 12px;
+}
+
+.do-student-record-severity-pill--minor {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.do-student-record-counts-line {
+  font-family: "Inter", sans-serif;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.45;
+  margin: 12px 0 0 0;
 }
 
 .reports-demo-pill {

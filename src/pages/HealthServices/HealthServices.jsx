@@ -42,7 +42,9 @@ import {
 import { showToast } from "../../utils/toast";
 import Sidebar from "../../components/Sidebar/Sidebar";
 import OfficeHeader from "../../components/OfficeHeader/OfficeHeader";
+import StaffNotificationBell from "../../components/common/StaffNotificationBell";
 import CCModal from "../../components/common/CCModal";
+import { useDONotificationsRealtime } from "../../hooks/useDONotificationsRealtime";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import {
@@ -57,11 +59,24 @@ import {
 import { appendEvidenceToInterOfficeRequest } from "../../services/interOfficeDocumentEvidence";
 import { logoutCampusCare } from "../../utils/campusCareAuth";
 import { PROFILE_SETTINGS_PATH_HEALTH } from "../../utils/profileSettingsRoutes";
+import { readCampusCareSession } from "../../utils/campusCareSession";
 import { canCreateDocumentRequest, labelForOfficeKey } from "../../constants/documentRequestAccess";
 import { NU_PROGRAM_OPTIONS } from "../../data/nuPrograms";
 import "../DODashboard/DO.css";
 import "./HealthServices.css";
 import { sanitizeDigitsOnlyInput, sanitizePersonNameInput } from "../../utils/signupFieldValidation";
+import {
+  INTER_OFFICE_DOC_STATUS,
+  DISCIPLINE_REFERRAL_STATUS,
+  isDocRequestPendingApproval,
+  isDocRequestDeclined,
+  isDocRequestApprovedForFulfillment,
+  normalizeInterOfficeDocStatus,
+  canReceivingOfficeUploadDoc,
+  canReceivingOfficeReviewReferral,
+  isReferralPendingPartnerReview,
+  normalizeReferralStatus,
+} from "../../utils/interOfficeWorkflow";
 
 const iconProps = { size: 16, strokeWidth: 1.5 };
 
@@ -122,6 +137,8 @@ function pillClass(status) {
   if (s.includes("scheduled")) return "hs-pill hs-pill-scheduled";
   if (s.includes("confirmed")) return "hs-pill hs-pill-ongoing";
   if (s.includes("pending")) return "hs-pill hs-pill-waiting";
+  if (s.includes("declined") || s.includes("rejected")) return "hs-pill hs-pill-waiting";
+  if (s.includes("approved")) return "hs-pill hs-pill-completed";
   return "hs-pill hs-pill-waiting";
 }
 
@@ -267,6 +284,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const [appointmentsList, setAppointmentsList] = useState(() => []);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [referralsList, setReferralsList] = useState(() => []);
+  const [disciplineIncomingReferrals, setDisciplineIncomingReferrals] = useState(() => []);
   const [selectedReferral, setSelectedReferral] = useState(null);
   const [docRequestsRows, setDocRequestsRows] = useState(() => []);
   const [selectedDocRequest, setSelectedDocRequest] = useState(null);
@@ -282,12 +300,10 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const recordFiltersSnapshot = useRef(null);
 
   const session = useMemo(() => {
-    try {
-      return JSON.parse(window.localStorage.getItem("campuscare_session_v1") || "null");
-    } catch {
-      return null;
-    }
+    return readCampusCareSession();
   }, []);
+
+  useDONotificationsRealtime();
 
   const canInterOfficeDocRequest = canCreateDocumentRequest(session?.office);
   const healthNavItems = useMemo(() => {
@@ -336,6 +352,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       setAppointmentsList(res.appointments);
       setReferralsList(res.referrals);
       setDocRequestsRows(res.documents);
+      setDisciplineIncomingReferrals(res.disciplineReferralsIncoming || []);
     })();
     return () => {
       cancelled = true;
@@ -708,12 +725,12 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       reason: newReferralForm.reason.trim(),
       health_observations: null,
       recommended_action: null,
-      status: "Sent",
+      status: DISCIPLINE_REFERRAL_STATUS.PENDING_PARTNER,
       urgent: false,
       created_by_name: userName,
       referral_date: rd,
       attachments: [],
-      timeline: [{ label: "Referral sent", when: dateLabel, by: userName, done: true }],
+      timeline: [{ label: "Pending partner review", when: dateLabel, by: userName, done: true }],
     };
     try {
       setReferralSaving(true);
@@ -738,7 +755,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
             date: dateLabel,
             dateSort: rd,
             by: userName,
-            status: "Sent",
+            status: DISCIPLINE_REFERRAL_STATUS.PENDING_PARTNER,
             urgent: false,
             attachments: [],
             timeline: payload.timeline,
@@ -770,9 +787,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       targetOffice: payload.targetOffice,
       documentType: docLabel,
       priority: payload.priority,
-      status: "Pending",
+      status: INTER_OFFICE_DOC_STATUS.PENDING_APPROVAL,
       description: payload.description,
-      evidence: [{ name: payload.evidenceFile.name }],
+      evidence: payload.evidenceFile ? [{ name: payload.evidenceFile.name }] : [],
       notes: null,
     };
     try {
@@ -798,6 +815,10 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !selectedDocRequest || selectedDocRequest.direction !== "incoming") return;
+    if (!canReceivingOfficeUploadDoc(selectedDocRequest.status)) {
+      showToast("Approve the request first before attaching a file.", { variant: "warning" });
+      return;
+    }
     try {
       setDocAcceptingUploadBusy(true);
       if (isSupabaseConfigured() && supabase) {
@@ -884,6 +905,10 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const filteredDocs = useMemo(() => {
     return docRequestsRows.filter((d) => {
       if (docStatusFilter === "all") return true;
+      if (docStatusFilter === "pendingApproval") return isDocRequestPendingApproval(d.status);
+      if (docStatusFilter === "approved") return isDocRequestApprovedForFulfillment(d.status);
+      if (docStatusFilter === "declined") return isDocRequestDeclined(d.status);
+      if (docStatusFilter === "fulfilled") return normalizeInterOfficeDocStatus(d.status) === "fulfilled";
       return d.status.toLowerCase() === docStatusFilter;
     }).filter((d) => {
       const q = search.toLowerCase();
@@ -963,9 +988,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     const list = docRequestsRows;
     return {
       total: list.length,
-      pending: list.filter((d) => d.status.toLowerCase() === "pending").length,
-      uploaded: list.filter((d) => d.status.toLowerCase() === "uploaded").length,
-      received: list.filter((d) => d.status.toLowerCase() === "received").length,
+      pending: list.filter((d) => isDocRequestPendingApproval(d.status)).length,
+      uploaded: list.filter((d) => isDocRequestApprovedForFulfillment(d.status)).length,
+      received: list.filter((d) => normalizeInterOfficeDocStatus(d.status) === "fulfilled").length,
     };
   }, [docRequestsRows]);
 
@@ -1514,8 +1539,12 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         <div className="cases-panel-header">
           <div className="cases-panel-top">
             <div>
-              <div className="cases-panel-title cases-panel-title--strong">All Referrals ({referralsList.length})</div>
-              <p className="hs-list-sub hs-list-sub--tight">Inter-office and external referrals</p>
+              <div className="cases-panel-title cases-panel-title--strong">
+                Outgoing referrals (Health Services) ({referralsList.length})
+              </div>
+              <p className="hs-list-sub hs-list-sub--tight">
+                Referrals are sent directly to the partner office for review.
+              </p>
             </div>
           </div>
         </div>
@@ -1527,7 +1556,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                 <p className="hs-consult-meta">{r.office}</p>
                 <div className="hs-consult-badges" style={{ marginTop: 8 }}>
                   {r.urgent ? <span className="hs-badge-urgent">URGENT</span> : null}
-                  <span className="hs-pill hs-pill-scheduled">{r.status}</span>
+                  <span className={pillClass(r.status)}>{r.status}</span>
                 </div>
               </div>
               <div>
@@ -1544,6 +1573,64 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="cases-panel hs-panel-elevated" style={{ marginTop: 24 }}>
+        <div className="cases-panel-header">
+          <div className="cases-panel-top">
+            <div>
+              <div className="cases-panel-title cases-panel-title--strong">
+                Incoming from Discipline Office ({disciplineIncomingReferrals.length})
+              </div>
+              <p className="hs-list-sub hs-list-sub--tight">
+                Approve or decline referrals from Discipline Office sent to Health Services.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="cases-table-wrapper">
+          <table className="cases-table">
+            <thead>
+              <tr>
+                <th>Referral ID</th>
+                <th>Student</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {disciplineIncomingReferrals.map((r) => (
+                <tr key={r.referralId}>
+                  <td className="cell-case-id">{r.referralId}</td>
+                  <td>
+                    <p className="cell-student-name">{r.studentName}</p>
+                    <p className="cell-student-id">{r.studentId}</p>
+                  </td>
+                  <td>
+                    <span className={pillClass(r.status)}>{r.status}</span>
+                  </td>
+                  <td className="cell-date">{r.date}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="hs-link-action"
+                      onClick={() => setSelectedReferral({ ...r, disciplineIncoming: true })}
+                    >
+                      <Eye size={14} strokeWidth={1.5} aria-hidden />
+                      View
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {disciplineIncomingReferrals.length === 0 ? (
+            <p className="hs-list-sub" style={{ padding: "16px 12px", margin: 0 }}>
+              No incoming referrals from Discipline Office.
+            </p>
+          ) : null}
         </div>
       </div>
     </>
@@ -1580,16 +1667,17 @@ function HealthServices({ embedReportsOnly = false } = {}) {
           </span>
           <input
             className="search-input"
-            placeholder="Search by student, ID, office, or document type..."
+            placeholder="Search by request ID, office, or document type..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <select className="hs-select" value={docStatusFilter} onChange={(e) => setDocStatusFilter(e.target.value)}>
           <option value="all">All Status</option>
-          <option value="pending">Pending</option>
-          <option value="uploaded">Uploaded</option>
-          <option value="received">Received</option>
+          <option value="pendingApproval">Pending approval</option>
+          <option value="approved">Approved</option>
+          <option value="declined">Declined</option>
+          <option value="fulfilled">Fulfilled</option>
         </select>
       </div>
       <div className="cases-panel hs-panel-elevated">
@@ -1606,7 +1694,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
             <thead>
               <tr>
                 <th>Request ID</th>
-                <th>Student</th>
                 <th>Partner office</th>
                 <th>Document Type</th>
                 <th>Priority</th>
@@ -1619,10 +1706,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               {filteredDocs.map((d) => (
                 <tr key={d.id}>
                   <td className="cell-case-id">{d.id}</td>
-                  <td>
-                    <p className="cell-student-name">{d.student}</p>
-                    <p className="cell-student-id">{d.sid}</p>
-                  </td>
                   <td className="cell-text" style={{ fontSize: 13 }}>
                     <span
                       className="hs-pill"
@@ -1946,7 +2029,12 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         profileSettingsPath={PROFILE_SETTINGS_PATH_HEALTH}
       />
       <div className="dashboard-main">
-        <OfficeHeader userName={userName} userRole={userRole} notifications={HS_NOTIFICATIONS} />
+        <OfficeHeader
+          userName={userName}
+          userRole={userRole}
+          notifications={HS_NOTIFICATIONS}
+          notificationSlot={<StaffNotificationBell />}
+        />
         <main className="dashboard-content hs-page hs-office-shell">
           <section className="hs-tab-page-heading">
             <div className="page-title-row">
@@ -2611,9 +2699,11 @@ function HealthServices({ embedReportsOnly = false } = {}) {
             <div className="cc-modal-body">
               <p className="hs-modal-lead">Complete referral information and tracking</p>
               <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-                <span className="hs-pill hs-pill-scheduled">{selectedReferral.referenceId}</span>
+                <span className="hs-pill hs-pill-scheduled">
+                  {selectedReferral.disciplineIncoming ? selectedReferral.referralId : selectedReferral.referenceId}
+                </span>
               </div>
-              {selectedReferral.urgent ? (
+              {!selectedReferral.disciplineIncoming && selectedReferral.urgent ? (
                 <div className="hs-banner-warn" style={{ marginBottom: 16 }}>
                   URGENT REFERRAL — Status: {selectedReferral.status}
                 </div>
@@ -2622,51 +2712,95 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               <dl className="hs-detail-grid">
                 <div className="hs-detail-item">
                   <dt>Name</dt>
-                  <dd>{selectedReferral.student}</dd>
+                  <dd>{selectedReferral.student ?? selectedReferral.studentName}</dd>
                 </div>
                 <div className="hs-detail-item">
                   <dt>Student ID</dt>
                   <dd>{selectedReferral.studentId}</dd>
                 </div>
-                <div className="hs-detail-item">
-                  <dt>Email</dt>
-                  <dd>{selectedReferral.email}</dd>
-                </div>
-                <div className="hs-detail-item">
-                  <dt>Phone</dt>
-                  <dd>{selectedReferral.phone}</dd>
-                </div>
-                <div className="hs-detail-item">
-                  <dt>Program</dt>
-                  <dd>{selectedReferral.program}</dd>
-                </div>
+                {!selectedReferral.disciplineIncoming ? (
+                  <>
+                    <div className="hs-detail-item">
+                      <dt>Email</dt>
+                      <dd>{selectedReferral.email}</dd>
+                    </div>
+                    <div className="hs-detail-item">
+                      <dt>Phone</dt>
+                      <dd>{selectedReferral.phone}</dd>
+                    </div>
+                    <div className="hs-detail-item">
+                      <dt>Program</dt>
+                      <dd>{selectedReferral.program}</dd>
+                    </div>
+                  </>
+                ) : null}
               </dl>
               <p className="hs-modal-section-title">Referral</p>
               <dl className="hs-detail-grid">
                 <div className="hs-detail-item">
                   <dt>From</dt>
-                  <dd>Health Services Office</dd>
+                  <dd>
+                    {selectedReferral.disciplineIncoming
+                      ? labelForOfficeKey(selectedReferral.referringOffice)
+                      : selectedReferral.referringLabel || "Health Services Office"}
+                  </dd>
                 </div>
                 <div className="hs-detail-item">
                   <dt>To</dt>
-                  <dd>{selectedReferral.office}</dd>
+                  <dd>
+                    {selectedReferral.disciplineIncoming
+                      ? "Health Services (HSO)"
+                      : selectedReferral.office}
+                  </dd>
                 </div>
                 <div className="hs-detail-item">
                   <dt>Date</dt>
                   <dd>{selectedReferral.date}</dd>
                 </div>
+                {!selectedReferral.disciplineIncoming ? (
+                  <div className="hs-detail-item">
+                    <dt>Created By</dt>
+                    <dd>{selectedReferral.by}</dd>
+                  </div>
+                ) : null}
                 <div className="hs-detail-item">
-                  <dt>Created By</dt>
-                  <dd>{selectedReferral.by}</dd>
+                  <dt>Status</dt>
+                  <dd>{selectedReferral.status}</dd>
                 </div>
               </dl>
+              {selectedReferral.disciplineIncoming && canReceivingOfficeReviewReferral(selectedReferral.status) ? (
+                <p className="hs-consult-meta" style={{ marginTop: 12 }}>
+                  Approve or decline this referral for Health Services.
+                </p>
+              ) : null}
+              {!selectedReferral.disciplineIncoming &&
+              (isReferralPendingPartnerReview(selectedReferral.status) ||
+                normalizeReferralStatus(selectedReferral.status).includes("pending referring")) ? (
+                <p className="hs-consult-meta" style={{ marginTop: 12 }}>
+                  Waiting for {selectedReferral.office} to approve or decline.
+                </p>
+              ) : null}
               <p className="hs-modal-section-title">Reason</p>
               <p className="hs-consult-meta">{selectedReferral.reason}</p>
-              <p className="hs-modal-section-title">Health observations</p>
-              <p className="hs-consult-meta">{selectedReferral.observations}</p>
-              <p className="hs-modal-section-title">Recommended action</p>
-              <p className="hs-consult-meta">{selectedReferral.recommendedAction}</p>
-              {selectedReferral.attachments?.length ? (
+              {!selectedReferral.disciplineIncoming ? (
+                <>
+                  <p className="hs-modal-section-title">Health observations</p>
+                  <p className="hs-consult-meta">{selectedReferral.observations}</p>
+                  <p className="hs-modal-section-title">Recommended action</p>
+                  <p className="hs-consult-meta">{selectedReferral.recommendedAction}</p>
+                </>
+              ) : null}
+              {selectedReferral.disciplineIncoming && Array.isArray(selectedReferral.evidence) && selectedReferral.evidence.length ? (
+                <>
+                  <p className="hs-modal-section-title">Attachments</p>
+                  <ul style={{ margin: 0, paddingLeft: 18, color: "#334155", fontSize: 14 }}>
+                    {selectedReferral.evidence.map((ev, i) => (
+                      <li key={i}>{ev.name || ev.label || "File"}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              {!selectedReferral.disciplineIncoming && selectedReferral.attachments?.length ? (
                 <>
                   <p className="hs-modal-section-title">Attachments</p>
                   <ul style={{ margin: 0, paddingLeft: 18, color: "#334155", fontSize: 14 }}>
@@ -2676,7 +2810,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   </ul>
                 </>
               ) : null}
-              {selectedReferral.timeline?.length ? (
+              {!selectedReferral.disciplineIncoming && selectedReferral.timeline?.length ? (
                 <>
                   <p className="hs-modal-section-title">Timeline</p>
                   <ul style={{ margin: 0, paddingLeft: 18, color: "#334155", fontSize: 14 }}>
@@ -2689,10 +2823,80 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                 </>
               ) : null}
             </div>
-            <div className="hs-modal-footer">
+            <div className="hs-modal-footer" style={{ justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
               <button type="button" className="cc-btn-secondary hs-modal-btn-cancel" onClick={() => setSelectedReferral(null)}>
                 Close
               </button>
+              {selectedReferral.disciplineIncoming && canReceivingOfficeReviewReferral(selectedReferral.status) ? (
+                <>
+                  <button
+                    type="button"
+                    className="cc-btn-secondary"
+                    onClick={async () => {
+                      try {
+                        if (isSupabaseConfigured() && supabase) {
+                          const { error } = await supabase
+                            .from("discipline_referrals")
+                            .update({
+                              status: DISCIPLINE_REFERRAL_STATUS.DECLINED,
+                              updated_at: new Date().toISOString(),
+                            })
+                            .eq("id", selectedReferral.referralId);
+                          if (error) throw error;
+                        }
+                        setDisciplineIncomingReferrals((prev) =>
+                          prev.map((x) =>
+                            x.referralId === selectedReferral.referralId
+                              ? { ...x, status: DISCIPLINE_REFERRAL_STATUS.DECLINED }
+                              : x,
+                          ),
+                        );
+                        setSelectedReferral((prev) =>
+                          prev ? { ...prev, status: DISCIPLINE_REFERRAL_STATUS.DECLINED } : null,
+                        );
+                        showToast("Referral declined.", { variant: "success" });
+                      } catch (err) {
+                        showToast(err?.message || "Could not update referral.", { variant: "error" });
+                      }
+                    }}
+                  >
+                    Decline
+                  </button>
+                  <button
+                    type="button"
+                    className="cc-btn-primary"
+                    onClick={async () => {
+                      try {
+                        if (isSupabaseConfigured() && supabase) {
+                          const { error } = await supabase
+                            .from("discipline_referrals")
+                            .update({
+                              status: DISCIPLINE_REFERRAL_STATUS.APPROVED,
+                              updated_at: new Date().toISOString(),
+                            })
+                            .eq("id", selectedReferral.referralId);
+                          if (error) throw error;
+                        }
+                        setDisciplineIncomingReferrals((prev) =>
+                          prev.map((x) =>
+                            x.referralId === selectedReferral.referralId
+                              ? { ...x, status: DISCIPLINE_REFERRAL_STATUS.APPROVED }
+                              : x,
+                          ),
+                        );
+                        setSelectedReferral((prev) =>
+                          prev ? { ...prev, status: DISCIPLINE_REFERRAL_STATUS.APPROVED } : null,
+                        );
+                        showToast("Referral approved.", { variant: "success" });
+                      } catch (err) {
+                        showToast(err?.message || "Could not update referral.", { variant: "error" });
+                      }
+                    }}
+                  >
+                    Approve
+                  </button>
+                </>
+              ) : null}
             </div>
           </>
         ) : null}
@@ -2737,18 +2941,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   <dd>{selectedDocRequest.status}</dd>
                 </div>
                 <div className="hs-detail-item">
-                  <dt>Student</dt>
-                  <dd>{selectedDocRequest.student}</dd>
-                </div>
-                <div className="hs-detail-item">
-                  <dt>Student ID</dt>
-                  <dd>{selectedDocRequest.sid}</dd>
-                </div>
-                <div className="hs-detail-item">
-                  <dt>Program</dt>
-                  <dd>{selectedDocRequest.program}</dd>
-                </div>
-                <div className="hs-detail-item">
                   <dt>{selectedDocRequest.direction === "incoming" ? "From office" : "To office"}</dt>
                   <dd>{labelForOfficeKey(selectedDocRequest.partnerOffice)}</dd>
                 </div>
@@ -2785,13 +2977,25 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                 )}
                 {selectedDocRequest.direction === "incoming" ? (
                   <div style={{ marginTop: 12 }}>
+                    {isDocRequestPendingApproval(selectedDocRequest.status) ? (
+                      <p className="hs-consult-meta" style={{ marginBottom: 8 }}>
+                        Approve this request first; then you can attach the file for the requesting office.
+                      </p>
+                    ) : null}
+                    {isDocRequestDeclined(selectedDocRequest.status) ? (
+                      <p className="hs-consult-meta" style={{ marginBottom: 8 }}>
+                        This request was declined — uploads are disabled.
+                      </p>
+                    ) : null}
                     <label htmlFor="hso-doc-accept-upload" style={{ display: "block", fontWeight: 600 }}>
                       Add attachment (your office)
                     </label>
                     <input
                       id="hso-doc-accept-upload"
                       type="file"
-                      disabled={docAcceptingUploadBusy}
+                      disabled={
+                        docAcceptingUploadBusy || !canReceivingOfficeUploadDoc(selectedDocRequest.status)
+                      }
                       onChange={handleHsoAcceptingOfficeUpload}
                       style={{ marginTop: 8, width: "100%", maxWidth: 360 }}
                     />
@@ -2808,11 +3012,73 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                 {selectedDocRequest.notes}
               </div>
             </div>
-            <div className="hs-modal-footer" style={{ justifyContent: "space-between" }}>
+            <div className="hs-modal-footer" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
               <span className="hs-stat-meta">Requested by: {selectedDocRequest.requestedBy}</span>
-              <button type="button" className="cc-btn-secondary hs-modal-btn-cancel" onClick={() => setSelectedDocRequest(null)}>
-                Close
-              </button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {selectedDocRequest.direction === "incoming" && isDocRequestPendingApproval(selectedDocRequest.status) ? (
+                  <>
+                    <button
+                      type="button"
+                      className="cc-btn-secondary"
+                      onClick={async () => {
+                        try {
+                          if (isSupabaseConfigured() && supabase) {
+                            const { error } = await supabase
+                              .from("inter_office_document_requests")
+                              .update({ status: INTER_OFFICE_DOC_STATUS.DECLINED, updated_at: new Date().toISOString() })
+                              .eq("id", selectedDocRequest.id);
+                            if (error) throw error;
+                          }
+                          setDocRequestsRows((prev) =>
+                            prev.map((d) =>
+                              d.id === selectedDocRequest.id ? { ...d, status: INTER_OFFICE_DOC_STATUS.DECLINED } : d,
+                            ),
+                          );
+                          setSelectedDocRequest((prev) =>
+                            prev ? { ...prev, status: INTER_OFFICE_DOC_STATUS.DECLINED } : null,
+                          );
+                          showToast("Request declined.", { variant: "success" });
+                        } catch (err) {
+                          showToast(err?.message || "Could not update request.", { variant: "error" });
+                        }
+                      }}
+                    >
+                      Decline
+                    </button>
+                    <button
+                      type="button"
+                      className="cc-btn-primary"
+                      onClick={async () => {
+                        try {
+                          if (isSupabaseConfigured() && supabase) {
+                            const { error } = await supabase
+                              .from("inter_office_document_requests")
+                              .update({ status: INTER_OFFICE_DOC_STATUS.APPROVED, updated_at: new Date().toISOString() })
+                              .eq("id", selectedDocRequest.id);
+                            if (error) throw error;
+                          }
+                          setDocRequestsRows((prev) =>
+                            prev.map((d) =>
+                              d.id === selectedDocRequest.id ? { ...d, status: INTER_OFFICE_DOC_STATUS.APPROVED } : d,
+                            ),
+                          );
+                          setSelectedDocRequest((prev) =>
+                            prev ? { ...prev, status: INTER_OFFICE_DOC_STATUS.APPROVED } : null,
+                          );
+                          showToast("Request approved. You can now attach the file.", { variant: "success" });
+                        } catch (err) {
+                          showToast(err?.message || "Could not update request.", { variant: "error" });
+                        }
+                      }}
+                    >
+                      Approve
+                    </button>
+                  </>
+                ) : null}
+                <button type="button" className="cc-btn-secondary hs-modal-btn-cancel" onClick={() => setSelectedDocRequest(null)}>
+                  Close
+                </button>
+              </div>
             </div>
           </>
         ) : null}

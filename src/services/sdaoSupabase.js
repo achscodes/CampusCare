@@ -2,6 +2,9 @@
  * SDAO — load / map / write rows for scholarship module tables.
  */
 
+import { DISCIPLINE_REFERRAL_STATUS } from "../utils/interOfficeWorkflow";
+import { rowToReferral } from "../utils/disciplineOfficeMappers";
+
 function formatShortDate(d) {
   if (!d) return "";
   const dt = d instanceof Date ? d : new Date(d);
@@ -132,6 +135,7 @@ export function mapSdaoReferralRow(r) {
   const createdLabel = created ? formatShortDate(created) : "—";
 
   return {
+    referralDbId: String(r.id),
     refId: r.reference_id?.trim() || `REF-${String(r.id).replace(/-/g, "").slice(0, 12).toUpperCase()}`,
     student: r.student_name,
     studentId: r.student_id,
@@ -156,7 +160,7 @@ export function mapSdaoReferralRow(r) {
 
 /** @param {import("@supabase/supabase-js").SupabaseClient} supabase */
 export async function loadSdaoFromSupabase(supabase) {
-  const [bRes, aRes, cRes, dRes, rRes] = await Promise.all([
+  const [bRes, aRes, cRes, dRes, rRes, discRes] = await Promise.all([
     supabase.from("sdao_beneficiaries").select("*").order("created_at", { ascending: false }),
     supabase.from("sdao_scholarship_applications").select("*").order("created_at", { ascending: false }),
     supabase.from("sdao_clearance_records").select("*").order("created_at", { ascending: false }),
@@ -166,9 +170,10 @@ export async function loadSdaoFromSupabase(supabase) {
       .or("requesting_office.eq.development,target_office.eq.development")
       .order("created_at", { ascending: false }),
     supabase.from("sdao_referrals").select("*").order("created_at", { ascending: false }),
+    supabase.from("discipline_referrals").select("*").eq("target_office", "development").order("referral_date", { ascending: false }),
   ]);
 
-  const err = bRes.error || aRes.error || cRes.error || dRes.error || rRes.error || null;
+  const err = bRes.error || aRes.error || cRes.error || dRes.error || rRes.error || discRes.error || null;
   if (err) {
     return {
       ok: false,
@@ -178,6 +183,7 @@ export async function loadSdaoFromSupabase(supabase) {
       clearanceRecords: [],
       documentRequests: [],
       referrals: [],
+      disciplineReferralsIncoming: [],
     };
   }
 
@@ -189,6 +195,7 @@ export async function loadSdaoFromSupabase(supabase) {
     clearanceRecords: (cRes.data || []).map(mapClearanceRow),
     documentRequests: (dRes.data || []).map(mapSdaoDocumentRequestRow),
     referrals: (rRes.data || []).map(mapSdaoReferralRow),
+    disciplineReferralsIncoming: (discRes.data || []).map(rowToReferral),
   };
 }
 
@@ -268,8 +275,8 @@ export async function insertSdaoReferral(supabase, form, userLabel) {
     development_details: form.referralNotes?.trim() || "",
     recommended_action: "",
     urgency: form.urgency || "normal",
-    status: "in-progress",
-    status_detail: "Referral sent",
+    status: DISCIPLINE_REFERRAL_STATUS.PENDING_PARTNER,
+    status_detail: "Pending partner review",
     created_by: userLabel || "SDAO",
     attachments: [],
     timeline: [

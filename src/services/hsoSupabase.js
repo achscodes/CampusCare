@@ -3,6 +3,7 @@
  */
 
 import { interOfficeRowToHsoDocumentRequest } from "./interOfficeDocumentRequests";
+import { rowToReferral } from "../utils/disciplineOfficeMappers";
 
 function visitTypeLabel(raw) {
   const s = String(raw || "").toLowerCase();
@@ -32,7 +33,7 @@ function isoFromDateField(v) {
 
 /** @param {import("@supabase/supabase-js").SupabaseClient} supabase */
 export async function loadHsoFromSupabase(supabase) {
-  const [cRes, rRes, aRes, refRes, dRes] = await Promise.all([
+  const [cRes, rRes, aRes, refRes, dRes, discRes] = await Promise.all([
     supabase.from("health_consultations").select("*").order("created_at", { ascending: false }),
     supabase.from("medical_records").select("*").order("updated_at", { ascending: false }),
     supabase.from("health_appointments").select("*").order("appointment_date", { ascending: false }),
@@ -42,10 +43,11 @@ export async function loadHsoFromSupabase(supabase) {
       .select("*")
       .or("requesting_office.eq.health,target_office.eq.health")
       .order("created_at", { ascending: false }),
+    supabase.from("discipline_referrals").select("*").eq("target_office", "health").order("referral_date", { ascending: false }),
   ]);
 
   const err =
-    cRes.error || rRes.error || aRes.error || refRes.error || dRes.error || null;
+    cRes.error || rRes.error || aRes.error || refRes.error || dRes.error || discRes.error || null;
   if (err) {
     return {
       ok: false,
@@ -55,6 +57,7 @@ export async function loadHsoFromSupabase(supabase) {
       appointments: [],
       referrals: [],
       documents: [],
+      disciplineReferralsIncoming: [],
     };
   }
 
@@ -66,6 +69,7 @@ export async function loadHsoFromSupabase(supabase) {
     appointments: (aRes.data || []).map(mapAppointmentRow),
     referrals: (refRes.data || []).map(mapReferralRow),
     documents: (dRes.data || []).map(interOfficeRowToHsoDocumentRequest),
+    disciplineReferralsIncoming: (discRes.data || []).map(rowToReferral),
   };
 }
 
@@ -169,6 +173,7 @@ export function mapReferralRow(r) {
     email: r.student_email?.trim() || "—",
     phone: r.student_phone?.trim() || "—",
     office: r.receiving_office?.trim() || "—",
+    referringLabel: r.referring_office?.trim() || "Health Services Office",
     reason: r.reason?.trim() || "—",
     observations: r.health_observations?.trim() || "—",
     recommendedAction: r.recommended_action?.trim() || "—",

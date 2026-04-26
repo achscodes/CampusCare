@@ -16,26 +16,22 @@ export function formatAuthError(error) {
 
   if (/database error querying schema|querying schema/i.test(msg)) {
     return (
-      "Supabase Auth could not read the database (this usually is not fixed by app code). " +
-      "Confirm Settings → API: Project URL and anon key match your .env.local, then restart npm run dev. " +
-      "Try Authentication → Add user (new email/password). If every user fails, use Project settings → Restart, check Logs → Postgres, or support.supabase.com. " +
-      "If you only used SQL-seeded logins, delete those users and recreate them in Authentication so identities are valid."
+      "We’re having trouble accessing your account right now. " +
+      "Please try again in a moment. If the issue continues, contact support."
     );
   }
 
   if (/No API key found|apikey.*header|No `apikey`/i.test(msg)) {
     return (
-      "Supabase API key is missing or not loaded. " +
-      "Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local (use the anon/public key from Dashboard → Settings → API), " +
-      "restart npm run dev, and run a fresh production build if you deploy."
+      "We couldn’t complete sign-in due to a configuration issue. " +
+      "Please refresh and try again. If it still fails, contact support."
     );
   }
 
   if (/confirmation email|error sending.*email|send.*confirm|email.*could not be sent/i.test(msg)) {
     return (
-      "Confirmation email could not be sent. Add your redirect URLs in Supabase (Auth → URL Configuration), " +
-      "including http://localhost:5173/signin. Check email rate limits or custom SMTP. " +
-      "For local dev, disable \"Confirm email\" under Auth → Providers → Email."
+      "We couldn’t send a confirmation email right now. " +
+      "Please try again later."
     );
   }
 
@@ -44,7 +40,7 @@ export function formatAuthError(error) {
   }
   if (/invalid login credentials|invalid email or password/i.test(msg)) {
     return (
-      "Invalid email or password. Use an account under your project’s Authentication → Users (sign up in the app or add a user in the dashboard). Your supabase.com login is not the same as an app user."
+      "Invalid email or password. Please check your credentials and try again."
     );
   }
   if (/email not confirmed/i.test(msg)) {

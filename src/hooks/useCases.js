@@ -8,7 +8,7 @@ import {
   rowToCase,
 } from "../utils/disciplineCaseMapper";
 
-const CASES_KEY = "campuscare_cases_v1";
+const CASES_KEY = "campuscare_cases_v2";
 
 function parseCaseIndex(id) {
   const parts = String(id).split("-");
@@ -96,6 +96,8 @@ export function useCases(initialCases = []) {
       priority = "medium",
       officer = "Discipline Office",
       program = "",
+      school = "",
+      offenseType = "",
       reportedBy = "",
     }) => {
       const pri = getDefaultPriority(priority);
@@ -140,6 +142,8 @@ export function useCases(initialCases = []) {
           date,
           officer: assignOfficer,
           program: String(program).trim(),
+          school: String(school || "").trim(),
+          offenseType: String(offenseType || "").trim(),
           description: mergedDescription,
           evidence,
           reportedAt: iso,
@@ -158,6 +162,9 @@ export function useCases(initialCases = []) {
         evidence,
         priority: pri,
         officer: String(reportedBy).trim() || officer,
+        program: String(program || "").trim(),
+        school: String(school || "").trim(),
+        offenseType: String(offenseType || "").trim(),
       });
       if (!supabase) throw new Error("Supabase client is not available.");
       const { data, error } = await supabase.from("discipline_cases").insert(row).select().single();

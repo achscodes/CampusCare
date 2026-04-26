@@ -67,6 +67,14 @@ export function documentRequestToInsert(id, payload) {
 /** @param {Record<string, unknown>} row */
 export function rowToReferral(row) {
   const evidence = Array.isArray(row.evidence) ? row.evidence : [];
+  const referringOffice = String(row.referring_office ?? "discipline").toLowerCase();
+  let targetOffice = String(row.target_office ?? "").toLowerCase();
+  if (!targetOffice) {
+    const rt = String(row.referral_type ?? "").toUpperCase();
+    if (rt.includes("HSO")) targetOffice = "health";
+    else if (rt.includes("SDAO")) targetOffice = "development";
+    else if (rt.includes("DO")) targetOffice = "discipline";
+  }
   return {
     referralId: String(row.id ?? ""),
     studentName: String(row.student_name ?? ""),
@@ -76,6 +84,8 @@ export function rowToReferral(row) {
     status: String(row.status ?? ""),
     date: formatCaseDateFromIso(row.referral_date),
     evidence,
+    referringOffice,
+    targetOffice,
   };
 }
 
@@ -89,6 +99,8 @@ export function referralToInsert(id, payload) {
     status: payload.status || "Pending",
     referral_date: new Date().toISOString(),
     evidence: Array.isArray(payload.evidence) ? payload.evidence : [],
+    referring_office: String(payload.referringOffice || "discipline").toLowerCase(),
+    target_office: String(payload.targetOffice || "").toLowerCase(),
   };
 }
 
@@ -104,6 +116,14 @@ export function rowToSanction(row) {
     dueDate: String(row.due_date ?? ""),
     notes: String(row.notes ?? ""),
     evidence,
+    hours: row.hours != null && row.hours !== "" ? Number(row.hours) : null,
+    correspondingOffice: String(row.corresponding_office ?? ""),
+    correspondingOfficeOther: String(row.corresponding_office_other ?? ""),
+    communityServiceDetail: String(row.community_service_detail ?? ""),
+    completionDate: String(row.completion_date ?? ""),
+    program: String(row.program ?? ""),
+    school: String(row.school ?? ""),
+    offensesSummary: String(row.offenses_summary ?? ""),
   };
 }
 
@@ -117,6 +137,14 @@ export function sanctionToInsert(id, payload) {
     due_date: (payload.dueDate || "").trim(),
     notes: (payload.notes || "").trim(),
     evidence: Array.isArray(payload.evidence) ? payload.evidence : [],
+    hours: payload.hours != null && payload.hours !== "" ? Number(payload.hours) : null,
+    corresponding_office: String(payload.correspondingOffice || "").trim(),
+    corresponding_office_other: String(payload.correspondingOfficeOther || "").trim(),
+    community_service_detail: String(payload.communityServiceDetail || "").trim(),
+    completion_date: String(payload.completionDate || "").trim(),
+    program: String(payload.program || "").trim(),
+    school: String(payload.school || "").trim(),
+    offenses_summary: String(payload.offensesSummary || "").trim(),
   };
 }
 

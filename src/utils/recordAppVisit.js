@@ -26,7 +26,14 @@ export async function recordAppVisit(client, pathKey = "/") {
   lastPathKey = key;
   lastRecordedAt = now;
 
-  const { error } = await client.from("landing_page_visits").insert({});
+  const insert = client.from("landing_page_visits").insert({});
+  const timeoutMs = 6000;
+  const { error } = await Promise.race([
+    insert,
+    new Promise((resolve) => {
+      window.setTimeout(() => resolve({ error: null }), timeoutMs);
+    }),
+  ]);
   if (error && import.meta.env.DEV) {
     console.warn("[CampusCare] recordAppVisit failed:", error.message);
   }

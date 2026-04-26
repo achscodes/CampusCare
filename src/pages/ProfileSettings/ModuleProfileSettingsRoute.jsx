@@ -17,10 +17,10 @@ import {
   PROFILE_SETTINGS_PATH_HEALTH,
   profileSettingsPathForSessionOffice,
 } from "../../utils/profileSettingsRoutes";
-import { DisciplineOfficeTopBar } from "../DODashboard/DO";
+import { readCampusCareSession } from "../../utils/campusCareSession";
+import { DisciplineOfficeTopBar } from "../DODashboard/DisciplineOfficeTopBar";
 import { SDAO_NAV_ITEMS, SDAO_NOTIFICATIONS } from "../SDAO/SDAO";
 import { HEALTH_NAV_ITEMS, HS_NOTIFICATIONS } from "../HealthServices/HealthServices";
-import "../DODashboard/DO.css";
 import "../SDAO/SDAO.css";
 import "../HealthServices/HealthServices.css";
 
@@ -32,11 +32,7 @@ export default function ModuleProfileSettingsRoute({ variant }) {
   const [logoutOpen, setLogoutOpen] = useState(false);
 
   const session = useMemo(() => {
-    try {
-      return JSON.parse(window.localStorage.getItem("campuscare_session_v1") || "null");
-    } catch {
-      return null;
-    }
+    return readCampusCareSession();
   }, []);
 
   const sessionOffice = session?.office;

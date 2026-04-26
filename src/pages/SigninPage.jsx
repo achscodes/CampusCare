@@ -11,6 +11,7 @@ import { syncCampusCareSessionFromSupabaseUser } from "../utils/campusCareAuth";
 import { getHomeRouteForOffice } from "../utils/officeRoutes";
 import { getSuperAdminRouteForOffice, isSuperAdminSession } from "../utils/superAdmin";
 import { showToast } from "../utils/toast";
+import { clearCampusCareSession, writeCampusCareSession } from "../utils/campusCareSession";
 
 const SigninPage = () => {
   const navigate = useNavigate();
@@ -77,7 +78,7 @@ const SigninPage = () => {
 
       if (!sync.ok) {
         await supabase.auth.signOut();
-        window.localStorage.removeItem("campuscare_session_v1");
+        clearCampusCareSession();
         setSubmitting(false);
         setFormError(
           sync.accountStatus === "rejected"
@@ -125,7 +126,7 @@ const SigninPage = () => {
       return;
     }
 
-    window.localStorage.setItem("campuscare_session_v1", JSON.stringify(session));
+    writeCampusCareSession(session, rememberMe);
 
     const dest = isSuperAdminSession(session) ? getSuperAdminRouteForOffice(office) : getHomeRouteForOffice(office);
     showToast("Signed in successfully.", { variant: "success" });

@@ -111,6 +111,49 @@ export function validateStrictNumericStudentId(value, label = "Student ID") {
   return null;
 }
 
+/** Discipline Office / campus student IDs: 2021–2024, hyphen, then 6–7 digit unique number. */
+export const DO_STUDENT_ID_ALLOWED_YEARS = ["2021", "2022", "2023", "2024"];
+
+/**
+ * Digits only (for comparing IDs that may be stored with or without a hyphen).
+ * @param {string} value
+ */
+export function studentIdDigitsOnly(value) {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+/**
+ * Formats input as YYYY-XXXXXX… while typing: after four digits, inserts "-" so entry continues in the unique-ID segment.
+ * @param {string} value
+ */
+export function sanitizeDoStudentIdInput(value) {
+  const digits = studentIdDigitsOnly(value).slice(0, 11); /* 4 + max 7 */
+  if (digits.length === 0) return "";
+  if (digits.length <= 4) return digits;
+  const y = digits.slice(0, 4);
+  const u = digits.slice(4);
+  return `${y}-${u}`;
+}
+
+/**
+ * @param {string} value
+ * @param {string} [label]
+ * @returns {string | null}
+ */
+export function validateDoStudentId(value, label = "Student ID") {
+  const t = String(value ?? "").trim();
+  if (!t) return `${label} is required.`;
+  const m = t.match(/^(\d{4})-(\d{6,7})$/);
+  if (!m) {
+    return `${label} must be YYYY-XXXXXX or YYYY-XXXXXXX (year 2021–2024, then 6–7 digits). Example: 2023-172077.`;
+  }
+  const [, year] = m;
+  if (!DO_STUDENT_ID_ALLOWED_YEARS.includes(year)) {
+    return `${label} year must be 2021, 2022, 2023, or 2024.`;
+  }
+  return null;
+}
+
 /**
  * UI helper: restrict name input as the user types.
  * Keeps Unicode letters, spaces, apostrophes, periods, and hyphens.

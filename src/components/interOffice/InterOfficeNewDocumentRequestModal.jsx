@@ -1,37 +1,23 @@
 import { useMemo, useState } from "react";
-import ProgramSelect from "../common/ProgramSelect";
-import { NU_PROGRAM_OPTIONS } from "../../data/nuPrograms";
 import { getDocumentRequestTargetOptionsForOffice, normalizeOfficeKey } from "../../constants/documentRequestAccess";
-import {
-  INTER_OFFICE_DOCUMENT_TYPES_BY_TARGET,
-  INTER_OFFICE_DOC_REQ_PRIORITY_OPTIONS,
-} from "../../constants/interOfficeDocumentTypes";
-import { sanitizeDigitsOnlyInput, sanitizePersonNameInput } from "../../utils/signupFieldValidation";
+import { INTER_OFFICE_DOCUMENT_TYPES_BY_TARGET } from "../../constants/interOfficeDocumentTypes";
 import "../../pages/DODashboard/DO.css";
 import "./InterOfficeNewDocumentRequestModal.css";
 
 const INITIAL = {
-  studentName: "",
-  studentId: "",
-  program: "",
   targetOffice: "",
   documentType: "",
   documentTypeOther: "",
-  priority: "medium",
   description: "",
 };
 
 /**
  * @typedef {object} InterOfficeNewDocumentRequestPayload
- * @property {string} studentName
- * @property {string} studentId
- * @property {string} program
  * @property {string} targetOffice
  * @property {string} documentType
  * @property {string} documentTypeOther
- * @property {string} priority
  * @property {string} description
- * @property {File} evidenceFile
+ * @property {File | null} evidenceFile
  */
 
 export default function InterOfficeNewDocumentRequestModal({
@@ -58,18 +44,12 @@ export default function InterOfficeNewDocumentRequestModal({
   const runSubmit = async (e) => {
     e.preventDefault();
     const next = {};
-    const sname = form.studentName.trim();
-    const sid = form.studentId.trim();
-    if (!sname) next.studentName = "Student name is required.";
-    if (!sid) next.studentId = "Student ID is required.";
-    if (!form.program.trim()) next.program = "Program is required.";
     if (!form.targetOffice.trim()) next.targetOffice = "Select which office should fulfill this request.";
     if (!form.documentType) next.documentType = "Document Type is required.";
     if (String(form.documentType).toLowerCase() === "other" && !form.documentTypeOther?.trim()) {
       next.documentTypeOther = "Please specify the document type.";
     }
     if (!form.description.trim()) next.description = "Description is required.";
-    if (!evidenceFile) next.evidence = "Attachment is required.";
 
     setErrors(next);
     setSubmitError(null);
@@ -77,13 +57,13 @@ export default function InterOfficeNewDocumentRequestModal({
 
     try {
       await onSubmit({
-        studentName: sname,
-        studentId: sid,
-        program: form.program.trim(),
+        studentName: "N/A",
+        studentId: "N/A",
+        program: "",
         targetOffice: form.targetOffice.trim(),
         documentType: form.documentType,
         documentTypeOther: form.documentTypeOther?.trim() || "",
-        priority: form.priority,
+        priority: "medium",
         description: form.description.trim(),
         evidenceFile,
       });
@@ -117,64 +97,7 @@ export default function InterOfficeNewDocumentRequestModal({
 
         <form className="inter-office-doc-modal__form" onSubmit={runSubmit} noValidate>
           <div className="inter-office-doc-modal__body cc-modal-body">
-            <p style={{ color: "#64748b", fontSize: 13, lineHeight: 1.45, margin: "0 0 12px" }}>
-              Admin-to-admin only (HSO, DO, and SDAO): enter the student or case this request supports. Attachments are
-              required before submitting.
-            </p>
-            <div className="cc-modal-row">
-              <div className="cc-field">
-                <div className="cc-label">Student name</div>
-                <input
-                  className={`cc-input${errors.studentName ? " cc-input-error" : ""}`}
-                  value={form.studentName}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, studentName: sanitizePersonNameInput(e.target.value) }))
-                  }
-                  placeholder="As it should appear on the document"
-                  aria-invalid={Boolean(errors.studentName)}
-                />
-                {errors.studentName ? (
-                  <div className="cc-form-error" role="alert">
-                    {errors.studentName}
-                  </div>
-                ) : null}
-              </div>
-              <div className="cc-field">
-                <div className="cc-label">Student ID</div>
-                <input
-                  className={`cc-input${errors.studentId ? " cc-input-error" : ""}`}
-                  value={form.studentId}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, studentId: sanitizeDigitsOnlyInput(e.target.value) }))
-                  }
-                  placeholder="e.g., 2023-10234"
-                  aria-invalid={Boolean(errors.studentId)}
-                />
-                {errors.studentId ? (
-                  <div className="cc-form-error" role="alert">
-                    {errors.studentId}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="cc-field" style={{ marginTop: 12 }}>
-              <div className="cc-label">Program</div>
-              <ProgramSelect
-                error={Boolean(errors.program)}
-                value={form.program}
-                onChange={(v) => setForm((p) => ({ ...p, program: v }))}
-                options={NU_PROGRAM_OPTIONS}
-                placeholder="Select program / course"
-              />
-              {errors.program ? (
-                <div className="cc-form-error" role="alert">
-                  {errors.program}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="cc-field" style={{ marginTop: 12 }}>
+            <div className="cc-field">
               <div className="cc-label">Request document from</div>
               <select
                 className={`cc-input${errors.targetOffice ? " cc-input-error" : ""}`}
@@ -232,21 +155,6 @@ export default function InterOfficeNewDocumentRequestModal({
                   </div>
                 ) : null}
               </div>
-
-              <div className="cc-field">
-                <div className="cc-label">Priority</div>
-                <select
-                  className="cc-input"
-                  value={form.priority}
-                  onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))}
-                >
-                  {INTER_OFFICE_DOC_REQ_PRIORITY_OPTIONS.map((p) => (
-                    <option value={p} key={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </div>
             </div>
 
             {String(form.documentType).toLowerCase() === "other" ? (
@@ -283,21 +191,15 @@ export default function InterOfficeNewDocumentRequestModal({
             </div>
 
             <div className="cc-field" style={{ marginTop: 12 }}>
-              <div className="cc-label">Attachment</div>
+              <div className="cc-label">Attachment (optional)</div>
               <input
-                className={`cc-input${errors.evidence ? " cc-input-error" : ""}`}
+                className="cc-input"
                 type="file"
                 onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)}
-                aria-invalid={Boolean(errors.evidence)}
               />
               {evidenceFile ? (
                 <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>
                   Selected: <span style={{ color: "#0f172a" }}>{evidenceFile.name}</span>
-                </div>
-              ) : null}
-              {errors.evidence ? (
-                <div className="cc-form-error" role="alert">
-                  {errors.evidence}
                 </div>
               ) : null}
             </div>
