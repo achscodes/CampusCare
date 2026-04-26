@@ -2653,6 +2653,7 @@ export function CaseConferencePage() {
                   nextErrors.caseId = caseIdErr;
                 } else {
                   setCaseIdError("");
+                  setSelectedConference(null);
                 }
 
                 // Resolve matched case
@@ -2740,7 +2741,7 @@ export function CaseConferencePage() {
                 }
               }}
             >
-              <div className="do-modal-body-scroll do-form-stack">
+              <div className="do-modal-body-scroll do-form-stack" style={{ maxHeight: "calc(90vh - 200px)", overflowY: "auto" }}>
                 {/* ── Case ID search input (replaces dropdown) ── */}
                 <div className="do-form-cell" style={{ marginBottom: 0 }}>
                   <label className="do-form-label" htmlFor="sch-case">
@@ -3022,7 +3023,10 @@ export function CaseConferencePage() {
                   <button
                     className="cc-btn-secondary"
                     type="button"
-                    onClick={() => openReschedule(selectedConference)}
+                    onClick={() => {
+                      setSelectedConference(null);
+                      openReschedule(selectedConference);
+                    }}
                   >
                     Reschedule
                   </button>
