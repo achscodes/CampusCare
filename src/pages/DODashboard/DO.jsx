@@ -87,6 +87,7 @@ import {
   buildReportsAnalytics,
   exportAnalyticsCsv,
 } from "../../utils/reportsAnalytics";
+import { downloadDisciplineReportsPdf } from "../../reports/pdf/downloadDisciplineReportsPdf";
 import { fileToEvidenceItem } from "../../utils/disciplineEvidence";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import { appendEvidenceToInterOfficeRequest } from "../../services/interOfficeDocumentEvidence";
@@ -5511,6 +5512,7 @@ function PieSliceLabel({ name, value }) {
 export function ReportsPage({ standalone = false } = {}) {
   const [period, setPeriod] = useState("semester");
   const [showGraphs, setShowGraphs] = useState(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
 
   const { cases, loading, fetchError } = useCases([]);
 
@@ -5539,7 +5541,19 @@ export function ReportsPage({ standalone = false } = {}) {
     URL.revokeObjectURL(url);
   };
 
-  const handleExportPdf = () => {
+  const handleExportPdf = async () => {
+    try {
+      setPdfExporting(true);
+      await downloadDisciplineReportsPdf(analytics, periodLabel, period);
+      showToast("PDF downloaded.", { variant: "success" });
+    } catch (err) {
+      showToast(err?.message || "Could not generate PDF.", { variant: "error" });
+    } finally {
+      setPdfExporting(false);
+    }
+  };
+
+  const handlePrintBrowser = () => {
     window.print();
   };
 
@@ -5580,11 +5594,19 @@ export function ReportsPage({ standalone = false } = {}) {
                 </select>
               </div>
               <div className="cc-page-actions">
-                <button className="cc-btn-primary" type="button" onClick={handleExportPdf}>
-                  Export PDF
+                <button
+                  className="cc-btn-primary"
+                  type="button"
+                  onClick={handleExportPdf}
+                  disabled={loading || pdfExporting}
+                >
+                  {pdfExporting ? "Generating PDF…" : "Export PDF"}
                 </button>
                 <button className="cc-btn-secondary" type="button" onClick={handleExportExcel}>
                   Export Excel
+                </button>
+                <button className="cc-btn-secondary" type="button" onClick={handlePrintBrowser}>
+                  Print via browser
                 </button>
               </div>
             </div>
