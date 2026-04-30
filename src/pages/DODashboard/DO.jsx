@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -93,6 +93,7 @@ import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import { appendEvidenceToInterOfficeRequest } from "../../services/interOfficeDocumentEvidence";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
 import { DisciplineOfficeTopBar } from "./DisciplineOfficeTopBar";
+import "../../components/common/ProgramSelect.css";
 import "./DO.css";
 
 export { DisciplineOfficeTopBar };
@@ -109,27 +110,22 @@ const SCHOOL_PROGRAM_MAP = {
   "SECA": [
     "BS Architecture",
     "BS Civil Engineering",
-    "BS Computer Science with specialization in Machine Learning",
-    "BS Information Technology with specialization in Mobile and Web Applications",
+    "BS Computer Science",
+    "BS Information Technology",
   ],
   "SBMA": [
     "BS Accountancy",
     "BS Management Accounting",
-    "BS Business Administration (BSBA) major in Financial Management",
+    "BS Business Administration major in Financial Management",
     "BSBA major in Marketing Management",
     "BSBA major in Human Resource Management",
+    "BS Hospitality Management",
+    "BS Tourism Management",
   ],
   "SASE": [
     "AB Communication",
     "BS Psychology",
-    "BS Nursing",
-    "Bachelor of Science in Pharmacy",
-    "Bachelor of Physical Education (BPEd)",
-    "BS Hospitality Management",
-    "BS Tourism Management",
-    "STEM: Science, Technology, Engineering, and Mathematics",
-    "ABM: Accountancy, Business, and Management",
-    "HUMSS: Humanities and Social Sciences",
+    "Bachelor of Physical Education",
   ],
 };
 
@@ -318,6 +314,7 @@ function DOEvidenceViewer({ evidence }) {
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedCase, setSelectedCase] = useState(null);
   const [isNewCaseOpen, setIsNewCaseOpen] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState(null);
@@ -349,6 +346,14 @@ export function DashboardPage() {
   useEffect(() => {
     setCaseModalError(null);
   }, [selectedCase]);
+
+  useEffect(() => {
+    if (searchParams.get("newCase") !== "1") return;
+    setIsNewCaseOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("newCase");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const stats = useMemo(() => {
     const newCount = cases.filter((c) => c.status === "new").length;
@@ -1113,6 +1118,7 @@ const CM_StatusBadge = ({ status }) => (
 );
 
 export function CaseManagementPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState("all");
   const [search, setSearch] = useState("");
   const [selectedCase, setSelectedCase] = useState(null);
@@ -1148,6 +1154,14 @@ export function CaseManagementPage() {
   useEffect(() => {
     setCaseModalError(null);
   }, [selectedCase]);
+
+  useEffect(() => {
+    if (searchParams.get("newCase") !== "1") return;
+    setIsNewCaseOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("newCase");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const filtered = useMemo(() => {
     return cases.filter((c) => {
@@ -5510,6 +5524,7 @@ function PieSliceLabel({ name, value }) {
  * When true, renders reports main content only (no DO sidebar / top bar) for Super Admin embed.
  */
 export function ReportsPage({ standalone = false } = {}) {
+  const navigate = useNavigate();
   const [period, setPeriod] = useState("semester");
   const [showGraphs, setShowGraphs] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
@@ -5551,10 +5566,6 @@ export function ReportsPage({ standalone = false } = {}) {
     } finally {
       setPdfExporting(false);
     }
-  };
-
-  const handlePrintBrowser = () => {
-    window.print();
   };
 
   /** Omit 0% slices so the donut has no degenerate arcs and labels cannot collide. */
@@ -5604,9 +5615,6 @@ export function ReportsPage({ standalone = false } = {}) {
                 </button>
                 <button className="cc-btn-secondary" type="button" onClick={handleExportExcel}>
                   Export Excel
-                </button>
-                <button className="cc-btn-secondary" type="button" onClick={handlePrintBrowser}>
-                  Print via browser
                 </button>
               </div>
             </div>

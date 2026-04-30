@@ -334,7 +334,10 @@ export function buildReportsAnalytics(cases, periodId = "semester") {
     if (sch && schoolCounts[sch] !== undefined) schoolCounts[sch] += 1;
   }
   const schoolStats = schoolLabels.map((school) => ({ school, count: schoolCounts[school] }));
-  const topSchool = [...schoolStats].sort((a, b) => b.count - a.count)[0] || { school: "—", count: 0 };
+  const bestSchool = [...schoolStats].sort((a, b) => b.count - a.count)[0] || { school: "—", count: 0 };
+  /** When all schools have zero cases, sort order is arbitrary — show no leader instead of a false label. */
+  const topSchool =
+    bestSchool.count > 0 ? bestSchool : { school: "—", count: 0 };
 
   // ── Monthly trend ───────────────────────────────────────────────────────
   const monthlyRaw = buildMonthlyFromCases(filtered, chartRange);

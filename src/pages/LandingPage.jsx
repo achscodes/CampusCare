@@ -175,8 +175,8 @@ const LandingPage = () => {
                 <span className="lp-hero-accent">Student Care</span> Platform
               </h1>
               <p className="lp-hero-lead lp-hero-enter lp-hero-enter--3">
-                A unified platform for Health Services, Guidance, Discipline, and
-                Student Development—so campus offices can coordinate care and support
+                A unified platform for Health Services Office, Discipline Office, and
+                Student Development and Activities Office—so campus offices can coordinate care and support
                 for every student.
               </p>
               <div className="lp-hero-actions lp-hero-enter lp-hero-enter--4">

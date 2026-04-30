@@ -99,8 +99,13 @@ export function useCases(initialCases = []) {
       school = "",
       offenseType = "",
       reportedBy = "",
+      /** When `"student"`, sets reporting officer for DB + notifications if reportedBy is empty (e.g. mobile self-report). */
+      submissionSource = "staff",
     }) => {
       const pri = getDefaultPriority(priority);
+      const assignOfficer =
+        String(reportedBy).trim()
+        || (submissionSource === "student" ? "Student (Mobile App)" : officer);
 
       const descParts = [];
       if (String(reportedBy).trim()) {
@@ -130,7 +135,6 @@ export function useCases(initialCases = []) {
           "Dec",
         ];
         const date = `${monthNames[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`;
-        const assignOfficer = String(reportedBy).trim() || officer;
         const iso = now.toISOString();
         const newCase = {
           id,
@@ -161,7 +165,7 @@ export function useCases(initialCases = []) {
         description: mergedDescription,
         evidence,
         priority: pri,
-        officer: String(reportedBy).trim() || officer,
+        officer: assignOfficer,
         program: String(program || "").trim(),
         school: String(school || "").trim(),
         offenseType: String(offenseType || "").trim(),

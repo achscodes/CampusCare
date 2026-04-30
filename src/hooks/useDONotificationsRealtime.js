@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { useDONotificationStore } from "../stores/doNotificationStore";
 import { readCampusCareSession } from "../utils/campusCareSession";
+import { formatCaseId } from "../utils/disciplineCaseMapper";
 import { normalizeOfficeKey, officeKeyFromInterOfficeLabel } from "../constants/documentRequestAccess";
 import {
   isDocRequestDeclined,
@@ -39,6 +40,28 @@ function involvedInLabeledReferral(row, office) {
   return rk === office || zk === office;
 }
 
+/** Mobile / self-service flows should set reporting_officer (or description) so staff can see student-originated filings. */
+function isLikelyStudentSubmittedCase(row) {
+  if (!row) return false;
+  const officer = String(row.reporting_officer || row.reportingOfficer || "").toLowerCase();
+  if (
+    officer.includes("student")
+    || officer.includes("self-report")
+    || officer.includes("self report")
+    || officer.includes("mobile")
+    || officer.includes("app")
+  ) {
+    return true;
+  }
+  const desc = String(row.description || "").toLowerCase();
+  return (
+    desc.includes("submitted via mobile")
+    || desc.includes("student incident")
+    || desc.includes("self-reported")
+    || desc.includes("reported by: student")
+  );
+}
+
 /**
  * Subscribes staff to Supabase realtime for shared inter-office workflows and discipline data.
  * Uses session office so DO / HSO / SDAO users only see relevant inter-office events.
@@ -57,12 +80,32 @@ export function useDONotificationsRealtime() {
         (payload) => {
           if (office && office !== "discipline") return;
           const row = payload.new && Object.keys(payload.new).length ? payload.new : payload.old;
-          const id = row?.id ? String(row.id) : "case";
+          const idRaw = row?.id ? String(row.id) : "case";
+          const idLabel = formatCaseId(idRaw);
           const st = row?.student_name ? String(row.student_name) : "";
           if (payload.eventType === "INSERT") {
-            push("New disciplinary case", [st && `Student: ${st}`, `Case ${id}`, "A new case was filed."].filter(Boolean).join(" · "));
+            const fromStudent = isLikelyStudentSubmittedCase(row);
+            push(
+              fromStudent ? "Student submitted a report" : "New disciplinary case",
+              [
+                st && `Student: ${st}`,
+                `Case ${idLabel}`,
+                fromStudent
+                  ? "Incident or disciplinary case filed from the student app — review in Case Management."
+                  : "A new case was filed.",
+              ]
+                .filter(Boolean)
+                .join(" · "),
+            );
           } else if (payload.eventType === "UPDATE") {
-            push("Case updated", [st && `Student: ${st}`, `Case ${id}`, "Status or details changed."].filter(Boolean).join(" · "));
+            const oldRow = payload.old || {};
+            const prev = String(oldRow.status || "").toLowerCase();
+            const next = String(row?.status || "").toLowerCase();
+            if (prev === next) return;
+            push(
+              "Case status updated",
+              [st && `Student: ${st}`, `Case ${idLabel}`, `Status: ${next || "updated"}.`].filter(Boolean).join(" · "),
+            );
           }
         },
       )
@@ -95,6 +138,16 @@ export function useDONotificationsRealtime() {
           } else if (isDocRequestDeclined(newRow.status)) {
             push("Document request declined", `${labelForDoc(newRow)} Status: Declined.`);
           }
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "discipline_referrals" },
+        (payload) => {
+          const row = payload.new || {};
+          if (!involvedInDisciplineReferral(row, office)) return;
+          const nm = row?.student_name ? String(row.student_name) : "Student";
+          push("New discipline referral", `${nm} — a new referral was created.`);
         },
       )
       .on(
