@@ -59,51 +59,70 @@ const SigninPage = () => {
     if (isSupabaseConfigured() && supabase) {
       setSubmitting(true);
       setFormError("");
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
+      console.log("[AUTH] → Attempting Supabase signin for:", email.trim());
+      
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
 
-      if (error) {
+        if (error) {
+          setSubmitting(false);
+          console.error("[AUTH] ✗ Signin failed:", error);
+          setFormError(formatAuthError(error));
+          return;
+        }
+
+        console.log("[AUTH] ✓ Supabase signin successful");
+        const authUser = data.user;
+        console.log("[AUTH] → Auth user received:", authUser?.id);
+
+        const sync = await syncCampusCareSessionFromSupabaseUser(authUser, {
+          rememberMe,
+          emailFallback: email.trim(),
+        });
+
+        if (!sync.ok) {
+          console.warn("[AUTH] ✗ Session sync failed:", sync.accountStatus);
+          await supabase.auth.signOut();
+          clearCampusCareSession();
+          setSubmitting(false);
+          setFormError(
+            sync.accountStatus === "rejected"
+              ? "Your account was rejected. Contact your office administrator."
+              : "Your account is pending approval from a Super Admin before you can sign in.",
+          );
+          return;
+        }
+
+        console.log("[AUTH] ✓ Session created successfully");
+        const { session } = sync;
         setSubmitting(false);
-        setFormError(formatAuthError(error));
+        const dest = isSuperAdminSession(session) ? getSuperAdminRouteForOffice(session.office) : getHomeRouteForOffice(session.office);
+        console.log("[AUTH] → Navigating to:", dest);
+        showToast("Signed in successfully.", { variant: "success" });
+        navigate(dest, { replace: true, state: {} });
+        return;
+      } catch (err) {
+        console.error("[AUTH] ✗ Unexpected error during signin:", err);
+        setSubmitting(false);
+        setFormError(err?.message || "An unexpected error occurred. Please try again.");
         return;
       }
-
-      const authUser = data.user;
-      const sync = await syncCampusCareSessionFromSupabaseUser(authUser, {
-        rememberMe,
-        emailFallback: email.trim(),
-      });
-
-      if (!sync.ok) {
-        await supabase.auth.signOut();
-        clearCampusCareSession();
-        setSubmitting(false);
-        setFormError(
-          sync.accountStatus === "rejected"
-            ? "Your account was rejected. Contact your office administrator."
-            : "Your account is pending approval from a Super Admin before you can sign in.",
-        );
-        return;
-      }
-
-      const { session } = sync;
-      setSubmitting(false);
-      const dest = isSuperAdminSession(session) ? getSuperAdminRouteForOffice(session.office) : getHomeRouteForOffice(session.office);
-      showToast("Signed in successfully.", { variant: "success" });
-      navigate(dest, { replace: true, state: {} });
-      return;
     }
 
+    console.log("[AUTH] → Using offline mode (Supabase not configured)");
     const user = verifyCredentials(email, password);
     if (!user) {
+      console.warn("[AUTH] ✗ Offline credentials invalid");
       setFormError(
         "Invalid email or password for offline mode. To use Supabase: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local, restart npm run dev, then sign in with a user from Supabase Authentication (demo Super Admins are created by migration 20260426000000_seed_demo_super_admin_users.sql).",
       );
       return;
     }
 
+    console.log("[AUTH] ✓ Offline credentials verified for:", user.email);
     setFormError("");
     const office = user.office;
     const accountStatus = user.accountStatus ?? "approved";
@@ -129,6 +148,7 @@ const SigninPage = () => {
     writeCampusCareSession(session, rememberMe);
 
     const dest = isSuperAdminSession(session) ? getSuperAdminRouteForOffice(office) : getHomeRouteForOffice(office);
+    console.log("[AUTH] → Offline navigation to:", dest);
     showToast("Signed in successfully.", { variant: "success" });
     navigate(dest);
   };

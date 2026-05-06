@@ -5,6 +5,7 @@ import AppVisitLogger from "./components/AppVisitLogger";
 import LandingPage from "./pages/LandingPage";
 import { profileSettingsPathForSessionOffice } from "./utils/profileSettingsRoutes";
 import { readCampusCareSession } from "./utils/campusCareSession";
+import { useSupabaseAuthRecovery } from "./hooks/useSupabaseAuthRecovery";
 
 const SignupPage = lazy(() =>
   import("./pages/SignupPage").then((m) => ({ default: m.default ?? m.SignupPage }))
@@ -24,6 +25,9 @@ const PrivacyPage = lazy(() =>
 
 const CaseConferencePage = lazy(() =>
   import("./pages/DODashboard/DO").then((m) => ({ default: m.CaseConferencePage }))
+);
+const IncidentReportPage = lazy(() =>
+  import("./pages/DODashboard/DO").then((m) => ({ default: m.IncidentReportPage }))
 );
 const CaseManagementPage = lazy(() =>
   import("./pages/DODashboard/DO").then((m) => ({ default: m.CaseManagementPage }))
@@ -86,6 +90,9 @@ function LegacyProfileSettingsRedirect() {
 }
 
 function App() {
+  // Recover existing Supabase session on app load
+  useSupabaseAuthRecovery();
+
   return (
     <Router>
       <ToastProvider>
@@ -108,6 +115,7 @@ function App() {
             <Route path="/case-conference" element={<CaseConferencePage />} />
             <Route path="/student-records" element={<StudentRecordsPage />} />
             <Route path="/case-management" element={<CaseManagementPage />} />
+            <Route path="/incident-report" element={<IncidentReportPage />} />
             <Route path="/document-requests" element={<DocumentRequestsPage />} />
             <Route path="/referrals" element={<ReferralsPage />} />
             <Route path="/sanctions" element={<SanctionsPage />} />

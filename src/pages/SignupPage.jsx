@@ -114,68 +114,86 @@ const SignupPage = () => {
     if (isSupabaseConfigured() && supabase) {
       setSubmitting(true);
       setFormError("");
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          emailRedirectTo: getAuthEmailRedirectUrl("/signin"),
-          data: {
-            first_name: firstName.trim(),
-            middle_initial: middleInitial.trim(),
-            last_name: lastName.trim(),
-            office: officeKey,
-            role,
-          },
-        },
-      });
-      setSubmitting(false);
-
-      if (error) {
-        setFormError(formatAuthError(error));
-        return;
-      }
-
-      if (data.user && !data.session) {
-        setFormError("");
-        showToast("Check your email to confirm your account, then sign in.", { variant: "info" });
-        navigate("/signin", {
-          state: {
-            message:
-              "Check your email to confirm your account, then sign in. After confirmation, you will be routed to Super Admin or your office workspace.",
+      console.log("[AUTH] → Attempting Supabase signup for:", email.trim());
+      
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            emailRedirectTo: getAuthEmailRedirectUrl("/signin"),
+            data: {
+              first_name: firstName.trim(),
+              middle_initial: middleInitial.trim(),
+              last_name: lastName.trim(),
+              office: officeKey,
+              role,
+            },
           },
         });
-        return;
-      }
+        setSubmitting(false);
 
-      if (data.session && data.user) {
-        const sync = await syncCampusCareSessionFromSupabaseUser(data.user, {
-          rememberMe: false,
-          emailFallback: email.trim(),
-        });
-        if (!sync.ok) {
-          await supabase.auth.signOut();
-          clearCampusCareSession();
-          setFormError(
-            sync.accountStatus === "rejected"
-              ? "Your account was rejected. Contact your office administrator."
-              : "Your account is pending approval from a Super Admin before you can sign in.",
-          );
+        if (error) {
+          console.error("[AUTH] ✗ Signup failed:", error);
+          setFormError(formatAuthError(error));
           return;
         }
-        const dest = isSuperAdminSession(sync.session)
-          ? getSuperAdminRouteForOffice(sync.session.office)
-          : getHomeRouteForOffice(sync.session.office);
-        showToast("Account created. Welcome to CampusCare.", { variant: "success" });
-        navigate(dest, { replace: true, state: {} });
+
+        console.log("[AUTH] ✓ Supabase signup successful");
+
+        if (data.user && !data.session) {
+          console.log("[AUTH] → Email confirmation required");
+          setFormError("");
+          showToast("Check your email to confirm your account, then sign in.", { variant: "info" });
+          navigate("/signin", {
+            state: {
+              message:
+                "Check your email to confirm your account, then sign in. After confirmation, you will be routed to Super Admin or your office workspace.",
+            },
+          });
+          return;
+        }
+
+        if (data.session && data.user) {
+          console.log("[AUTH] → Immediate session created, syncing profile...");
+          const sync = await syncCampusCareSessionFromSupabaseUser(data.user, {
+            rememberMe: false,
+            emailFallback: email.trim(),
+          });
+          if (!sync.ok) {
+            console.warn("[AUTH] ✗ Session sync failed:", sync.accountStatus);
+            await supabase.auth.signOut();
+            clearCampusCareSession();
+            setFormError(
+              sync.accountStatus === "rejected"
+                ? "Your account was rejected. Contact your office administrator."
+                : "Your account is pending approval from a Super Admin before you can sign in.",
+            );
+            return;
+          }
+          console.log("[AUTH] ✓ Signup and session created successfully");
+          const dest = isSuperAdminSession(sync.session)
+            ? getSuperAdminRouteForOffice(sync.session.office)
+            : getHomeRouteForOffice(sync.session.office);
+          showToast("Account created. Welcome to CampusCare.", { variant: "success" });
+          navigate(dest, { replace: true, state: {} });
+          return;
+        }
+
+        console.log("[AUTH] ✓ Signup completed, awaiting confirmation");
+        setFormError("");
+        showToast("Account created. You can sign in now.", { variant: "success" });
+        navigate("/signin", { state: { message: "Account created. You can sign in now." } });
+        return;
+      } catch (err) {
+        console.error("[AUTH] ✗ Unexpected error during signup:", err);
+        setSubmitting(false);
+        setFormError(err?.message || "An unexpected error occurred. Please try again.");
         return;
       }
-
-      setFormError("");
-      showToast("Account created. You can sign in now.", { variant: "success" });
-      navigate("/signin", { state: { message: "Account created. You can sign in now." } });
-      return;
     }
 
+    console.log("[AUTH] → Using offline mode for signup");
     try {
       const created = registerUser({
         firstName: firstName.trim(),
@@ -186,6 +204,7 @@ const SignupPage = () => {
         office: officeKey,
         role,
       });
+      console.log("[AUTH] ✓ Offline user registered");
       setFormError("");
       if (isSuperAdminSession({ role })) {
         const session = {
@@ -205,6 +224,7 @@ const SignupPage = () => {
         navigate("/signin", { state: { message: "Account created. You can sign in now." } });
       }
     } catch (err) {
+      console.error("[AUTH] ✗ Offline registration failed:", err);
       setFormError(err?.message || "Unable to create account.");
     }
   };

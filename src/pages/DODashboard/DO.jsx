@@ -1954,7 +1954,502 @@ export function CaseManagementPage() {
   );
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// INCIDENT REPORT PAGE — paste above ConferencePill
+// ─────────────────────────────────────────────────────────────────────────────
 
+// ── Status → badge CSS class (maps to existing DO.css badge-* classes) ───────
+const IR_STATUS_BADGE = {
+  submitted:         "new",
+  under_review:      "ongoing",
+  escalated:         "high",
+  rejected:          "pending",
+  converted_to_case: "closed",
+};
+
+const IR_STATUS_LABEL = {
+  submitted:         "Submitted",
+  under_review:      "Under Review",
+  escalated:         "Escalated",
+  rejected:          "Rejected",
+  converted_to_case: "Converted to Case",
+};
+
+const IR_TABS = [
+  { key: "all",               label: (rows) => `All Reports (${rows.length})` },
+  { key: "submitted",         label: (rows) => `Submitted (${rows.filter((r) => r.status === "submitted").length})` },
+  { key: "under_review",      label: (rows) => `Under Review (${rows.filter((r) => r.status === "under_review").length})` },
+  { key: "escalated",         label: (rows) => `Escalated (${rows.filter((r) => r.status === "escalated").length})` },
+  { key: "rejected",          label: (rows) => `Rejected (${rows.filter((r) => r.status === "rejected").length})` },
+  { key: "converted_to_case", label: (rows) => `Converted to Case (${rows.filter((r) => r.status === "converted_to_case").length})` },
+];
+
+function irFormatDate(raw) {
+  if (!raw) return "—";
+  try {
+    return new Date(raw).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch { return raw; }
+}
+
+function irFormatId(raw) {
+  if (!raw) return "—";
+  const s = String(raw).toUpperCase();
+  return /^IR-/.test(s) ? s : `IR-${s}`;
+}
+
+function irRenderInvolvedParties(parties) {
+  if (!parties) return "—";
+  try {
+    const arr = Array.isArray(parties) ? parties : JSON.parse(parties);
+    if (!arr || arr.length === 0) return "—";
+    return arr.map((p, i) => {
+      if (typeof p === "string") return <span key={i} style={{ display: "block" }}>{p}</span>;
+      const name = p.name || p.student || p.id || JSON.stringify(p);
+      const role = p.role ? ` (${p.role})` : "";
+      return <span key={i} style={{ display: "block" }}>{name}{role}</span>;
+    });
+  } catch {
+    return String(parties);
+  }
+}
+
+export function IncidentReportPage() {
+  const [irReports, setIrReports]           = useState([]);
+  const [irLoading, setIrLoading]           = useState(true);
+  const [irError, setIrError]               = useState(null);
+  const [irActiveTab, setIrActiveTab]       = useState("all");
+  const [irSearch, setIrSearch]             = useState("");
+  const [irSearchField, setIrSearchField]   = useState("all");
+  const [irSelected, setIrSelected]         = useState(null);
+  const [irStatusUpdate, setIrStatusUpdate] = useState("submitted");
+  const [irStaffNotes, setIrStaffNotes]     = useState("");
+  const [irModalError, setIrModalError]     = useState(null);
+
+  const fetchIrReports = useCallback(async () => {
+    setIrLoading(true);
+    setIrError(null);
+    try {
+      const { data, error } = await supabase
+        .from("discipline_incident_reports")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setIrReports(data || []);
+    } catch (err) {
+      setIrError(err?.message || "Failed to load incident reports.");
+    } finally {
+      setIrLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchIrReports(); }, [fetchIrReports]);
+
+  useEffect(() => {
+    setIrModalError(null);
+    if (irSelected) {
+      setIrStatusUpdate(irSelected.status || "submitted");
+      setIrStaffNotes(irSelected.staff_notes || "");
+    }
+  }, [irSelected]);
+
+  const irStats = useMemo(() => ({
+    total:        irReports.length,
+    submitted:    irReports.filter((r) => r.status === "submitted").length,
+    under_review: irReports.filter((r) => r.status === "under_review").length,
+    escalated:    irReports.filter((r) => r.status === "escalated").length,
+  }), [irReports]);
+
+  const irFiltered = useMemo(() => {
+    return irReports.filter((r) => {
+      const matchesTab = irActiveTab === "all" || r.status === irActiveTab;
+
+      const q = irSearch.toLowerCase();
+      const matchesSearch = (() => {
+        if (!q) return true;
+        const id       = String(r.id       || "").toLowerCase();
+        const subject  = String(r.subject  || "").toLowerCase();
+        const location = String(r.location || "").toLowerCase();
+        if (irSearchField === "reportId") return id.includes(q);
+        if (irSearchField === "subject")  return subject.includes(q);
+        if (irSearchField === "location") return location.includes(q);
+        return id.includes(q) || subject.includes(q) || location.includes(q);
+      })();
+
+      return matchesTab && matchesSearch;
+    });
+  }, [irReports, irActiveTab, irSearch, irSearchField]);
+
+  return (
+    <div className="dashboard-layout do-office-layout">
+      <Sidebar profileSettingsPath={PROFILE_SETTINGS_PATH_DISCIPLINE} />
+      <div className="dashboard-main">
+        <DisciplineOfficeTopBar />
+        <main className="dashboard-content do-office-shell">
+
+          {/* ── Error / loading banner ── */}
+          {(irError || (irLoading && irReports.length === 0)) && (
+            <div
+              role="status"
+              style={{
+                marginBottom: 16,
+                padding: "12px 14px",
+                borderRadius: 10,
+                background: irError ? "#fef2f2" : "#f8fafc",
+                border: `1px solid ${irError ? "#fecaca" : "#e2e8f0"}`,
+                color: irError ? "#991b1b" : "#475569",
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <span>{irError ? `Could not load reports: ${irError}` : "Loading incident reports…"}</span>
+              {irError && (
+                <button type="button" className="cc-btn-secondary" style={{ height: 32, padding: "0 12px" }} onClick={fetchIrReports}>
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* ── Page title row ── */}
+          <div className="page-title-row">
+            <div>
+              <h1>Incident Report</h1>
+              <p>Manage and track all disciplinary incident reports</p>
+            </div>
+            <button className="btn-new-case" type="button" disabled style={{ opacity: 0.5, cursor: "not-allowed" }}>
+              <Plus size={16} strokeWidth={2} aria-hidden />
+              New Report
+            </button>
+          </div>
+
+          {/* ── Summary stat cards ── */}
+          <div className="stats-grid">
+            <div className="stat-card">
+              <p className="stat-value total">{irStats.total}</p>
+              <p className="stat-label">Total Reports</p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-value new">{irStats.submitted}</p>
+              <p className="stat-label">Submitted</p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-value pending">{irStats.under_review}</p>
+              <p className="stat-label">Under Review</p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-value high">{irStats.escalated}</p>
+              <p className="stat-label">Escalated</p>
+            </div>
+          </div>
+
+          {/* ── Table panel ── */}
+          <div className="cases-panel">
+            <div className="cases-panel-header">
+
+              <div className="cases-panel-top">
+                <div className="cases-panel-title">
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                    <path d="M16.667 2.5H3.333C2.413 2.5 1.667 3.246 1.667 4.167v11.666c0 .92.746 1.667 1.666 1.667h13.334c.92 0 1.666-.746 1.666-1.667V4.167c0-.92-.746-1.667-1.666-1.667z" stroke="#0f172a" strokeWidth="1.5" />
+                    <path d="M6.667 7.5h6.666M6.667 10.833h4.166" stroke="#0f172a" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                  All Incident Reports
+                </div>
+              </div>
+
+              <div className="confidential-notice">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <circle cx="6" cy="6" r="5" stroke="#f54900" strokeWidth="1.2" />
+                  <path d="M6 4v2.5M6 8h.006" stroke="#f54900" strokeWidth="1.2" strokeLinecap="round" />
+                </svg>
+                Confidential - Handle with discretion
+              </div>
+
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 0 }}>
+                <select
+                  className="cc-input"
+                  style={{ width: 140, height: 36, flexShrink: 0 }}
+                  value={irSearchField}
+                  onChange={(e) => setIrSearchField(e.target.value)}
+                  aria-label="Search by field"
+                >
+                  <option value="all">All Fields</option>
+                  <option value="reportId">Report ID</option>
+                  <option value="subject">Subject</option>
+                  <option value="location">Location</option>
+                </select>
+                <div className="search-bar-wrapper" style={{ flex: 1, marginBottom: 0 }}>
+                  <span className="search-icon" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <circle cx="7.333" cy="7.333" r="4.667" stroke="#64748b" strokeWidth="1.5" />
+                      <path d="M14 14l-2.667-2.667" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                  </span>
+                  <input
+                    type="text"
+                    className="search-input"
+                    placeholder={
+                      irSearchField === "reportId" ? "Search by report ID…" :
+                      irSearchField === "subject"  ? "Search by subject…"   :
+                      irSearchField === "location" ? "Search by location…"  :
+                      "Search reports…"
+                    }
+                    value={irSearch}
+                    onChange={(e) => setIrSearch(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="tab-list">
+                {IR_TABS.map((tab) => (
+                  <button
+                    key={tab.key}
+                    className={`tab-btn${irActiveTab === tab.key ? " tab-active" : ""}`}
+                    type="button"
+                    onClick={() => setIrActiveTab(tab.key)}
+                  >
+                    {tab.label(irReports)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Table ── */}
+            <div className="cases-table-wrapper">
+              <table className="cases-table">
+                <thead>
+                  <tr>
+                    <th>Report ID</th>
+                    <th>Subject</th>
+                    <th>Status</th>
+                    <th>Incident Date</th>
+                    <th>Location</th>
+                    <th>Submitted On</th>
+                    <th className="cases-table-col-action">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {irFiltered.map((r) => (
+                    <tr key={r.id}>
+                      <td className="cell-case-id">{irFormatId(r.id)}</td>
+                      <td className="cell-text">{r.subject || "—"}</td>
+                      <td>
+                        <span className={`badge badge-${IR_STATUS_BADGE[r.status] || "new"}`}>
+                          {IR_STATUS_LABEL[r.status] || r.status || "—"}
+                        </span>
+                      </td>
+                      <td className="cell-date">{irFormatDate(r.incident_at)}</td>
+                      <td className="cell-text">{r.location || "—"}</td>
+                      <td className="cell-date">{irFormatDate(r.created_at)}</td>
+                      <td className="cases-table-col-action">
+                        <button
+                          className="btn-view btn-view--fixed"
+                          type="button"
+                          onClick={() => setIrSelected(r)}
+                        >
+                          <Eye size={16} strokeWidth={2} aria-hidden />
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {irFiltered.length === 0 && (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", color: "#64748b", padding: "32px 8px", fontFamily: "'Inter', sans-serif" }}>
+                        {irLoading ? "Loading…" : "No incident reports found."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </main>
+      </div>
+
+      {/* ── Detail / update modal ── */}
+      {irSelected && (
+        <div
+          className="cc-modal-overlay do-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={() => setIrSelected(null)}
+        >
+          <div
+            className="cc-modal do-modal do-modal--lg do-modal--case-detail"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="do-modal-head">
+              <button className="do-modal-x" type="button" aria-label="Close" onClick={() => setIrSelected(null)}>×</button>
+              <div className="do-modal-head-row">
+                <div className="do-modal-icon-wrap" aria-hidden><FileText size={22} strokeWidth={2} /></div>
+                <div>
+                  <h2 className="do-modal-heading">Incident Report Details</h2>
+                  <p className="do-modal-sub">Complete information about the incident report</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="do-modal-body-scroll">
+              {/* Banner */}
+              <div className="do-case-banner">
+                <div>
+                  <p className="do-case-banner-id">{irFormatId(irSelected.id)}</p>
+                  <p className="do-case-banner-type">{irSelected.subject || "—"}</p>
+                </div>
+                <div className="do-banner-badges">
+                  <span className={`badge badge-${IR_STATUS_BADGE[irSelected.status] || "new"}`}>
+                    {IR_STATUS_LABEL[irSelected.status] || irSelected.status || "—"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Info cards */}
+              <div className="do-info-grid">
+                <div className="do-info-card">
+                  <div className="do-info-card-top">
+                    <FileText size={18} strokeWidth={2} aria-hidden />
+                    Report Information
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Report ID</p>
+                    <p className="do-info-dd">{irFormatId(irSelected.id)}</p>
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Status</p>
+                    <p className="do-info-dd">{IR_STATUS_LABEL[irSelected.status] || irSelected.status || "—"}</p>
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Submitted On</p>
+                    <p className="do-info-dd">{irFormatDate(irSelected.created_at)}</p>
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Last Updated</p>
+                    <p className="do-info-dd">{irFormatDate(irSelected.updated_at)}</p>
+                  </div>
+                  {irSelected.converted_case_id && (
+                    <div className="do-info-row">
+                      <p className="do-info-dt">Converted Case</p>
+                      <p className="do-info-dd">{irSelected.converted_case_id}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="do-info-card">
+                  <div className="do-info-card-top">
+                    <Info size={18} strokeWidth={2} aria-hidden />
+                    Incident Details
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Subject</p>
+                    <p className="do-info-dd">{irSelected.subject || "—"}</p>
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Incident Date</p>
+                    <p className="do-info-dd">{irFormatDate(irSelected.incident_at)}</p>
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Location</p>
+                    <p className="do-info-dd">{irSelected.location || "—"}</p>
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Reviewed At</p>
+                    <p className="do-info-dd">{irFormatDate(irSelected.reviewed_at)}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Description */}
+              {irSelected.description && (
+                <div className="do-section-card">
+                  <h4>Description</h4>
+                  <p style={{ whiteSpace: "pre-wrap" }}>{irSelected.description}</p>
+                </div>
+              )}
+
+              {/* Involved Parties */}
+              {irSelected.involved_parties && Array.isArray(irSelected.involved_parties) && irSelected.involved_parties.length > 0 && (
+                <div className="do-section-card">
+                  <h4>Involved Parties</h4>
+                  <div>{irRenderInvolvedParties(irSelected.involved_parties)}</div>
+                </div>
+              )}
+
+              {/* Staff Notes (read-only display) */}
+              {irSelected.staff_notes && (
+                <div className="do-section-card">
+                  <h4>Staff Notes</h4>
+                  <p style={{ whiteSpace: "pre-wrap" }}>{irSelected.staff_notes}</p>
+                </div>
+              )}
+
+              <div style={{ borderTop: "1px solid #e2e8f0", marginBottom: 16, marginTop: 8 }} />
+
+              {/* Update form */}
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+                  Update Report
+                </div>
+                <div className="cc-field" style={{ marginBottom: 12 }}>
+                  <div className="cc-label">Status</div>
+                  <select className="cc-input" value={irStatusUpdate} onChange={(e) => setIrStatusUpdate(e.target.value)}>
+                    <option value="submitted">Submitted</option>
+                    <option value="under_review">Under Review</option>
+                    <option value="escalated">Escalated</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="converted_to_case">Converted to Case</option>
+                  </select>
+                </div>
+                <div className="cc-field">
+                  <div className="cc-label">Staff Notes</div>
+                  <textarea
+                    className="cc-textarea"
+                    value={irStaffNotes}
+                    onChange={(e) => setIrStaffNotes(e.target.value)}
+                    placeholder="Add or update staff notes for this report..."
+                  />
+                </div>
+              </div>
+            </div>
+
+            {irModalError && (
+              <div className="cc-form-error" role="alert" style={{ padding: "0 20px 12px" }}>
+                {irModalError}
+              </div>
+            )}
+            <div className="cc-modal-actions">
+              <button className="cc-btn-secondary" type="button" onClick={() => setIrSelected(null)}>
+                Close
+              </button>
+              <button
+                className="cc-btn-primary"
+                type="button"
+                onClick={async () => {
+                  setIrModalError(null);
+                  try {
+                    const { error } = await supabase
+                      .from("discipline_incident_reports")
+                      .update({ status: irStatusUpdate, staff_notes: irStaffNotes })
+                      .eq("id", irSelected.id);
+                    if (error) throw error;
+                    await fetchIrReports();
+                    setIrSelected(null);
+                  } catch (err) {
+                    setIrModalError(err?.message || "Could not update report. Check Supabase and try again.");
+                  }
+                }}
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const ConferencePill = ({ conference, status: statusProp }) => {
   const status = conference ? effectiveConferenceStatus(conference) : String(statusProp || "scheduled").toLowerCase();

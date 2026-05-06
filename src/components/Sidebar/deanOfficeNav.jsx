@@ -28,6 +28,22 @@ export const DO_NAV_ITEMS = [
     ),
   },
   {
+    label: "Incident Report",
+    path: "/incident-report",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path
+          d="M13.333 2H2.667C1.93 2 1.333 2.597 1.333 3.333v9.334C1.333 13.403 1.93 14 2.667 14h10.666c.737 0 1.334-.597 1.334-1.333V3.333C14.667 2.597 14.07 2 13.333 2z"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M5.333 6h5.334M5.333 9.333h3.334M5.333 12h1.334" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     label: "Case Conference",
     path: "/case-conference",
     icon: (

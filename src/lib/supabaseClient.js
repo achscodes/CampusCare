@@ -35,6 +35,27 @@ export const supabase = isSupabaseConfigured()
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
+        flowType: "pkce",
+      },
+      db: { schema: "public" },
+      global: {
+        headers: {
+          "x-client-info": "campuscare-v1",
+        },
       },
     })
   : null;
+
+// Debug logging in browser console
+if (typeof window !== "undefined") {
+  if (isSupabaseConfigured()) {
+    console.log("[SUPABASE] ✓ Supabase client initialized successfully");
+    console.log("[SUPABASE] URL:", url);
+  } else {
+    console.warn(
+      "[SUPABASE] ✗ Supabase not configured. Check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local",
+    );
+    console.warn("[SUPABASE] VITE_SUPABASE_URL:", import.meta.env.VITE_SUPABASE_URL ? "✓ Set" : "✗ Missing");
+    console.warn("[SUPABASE] VITE_SUPABASE_ANON_KEY:", anonKey ? "✓ Set" : "✗ Missing");
+  }
+}
