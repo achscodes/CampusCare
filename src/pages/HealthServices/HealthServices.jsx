@@ -50,8 +50,10 @@ import Sidebar from "../../components/Sidebar/Sidebar";
 import OfficeHeader from "../../components/OfficeHeader/OfficeHeader";
 import StaffNotificationBell from "../../components/common/StaffNotificationBell";
 import CCModal from "../../components/common/CCModal";
-import { useDONotificationsRealtime } from "../../hooks/useDONotificationsRealtime";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
+import { useDONotificationsRealtime } from "../../hooks/useDONotificationsRealtime";
+import { useRealtimeAppointments } from "../../hooks/useRealtimeAppointments";
+import { useRealtimeMedicalRecords } from "../../hooks/useRealtimeMedicalRecords";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import {
   loadHsoFromSupabase,
@@ -135,6 +137,10 @@ const PAGE_META = {
     title: "Appointments",
     subtitle: "Medical appointments and schedules",
   },
+  nurseStation: {
+    title: "Nurse Station",
+    subtitle: "Inter-office referrals and document requests for coordinating student care between departments",
+  },
   referrals: {
     title: "Referrals",
     subtitle: "Create and track referrals to other offices and external partners",
@@ -173,10 +179,11 @@ const PAGE_META = {
   },
 };
 
+// --- Role-specific navigation assignment ---
 const HEALTH_NAV_BY_DESIGNATION = {
   // Admin scope intentionally limited to screens present in provided UI reference.
   admin: ["dashboard", "userManagement", "staffScheduling", "queue", "reports", "settings"],
-  nurse: ["dashboard", "appointments", "checkin", "queue", "records", "settings"],
+  nurse: ["dashboard", "appointments", "checkin", "queue", "records", "nurseStation", "settings"],
   physician: ["dashboard", "visits", "records", "appointments", "queueDisplay"],
   dentist: ["dashboard", "dentalQueue", "dentalRecords", "dentalChart", "dentalFollowups"],
 };
@@ -433,6 +440,20 @@ function HealthServices({ embedReportsOnly = false } = {}) {
 
   useDONotificationsRealtime();
 
+  // Realtime update handlers
+  const handleAppointmentsUpdate = useCallback((payload) => {
+    console.log('Appointments updated, consider refetching...');
+    // TODO: Implement refetch or state update for appointments
+  }, []);
+
+  const handleRecordsUpdate = useCallback((payload) => {
+    console.log('Medical records updated, consider refetching...');
+    // TODO: Implement refetch or state update for medical records
+  }, []);
+
+  // Use Realtime hooks
+  useRealtimeAppointments(handleAppointmentsUpdate);
+  useRealtimeMedicalRecords(handleRecordsUpdate);
   const canInterOfficeDocRequest = canCreateDocumentRequest(session?.office);
   const userDesignation = normalizeHsoDesignation(session?.designation);
   const isNurseUser = userDesignation === "nurse";
@@ -452,6 +473,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         checkin: "Patient Check-In",
         queue: "Nurse Queue",
         appointments: "Triage Management",
+        nurseStation: "Nurse Station",
         records: "Patient Records",
         settings: "Settings",
       };
@@ -483,14 +505,17 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const userName = session?.name || "Priscilla C. Pelayo";
   const userRole = `${hsoDesignationLabel(userDesignation)} · ${session?.role || "Staff"}`;
 
+  // --- Nurse side page metadata ---
   const nurseMetaByNav = {
     dashboard: { title: "Dashboard", subtitle: "Nurse station overview and patient management" },
     checkin: { title: "Patient Check-In", subtitle: "Nurse station overview and patient management" },
     queue: { title: "Queue Management", subtitle: "Live ticketing across all stations." },
     appointments: { title: "Vital Signs", subtitle: "Capture and review patient vitals before consultation." },
+    nurseStation: { title: "Nurse Station", subtitle: "Inter-office referrals and document requests for coordinated care." },
     records: { title: "Patient Records", subtitle: "Read-only view for nurses - diagnoses are restricted to physicians." },
     settings: { title: "Settings", subtitle: "Configure queue and station preferences." },
   };
+  // --- Physician side page metadata ---
   const physicianMetaByNav = {
     dashboard: { title: "Physician Workspace", subtitle: "Review vitals, consult patients, manage prescriptions." },
     visits: { title: "Physician Queue", subtitle: "Manage patient queue and flow." },
@@ -499,6 +524,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     appointments: { title: "Medical Certificates", subtitle: "Issue and track medical certifications." },
     queueDisplay: { title: "Prescription History", subtitle: "All prescriptions issued from your workspace." },
   };
+  // --- Dentist side page metadata ---
   const dentistMetaByNav = {
     dashboard: { title: "Dentist Dashboard", subtitle: "Track patients, procedures and follow-ups." },
     dentalQueue: { title: "Queue Management", subtitle: "Live ticketing in Dentist Station." },
@@ -1725,6 +1751,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   }, [appointmentsList]);
 
 
+  // --- Nurse / Physician / Dentist / Admin Dashboard Views ---
   const renderDashboard = () => {
     if (isNurseUser) {
       const dashboardQueueRows = nurseWaitlistRows.slice(0, 5);
@@ -2290,6 +2317,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     );
   };
 
+  // --- Nurse Side: Check-In Desk ---
   const renderCheckin = () => (
     isNurseUser ? (
       <>
@@ -2365,6 +2393,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     )
   );
 
+  // --- Nurse Side: Queue Management ---
   const renderQueue = () => (
     isNurseUser ? (
       <>
@@ -2468,6 +2497,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     )
   );
 
+  // --- Physician Side: Consultation Workspace ---
   const renderConsultation = () => (
     isPhysicianUser ? (
       <div className="hs-phys-shell">
@@ -2550,6 +2580,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     )
   );
 
+  // --- Physician Side: Queue Display and Prescription History ---
   const renderQueueDisplay = () => {
     if (isPhysicianUser) {
       const issuedToday = physicianPrescriptionRows.filter((r) => r.date === formatVisitDateLabel(new Date())).length;
@@ -2626,6 +2657,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     );
   };
 
+  // --- Admin Side: User Management ---
   const renderUserManagement = () => (
     <>
       <div className="hs-stat-row">
@@ -2684,6 +2716,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     </>
   );
 
+  // --- Admin Side: Staff Scheduling ---
   const renderStaffScheduling = () => (
     <>
       <div className="cases-panel hs-panel-elevated">
@@ -2720,6 +2753,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     </>
   );
 
+  // --- Dentist Side: Queue ---
   const renderDentistQueue = () => {
     const serving = dentistQueueRows[0];
     const rest = dentistQueueRows.slice(1);
@@ -2804,6 +2838,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     );
   };
 
+  // --- Dentist Side: Patient Records ---
   const renderDentistPatientRecords = () => {
     const q = dentalRecordsSearch.trim().toLowerCase();
     const filtered = healthRecordsRows.filter((r) => {
@@ -2958,6 +2993,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     );
   };
 
+  // --- Dentist Side: Dental Chart Workspace ---
   const renderDentistChartWorkspace = () => {
     const chartQueue = dentistQueueRows.slice(0, 5);
     const paintOpts = [
@@ -3108,6 +3144,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     );
   };
 
+  // --- Dentist Side: Follow-up Appointments ---
   const renderDentistFollowups = () => {
     const q = dentalFollowupSearch.trim().toLowerCase();
     const list = dentalFollowupRows.filter((r) => {
@@ -3189,6 +3226,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     );
   };
 
+  // --- Admin Side: HSO Operational Settings ---
   const renderSettings = () => (
     <div className="cases-panel hs-panel-elevated">
       <div className="cases-panel-header">
@@ -3217,6 +3255,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     </div>
   );
 
+  // --- Visits View: Physician and Nurse Listing ---
   const renderVisits = () => {
     if (isPhysicianUser) {
       const physicianQueueRows = workflowRows
@@ -3883,6 +3922,181 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     )
   );
 
+  const renderNurseStation = () => (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginBottom: 24 }}>
+        <div>
+          <h3 className="hs-section-title" style={{ marginBottom: 12, fontSize: 14, fontWeight: 600 }}>Document Requests</h3>
+          <p style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
+            Total: <strong>{docTabStats.total}</strong> • Pending: <strong>{docTabStats.pending}</strong> • Uploaded: <strong>{docTabStats.uploaded}</strong> • Received: <strong>{docTabStats.received}</strong>
+          </p>
+        </div>
+        <div>
+          <h3 className="hs-section-title" style={{ marginBottom: 12, fontSize: 14, fontWeight: 600 }}>Referrals</h3>
+          <p style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
+            Sent: <strong>{referralsTabStats.sent}</strong> • In Progress: <strong>{referralsTabStats.inProg}</strong> • Completed: <strong>{referralsTabStats.done}</strong> • Urgent: <strong>{referralsTabStats.urgent}</strong>
+          </p>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+        <div>
+          <div className="cases-panel hs-panel-elevated">
+            <div className="cases-panel-header">
+              <div className="cases-panel-top">
+                <div>
+                  <div className="cases-panel-title cases-panel-title--strong">Document Requests</div>
+                  <p className="hs-list-sub hs-list-sub--tight">
+                    Outgoing and incoming requests ({filteredDocs.length})
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="cases-table-wrapper">
+              {filteredDocs.length > 0 ? (
+                <table className="cases-table" style={{ fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th>Request ID</th>
+                      <th>Office</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDocs.slice(0, 8).map((d) => (
+                      <tr key={d.id}>
+                        <td className="cell-case-id" style={{ fontSize: 11 }}>{d.id}</td>
+                        <td style={{ fontSize: 12 }}>{labelForOfficeKey(d.partnerOffice)}</td>
+                        <td style={{ fontSize: 12 }}>{d.doc}</td>
+                        <td>
+                          <span className={pillClass(d.status)} style={{ fontSize: 11 }}>{d.status}</span>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="hs-link-action"
+                            onClick={() => setSelectedDocRequest(d)}
+                          >
+                            <Eye size={13} strokeWidth={1.5} aria-hidden />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <EmptyStateMessage title="No document requests yet" description="Create your first request to get started" compact />
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div className="cases-panel hs-panel-elevated">
+            <div className="cases-panel-header">
+              <div className="cases-panel-top">
+                <div>
+                  <div className="cases-panel-title cases-panel-title--strong">Outgoing Referrals</div>
+                  <p className="hs-list-sub hs-list-sub--tight">
+                    Referrals sent for review ({referralsList.length})
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="cases-table-wrapper">
+              {referralsList.length > 0 ? (
+                <div>
+                  {referralsList.slice(0, 8).map((r) => (
+                    <div key={r.id} className="hs-consult-row" style={{ fontSize: 12 }}>
+                      <div>
+                        <p className="hs-consult-name" style={{ fontSize: 12 }}>{r.student}</p>
+                        <p className="hs-consult-meta" style={{ fontSize: 11 }}>{r.office}</p>
+                        <div className="hs-consult-badges" style={{ marginTop: 6 }}>
+                          <span className={pillClass(r.status)} style={{ fontSize: 10 }}>{r.status}</span>
+                        </div>
+                      </div>
+                      <div>
+                        <button
+                          type="button"
+                          className="hs-link-action"
+                          onClick={() => setSelectedReferral(r)}
+                        >
+                          <Eye size={13} strokeWidth={1.5} aria-hidden />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyStateMessage title="No outgoing referrals yet" description="Create a referral to coordinate with other departments" compact />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <div className="cases-panel hs-panel-elevated">
+          <div className="cases-panel-header">
+            <div className="cases-panel-top">
+              <div>
+                <div className="cases-panel-title cases-panel-title--strong">Incoming from Discipline Office</div>
+                <p className="hs-list-sub hs-list-sub--tight">
+                  Referrals requiring approval ({disciplineIncomingReferrals.length})
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="cases-table-wrapper">
+            {disciplineIncomingReferrals.length > 0 ? (
+              <table className="cases-table" style={{ fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th>Referral ID</th>
+                    <th>Student</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {disciplineIncomingReferrals.map((r) => (
+                    <tr key={r.referralId}>
+                      <td className="cell-case-id" style={{ fontSize: 11 }}>{r.referralId}</td>
+                      <td>
+                        <p className="cell-student-name">{r.studentName}</p>
+                        <p className="cell-student-id" style={{ fontSize: 10 }}>{r.studentId}</p>
+                      </td>
+                      <td>
+                        <span className={pillClass(r.status)} style={{ fontSize: 11 }}>{r.status}</span>
+                      </td>
+                      <td className="cell-date" style={{ fontSize: 12 }}>{r.date}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="hs-link-action"
+                          onClick={() => setSelectedReferral({ ...r, disciplineIncoming: true })}
+                        >
+                          <Eye size={13} strokeWidth={1.5} aria-hidden />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="hs-list-sub" style={{ padding: "16px 12px", margin: 0 }}>
+                No incoming referrals from Discipline Office.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
   const renderReferrals = () => (
     <>
       <div className="hs-stat-row-4">
@@ -4202,7 +4416,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   );
 
   const hsoTabPrimaryAction = (() => {
-    if (isNurseUser) return null;
     if (isPhysicianUser) {
       if (activeNav === "appointments") return { label: "Issue Certificate", onClick: () => {}, Icon: Plus };
       return null;
@@ -4233,6 +4446,10 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       case "appointments":
         return userDesignation === "admin" || userDesignation === "nurse"
           ? { label: "New Appointment", onClick: openNewAppointmentModal, Icon: CalendarDays }
+          : null;
+      case "nurseStation":
+        return userDesignation === "admin" || userDesignation === "nurse"
+          ? { label: "New Document Request", onClick: openNewDocModal, Icon: FileText }
           : null;
       case "referrals":
         return userDesignation === "admin"
@@ -4273,6 +4490,8 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         return renderRecords();
       case "appointments":
         return renderAppointments();
+      case "nurseStation":
+        return renderNurseStation();
       case "referrals":
         return renderReferrals();
       case "docrequests":

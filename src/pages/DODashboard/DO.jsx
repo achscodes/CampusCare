@@ -44,6 +44,7 @@ import {
   useSanctions,
   useStudentRecords,
 } from "../../hooks/useDisciplineOfficeData";
+import { useRealtimeDisciplineCases } from "../../hooks/useRealtimeDisciplineCases";
 import {
   buildMonthGrid,
   dateKey,
@@ -326,6 +327,14 @@ export function DashboardPage() {
     createCase,
     updateCaseStatus,
   } = useCases([]);
+
+  // Realtime update handler
+  const handleCasesUpdate = useCallback((payload) => {
+    console.log('Discipline cases updated, refreshing...');
+    refreshCases(); // Refresh the cases data
+  }, [refreshCases]);
+
+  useRealtimeDisciplineCases(handleCasesUpdate);
 
   const [newCaseForm, setNewCaseForm] = useState({
     student: "",

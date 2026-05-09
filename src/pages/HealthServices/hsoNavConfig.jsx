@@ -28,6 +28,7 @@ export const HEALTH_NAV_ITEMS = [
   { id: "visits", label: "Student Visits", icon: <Stethoscope {...iconProps} /> },
   { id: "records", label: "Patient Records", icon: <FileHeart {...iconProps} /> },
   { id: "appointments", label: "Appointments", icon: <CalendarDays {...iconProps} /> },
+  { id: "nurseStation", label: "Nurse Station", icon: <FileHeart {...iconProps} /> },
   { id: "referrals", label: "Referrals", icon: <UserPlus {...iconProps} /> },
   { id: "docrequests", label: "Document Requests", icon: <FileText {...iconProps} /> },
   { id: "reports", label: "Reports & Analytics", icon: <BarChart3 {...iconProps} /> },
