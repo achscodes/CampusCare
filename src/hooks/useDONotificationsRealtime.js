@@ -4,20 +4,61 @@ import { useDONotificationStore } from "../stores/doNotificationStore";
 import { readCampusCareSession } from "../utils/campusCareSession";
 import { formatCaseId } from "../utils/disciplineCaseMapper";
 import { normalizeOfficeKey, officeKeyFromInterOfficeLabel } from "../constants/documentRequestAccess";
+import { normalizeHsoDesignation } from "../utils/hsoAccess";
 import {
   isDocRequestDeclined,
   isDocRequestApprovedForFulfillment,
   normalizeInterOfficeDocStatus,
 } from "../utils/interOfficeWorkflow";
 
-function push(title, body) {
-  const id = `rt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const createdAt = new Date().toLocaleString();
-  useDONotificationStore.getState().prependNotification({ id, title, body, createdAt, unread: true });
+function mapNotificationRow(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    category: row.category || "workflow",
+    createdAt: row.created_at ? new Date(row.created_at).toLocaleString() : new Date().toLocaleString(),
+    unread: !row.read_at,
+  };
+}
+
+async function pushImportant(userId, title, body, category = "workflow") {
+  if (!userId || !isSupabaseConfigured() || !supabase) return;
+  const { data, error } = await supabase
+    .from("notifications")
+    .insert({
+      user_id: userId,
+      category,
+      title,
+      body,
+    })
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    const id = `rt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    useDONotificationStore.getState().prependNotification({ id, title, body, createdAt: new Date().toLocaleString(), unread: true });
+    return;
+  }
+  useDONotificationStore.getState().upsertNotification(mapNotificationRow(data));
 }
 
 function myOfficeKey() {
   return normalizeOfficeKey(readCampusCareSession()?.office);
+}
+
+function myHsoDesignation() {
+  const s = readCampusCareSession();
+  return normalizeHsoDesignation(s?.designation);
+}
+
+function canViewNotificationCategory(category, office, hsoDesignation) {
+  const c = String(category || "workflow").toLowerCase();
+  if (office !== "health") return true;
+  if (hsoDesignation === "admin") return true;
+  if (c === "hso:all" || c === `hso:${hsoDesignation}`) return true;
+  if (c.startsWith("hso:")) return false;
+  return false;
 }
 
 function involvedInDocRequest(row, office) {
@@ -71,6 +112,30 @@ export function useDONotificationsRealtime() {
     if (!isSupabaseConfigured() || !supabase) return undefined;
 
     const office = myOfficeKey();
+    const hsoDesignation = myHsoDesignation();
+    let myUserId = null;
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      const { data: authData } = await supabase.auth.getSession();
+      const uid = authData?.session?.user?.id || null;
+      if (!uid || cancelled) return;
+      myUserId = uid;
+
+      const { data } = await supabase
+        .from("notifications")
+        .select("id, title, body, category, read_at, created_at")
+        .eq("user_id", uid)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (cancelled || !data) return;
+      useDONotificationStore.getState().setNotifications(
+        data
+          .filter((r) => canViewNotificationCategory(r.category, office, hsoDesignation))
+          .map(mapNotificationRow),
+      );
+    };
+    bootstrap();
 
     const channel = supabase
       .channel(`campus_staff_notifications_${office || "anon"}`)
@@ -85,7 +150,10 @@ export function useDONotificationsRealtime() {
           const st = row?.student_name ? String(row.student_name) : "";
           if (payload.eventType === "INSERT") {
             const fromStudent = isLikelyStudentSubmittedCase(row);
-            push(
+            if (!fromStudent) return;
+            if (!canViewNotificationCategory("workflow", office, hsoDesignation)) return;
+            void pushImportant(
+              myUserId,
               fromStudent ? "Student submitted a report" : "New disciplinary case",
               [
                 st && `Student: ${st}`,
@@ -102,7 +170,10 @@ export function useDONotificationsRealtime() {
             const prev = String(oldRow.status || "").toLowerCase();
             const next = String(row?.status || "").toLowerCase();
             if (prev === next) return;
-            push(
+            if (!["pending", "ongoing", "closed"].includes(next)) return;
+            if (!canViewNotificationCategory("workflow", office, hsoDesignation)) return;
+            void pushImportant(
+              myUserId,
               "Case status updated",
               [st && `Student: ${st}`, `Case ${idLabel}`, `Status: ${next || "updated"}.`].filter(Boolean).join(" · "),
             );
@@ -116,9 +187,13 @@ export function useDONotificationsRealtime() {
           const row = payload.new || {};
           if (!involvedInDocRequest(row, office)) return;
           if (String(row.target_office || "").toLowerCase() === office) {
-            push(
+            const category = office === "health" ? "hso:admin" : "workflow";
+            if (!canViewNotificationCategory(category, office, hsoDesignation)) return;
+            void pushImportant(
+              myUserId,
               "New document request",
               `${labelForDoc(row)} A partner office asked your office to fulfill a document request.`,
+              category,
             );
           }
         },
@@ -133,10 +208,17 @@ export function useDONotificationsRealtime() {
           const prev = normalizeInterOfficeDocStatus(oldRow.status);
           const next = normalizeInterOfficeDocStatus(newRow.status);
           if (prev === next) return;
+          const category = office === "health" ? "hso:admin" : "workflow";
+          if (!canViewNotificationCategory(category, office, hsoDesignation)) return;
           if (isDocRequestApprovedForFulfillment(newRow.status)) {
-            push("Document request approved", `${labelForDoc(newRow)} Status: Approved. The receiving office may attach the file.`);
+            void pushImportant(
+              myUserId,
+              "Document request approved",
+              `${labelForDoc(newRow)} Status: Approved. The receiving office may attach the file.`,
+              category,
+            );
           } else if (isDocRequestDeclined(newRow.status)) {
-            push("Document request declined", `${labelForDoc(newRow)} Status: Declined.`);
+            void pushImportant(myUserId, "Document request declined", `${labelForDoc(newRow)} Status: Declined.`, category);
           }
         },
       )
@@ -146,8 +228,10 @@ export function useDONotificationsRealtime() {
         (payload) => {
           const row = payload.new || {};
           if (!involvedInDisciplineReferral(row, office)) return;
+          const category = office === "health" ? "hso:admin" : "workflow";
+          if (!canViewNotificationCategory(category, office, hsoDesignation)) return;
           const nm = row?.student_name ? String(row.student_name) : "Student";
-          push("New discipline referral", `${nm} — a new referral was created.`);
+          void pushImportant(myUserId, "New discipline referral", `${nm} — a new referral was created.`, category);
         },
       )
       .on(
@@ -160,10 +244,12 @@ export function useDONotificationsRealtime() {
           const prev = String(oldRow.status || "").toLowerCase();
           const next = String(newRow.status || "").toLowerCase();
           if (prev === next) return;
+          const category = office === "health" ? "hso:admin" : "workflow";
+          if (!canViewNotificationCategory(category, office, hsoDesignation)) return;
           if (next.includes("approved")) {
-            push("Referral approved", `${newRow?.student_name || "Student"} — referral was approved.`);
+            void pushImportant(myUserId, "Referral approved", `${newRow?.student_name || "Student"} — referral was approved.`, category);
           } else if (next.includes("declined") || next.includes("rejected")) {
-            push("Referral declined", `${newRow?.student_name || "Student"} — referral was declined.`);
+            void pushImportant(myUserId, "Referral declined", `${newRow?.student_name || "Student"} — referral was declined.`, category);
           }
         },
       )
@@ -177,10 +263,12 @@ export function useDONotificationsRealtime() {
           const prev = String(oldRow.status || "").toLowerCase();
           const next = String(newRow.status || "").toLowerCase();
           if (prev === next) return;
+          const category = office === "health" ? "hso:admin" : "workflow";
+          if (!canViewNotificationCategory(category, office, hsoDesignation)) return;
           if (next.includes("approved") || next.includes("accepted") || next.includes("completed")) {
-            push("Referral approved", `${newRow?.student_name || "Student"} — referral status updated.`);
+            void pushImportant(myUserId, "Referral approved", `${newRow?.student_name || "Student"} — referral status updated.`, category);
           } else if (next.includes("declined") || next.includes("rejected")) {
-            push("Referral declined", `${newRow?.student_name || "Student"} — referral was declined.`);
+            void pushImportant(myUserId, "Referral declined", `${newRow?.student_name || "Student"} — referral was declined.`, category);
           }
         },
       )
@@ -194,37 +282,30 @@ export function useDONotificationsRealtime() {
           const prev = String(oldRow.status || "").toLowerCase();
           const next = String(newRow.status || "").toLowerCase();
           if (prev === next) return;
+          const category = office === "health" ? "hso:admin" : "workflow";
+          if (!canViewNotificationCategory(category, office, hsoDesignation)) return;
           if (next.includes("approved") || next.includes("completed")) {
-            push("Referral approved", `${newRow?.student_name || "Student"} — referral status updated.`);
+            void pushImportant(myUserId, "Referral approved", `${newRow?.student_name || "Student"} — referral status updated.`, category);
           } else if (next.includes("declined") || next.includes("rejected")) {
-            push("Referral declined", `${newRow?.student_name || "Student"} — referral was declined.`);
+            void pushImportant(myUserId, "Referral declined", `${newRow?.student_name || "Student"} — referral was declined.`, category);
           }
         },
       )
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "discipline_case_conferences" },
+        { event: "*", schema: "public", table: "notifications" },
         (payload) => {
-          if (office && office !== "discipline") return;
-          const row = payload.new && Object.keys(payload.new).length ? payload.new : payload.old;
-          push(
-            "Case conference",
-            `${row?.case_id || "Case"} — ${String(row?.status || "schedule updated")}.`,
-          );
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "discipline_sanctions" },
-        (payload) => {
-          if (office && office !== "discipline") return;
-          const row = payload.new && Object.keys(payload.new).length ? payload.new : payload.old;
-          push("Sanction record", `${row?.student_name || "Student"} — ${String(row?.sanction_type || "sanction")}.`);
+          const row = payload.new || payload.old || {};
+          if (!myUserId || String(row.user_id || "") !== String(myUserId)) return;
+          if (payload.eventType === "DELETE") return;
+          if (!canViewNotificationCategory(row.category, office, hsoDesignation)) return;
+          useDONotificationStore.getState().upsertNotification(mapNotificationRow(row));
         },
       )
       .subscribe();
 
     return () => {
+      cancelled = true;
       supabase.removeChannel(channel);
     };
   }, []);

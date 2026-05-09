@@ -114,7 +114,7 @@ const client = createClient(url, key, {
 **Console Output:**
 ```
 [SUPABASE] ✓ Supabase client initialized successfully
-[SUPABASE] URL: https://lgqfkuvswbvqljixashq.supabase.co
+[SUPABASE] URL: https://YOUR_PROJECT_REF.supabase.co
 [SUPABASE] Configured with PKCE flow
 ```
 
@@ -677,8 +677,8 @@ If something fails, look for the first ✗ message:
 Create `.env.local` with:
 
 ```env
-VITE_SUPABASE_URL=https://lgqfkuvswbvqljixashq.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxncWZrdXZzd2J2cWxqaXhhc2hxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0ODg5MDQsImV4cCI6MjA5MTA2NDkwNH0.fCkELx_ztEd8N9GLk8nn7BPgFopTlDWnCpnWJr_lfwA
+VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+VITE_SUPABASE_ANON_KEY=your_anon_public_key_from_supabase_dashboard
 ```
 
 ### How to Get These Values

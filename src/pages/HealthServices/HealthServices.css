@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700;800&display=swap");
+
 /* Health Services Office — aligned with CampusCare HSO Figma / screenshots */
 
 .hs-page {
@@ -8,6 +10,21 @@
   --hs-navy: #1e3a8a;
   --hs-navy-btn: #1e3a8a;
   --hs-surface: #f8fafc;
+  --nurse-blue: #1075f9;
+  --nurse-blue-strong: #1075f9;
+  --nurse-sidebar: #1e3a8a;
+  --nurse-bg: #f3f4f6;
+  --nurse-card: #ffffff;
+  --nurse-border: #e5e7eb;
+}
+
+.health-services-layout,
+.health-services-layout * {
+  font-family: "Plus Jakarta Sans", sans-serif;
+}
+
+.hs-page {
+  font-size: 14px;
 }
 
 .hs-page .dashboard-content {
@@ -50,20 +67,18 @@
 }
 
 .hs-tab-page-title {
-  font-family: "Inter", sans-serif;
-  font-weight: 600;
-  font-size: 24px;
-  line-height: 32px;
+  font-weight: 700;
+  font-size: 30px;
+  line-height: 1.15;
   color: #1e3a8a;
   margin: 0;
   letter-spacing: -0.02em;
 }
 
 .hs-tab-page-subtitle {
-  font-family: "Inter", sans-serif;
   font-weight: 400;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 13px;
+  line-height: 20px;
   color: #64748b;
   margin: 6px 0 0 0;
   max-width: 720px;
@@ -78,15 +93,603 @@
   flex-shrink: 0;
 }
 
+.health-services-layout .btn-new-case {
+  background: #1075f9;
+  border-color: #1075f9;
+  color: #fff;
+  font-family: "Plus Jakarta Sans", sans-serif;
+  font-weight: 700;
+}
+
+.health-services-layout .btn-new-case:hover {
+  background: #0b63d6;
+  border-color: #0b63d6;
+}
+
 /* Match reference: white panels, light page shell */
 .hs-panel-elevated {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
 .hs-page .cases-panel-title--strong {
-  font-weight: 600;
+  font-weight: 700;
   font-size: 16px;
   color: #0f172a;
+}
+
+.hs-nurse-shell {
+  background: var(--nurse-bg);
+  border-radius: 14px;
+}
+
+.hs-nurse-card {
+  background: var(--nurse-card);
+  border: 1px solid var(--nurse-border);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+  min-height: 204px;
+  overflow: hidden;
+}
+
+.hs-nurse-card .cases-panel-header {
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.hs-nurse-card .cc-modal-body {
+  padding: 10px 14px 14px;
+}
+
+.hs-nurse-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: 14px;
+}
+
+.hs-nurse-kpi .hs-stat-label {
+  font-size: 12px;
+}
+
+.hs-nurse-kpi .hs-stat-value {
+  font-size: 30px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1;
+}
+
+.hs-nurse-ticket {
+  border: 1px solid var(--nurse-border);
+  border-radius: 10px;
+  padding: 9px 11px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+
+.hs-nurse-ticket strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.hs-nurse-ticket p {
+  margin: 2px 0 0;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.hs-nurse-now-serving {
+  text-align: center;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  border-radius: 12px;
+  padding: 18px 12px;
+}
+
+.hs-nurse-now-serving .num {
+  font-size: 56px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--nurse-blue-strong);
+  margin: 4px 0;
+}
+
+.hs-nurse-form .hs-modal-field label {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.hs-nurse-form .hs-modal-field input,
+.hs-nurse-form .hs-modal-field textarea,
+.hs-nurse-form .hs-modal-field select {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.hs-nurse-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.hs-nurse-kpi {
+  padding: 12px 14px 10px;
+  min-height: 84px;
+}
+
+.hs-nurse-kpi-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hs-nurse-kpi-icon--blue { color: #1075f9; background: #eff6ff; }
+.hs-nurse-kpi-icon--green { color: #16a34a; background: #ecfdf5; }
+.hs-nurse-kpi-icon--orange { color: #ea580c; background: #fff7ed; }
+.hs-nurse-kpi-icon--red { color: #dc2626; background: #fef2f2; }
+
+.hs-nurse-dash-layout {
+  display: grid;
+  grid-template-columns: 1.1fr 0.95fr 0.95fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.hs-nurse-card--queue {
+  min-height: 430px;
+}
+
+.hs-nurse-mid-col,
+.hs-nurse-right-col {
+  display: grid;
+  gap: 12px;
+}
+
+.hs-nurse-ticket--dashboard {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  gap: 12px;
+  align-items: center;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hs-nurse-ticket--dashboard:hover {
+  border-color: #bfdbfe;
+  box-shadow: 0 1px 5px rgba(37, 99, 235, 0.12);
+}
+
+.hs-nurse-ticket-no span {
+  display: block;
+  font-size: 9px;
+  color: #94a3b8;
+  letter-spacing: 0.06em;
+}
+
+.hs-nurse-ticket-no strong {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.hs-nurse-now-serving-strip {
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.hs-nurse-now-serving-strip > strong {
+  font-size: 22px;
+  letter-spacing: 0.04em;
+}
+
+.hs-nurse-now-serving-strip p {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.hs-nurse-now-serving-strip span {
+  margin: 0;
+  font-size: 10px;
+  color: #64748b;
+}
+
+.hs-nurse-full-btn {
+  width: 100%;
+  justify-content: center;
+  height: 38px;
+}
+
+.hs-nurse-vitals-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.hs-nurse-route-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.hs-nurse-queue-layout {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.hs-nurse-serving-label {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: #6b7280;
+  text-align: center;
+}
+
+.hs-nurse-serving-title {
+  margin: 4px 0 0;
+  text-align: center;
+  font-size: 30px;
+  letter-spacing: 0.02em;
+  color: #1075f9;
+  font-weight: 800;
+}
+
+.hs-nurse-serving-box {
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  background: #f8fafc;
+  min-height: 118px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 76px;
+  font-weight: 800;
+  color: #3b82f6;
+  letter-spacing: 0.06em;
+}
+
+.hs-nurse-quick-title {
+  margin: 16px 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+  letter-spacing: 0.04em;
+}
+
+.hs-nurse-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.hs-nurse-quick-grid .hs-btn-secondary {
+  height: 44px;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  padding: 0;
+}
+
+.hs-nurse-ticket--upnext {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.hs-phys-shell {
+  background: #f3f4f6;
+}
+
+.hs-phys-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.hs-phys-kpi {
+  min-height: 86px;
+}
+
+.hs-phys-main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.hs-phys-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+}
+
+.hs-phys-queue-item {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #10b981;
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+
+.hs-phys-queue-item--active {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 2px rgba(16, 117, 249, 0.12);
+}
+
+.hs-phys-queue-no {
+  font-size: 34px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1;
+}
+
+.hs-phys-queue-main strong {
+  font-size: 14px;
+  color: #111827;
+}
+
+.hs-phys-queue-main p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.hs-phys-queue-right p {
+  margin: 0;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.hs-phys-queue-right span {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #374151;
+  background: #f1f5f9;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.hs-phys-active-title-wrap {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.hs-phys-active-title-wrap--empty {
+  gap: 0;
+}
+
+.hs-phys-active-q {
+  font-size: 44px;
+  line-height: 1;
+  color: #1075f9;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.hs-phys-panel-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.hs-phys-panel-actions .hs-btn-primary:disabled,
+.hs-phys-panel-actions .hs-btn-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.hs-phys-vitals-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.hs-phys-vitals-grid span {
+  display: block;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.hs-phys-vitals-grid strong {
+  display: block;
+  font-size: 22px;
+  color: #111827;
+}
+
+.hs-phys-queue-layout {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 14px;
+}
+
+.hs-phys-records-grid {
+  display: grid;
+  grid-template-columns: 0.95fr 1.05fr;
+  gap: 12px;
+}
+
+.hs-phys-records-left,
+.hs-phys-records-right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hs-phys-records-search {
+  margin-bottom: 0;
+}
+
+.hs-phys-records-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hs-phys-records-header {
+  align-items: flex-start;
+}
+
+.hs-phys-records-header .hs-btn-secondary {
+  margin-left: auto;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+}
+
+.hs-phys-cert-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.hs-phys-cert-actions .hs-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hs-phys-cert-kpis .hs-stat-card-top {
+  align-items: center;
+}
+
+.hs-phys-cert-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hs-phys-cert-search-wrap {
+  width: min(100%, 280px);
+}
+
+.hs-phys-cert-table-tools {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0 10px;
+}
+
+.hs-phys-cert-row-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hs-icon-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.hs-icon-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.hs-icon-btn:focus-visible {
+  outline: 2px solid #bfdbfe;
+  outline-offset: 1px;
+}
+
+.hs-phys-tab-row {
+  display: inline-flex;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.hs-phys-tab-btn {
+  background: #f8fafc;
+  border: none;
+  border-right: 1px solid #e2e8f0;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 400;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.hs-phys-tab-btn:last-child {
+  border-right: none;
+}
+
+.hs-phys-tab-btn--active {
+  background: #fff;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.hs-phys-vitals-form .hs-modal-field input,
+.hs-phys-vitals-form .hs-modal-field textarea,
+.hs-phys-consult-form .hs-modal-field textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.hs-nurse-form .hs-modal-field input {
+  height: 34px;
+}
+
+.hs-nurse-form .hs-modal-field textarea {
+  min-height: 56px;
+}
+
+@media (max-width: 1200px) {
+  .hs-nurse-kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hs-nurse-dash-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-nurse-mid-col,
+  .hs-nurse-right-col {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .hs-nurse-mid-col,
+  .hs-nurse-right-col {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-nurse-route-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .hs-stat-icon--warn {
@@ -331,21 +934,87 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 36px;
+  height: 34px;
   padding: 0 16px;
-  background: var(--hs-green);
+  background: #1075f9;
   border: none;
   border-radius: 8px;
-  font-family: "Inter", sans-serif;
-  font-weight: 600;
-  font-size: 14px;
+  font-family: "Plus Jakarta Sans", sans-serif;
+  font-weight: 700;
+  font-size: 12px;
   color: #fff;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .hs-btn-primary:hover {
-  background: var(--hs-green-dark);
+  background: #0b63d6;
+}
+
+.hs-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.hs-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 16px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-family: "Plus Jakarta Sans", sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  color: #334155;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.hs-btn-secondary:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.hs-btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.hs-btn-success {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 16px;
+  background: #00841d;
+  border: none;
+  border-radius: 8px;
+  font-family: "Plus Jakarta Sans", sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hs-btn-success:hover {
+  background: #006a17;
+}
+
+.hs-btn-primary:focus-visible,
+.hs-btn-secondary:focus-visible,
+.hs-select:focus-visible,
+.hs-control:focus-visible,
+.hs-filter-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
 }
 
 .hs-btn-navy {
@@ -661,6 +1330,33 @@
   color: #0f172a;
   background: #fff;
   cursor: pointer;
+}
+
+.hs-control {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-family: "Inter", sans-serif;
+  font-size: 14px;
+  color: #0f172a;
+  background: #fff;
+}
+
+.hs-filter-input {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-family: "Inter", sans-serif;
+  font-size: 14px;
+  color: #0f172a;
+  background: #fff;
+  width: 100%;
+}
+
+.hs-filter-input::placeholder {
+  color: #94a3b8;
 }
 
 /* ── Warning / confidential banners ─────────────────────────────── */
@@ -1018,6 +1714,54 @@
   text-align: center;
   color: #64748b;
   font-size: 14px;
+}
+
+.hs-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 112px;
+  padding: 16px 14px;
+  border: 1px dashed #dbeafe;
+  border-radius: 12px;
+  background: #fbfdff;
+  text-align: center;
+}
+
+.hs-empty-state--compact {
+  min-height: 92px;
+  padding: 14px 12px;
+}
+
+.hs-empty-state-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #eaf2ff;
+  color: #2563eb;
+}
+
+.hs-empty-state-title {
+  margin: 0;
+  color: #0f172a;
+  font-family: "Inter", sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.hs-empty-state-description {
+  margin: 0;
+  color: #64748b;
+  font-family: "Inter", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  max-width: 420px;
 }
 
 .hs-reports-breakdown-heading {
@@ -1811,4 +2555,834 @@
   line-height: 1.5;
   color: #0f172a;
   word-break: break-word;
+}
+
+/* ── Dentist workspace ─────────────────────────────────────────── */
+.hs-dent-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hs-dent-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.hs-dent-kpi-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hs-dent-kpi-icon--blue {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.hs-dent-kpi-icon--green {
+  background: #ecfdf5;
+  color: #16a34a;
+}
+
+.hs-dent-kpi-icon--purple {
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+
+.hs-dent-kpi-icon--orange {
+  background: #fff7ed;
+  color: #ea580c;
+}
+
+.hs-dent-main-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.hs-dent-left-col,
+.hs-dent-right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hs-dent-card {
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.hs-dent-kpi-card {
+  min-height: 118px;
+  box-sizing: border-box;
+}
+
+.hs-dent-kpi-card .hs-stat-card-top {
+  display: flex;
+  margin-bottom: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.hs-dent-kpi-card .hs-stat-label {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #64748b;
+}
+
+.hs-dent-card-pad {
+  padding: 16px 20px 20px;
+}
+
+.hs-dent-panel-head--compact {
+  padding: 16px 20px 0;
+  min-height: unset;
+  border-bottom: none;
+}
+
+.hs-dent-panel-head--compact .cases-panel-title {
+  margin: 0;
+}
+
+.hs-dent-btn-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.hs-dent-btn {
+  min-height: 42px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.hs-dent-btn--block {
+  width: 100%;
+}
+
+.hs-dent-save-wrap {
+  padding: 8px 18px 22px;
+  box-sizing: border-box;
+}
+
+.hs-dent-kicker {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #94a3b8;
+}
+
+.hs-dent-patient-name {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.hs-dent-priority {
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.hs-dent-concern {
+  margin: 12px 0 14px;
+  font-size: 14px;
+  color: #334155;
+}
+
+.hs-dent-full-btn {
+  width: 100%;
+  margin-top: 8px;
+  min-height: 42px;
+}
+
+.hs-dent-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 0;
+  gap: 12px;
+}
+
+.hs-dent-card-head .cases-panel-title {
+  margin: 0;
+}
+
+.hs-dent-card-head .hs-link-action {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.hs-dent-appt-list {
+  padding: 8px 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hs-dent-appt-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  min-height: 56px;
+}
+
+.hs-dent-appt-row > :last-child {
+  justify-self: end;
+  text-align: right;
+}
+
+.hs-dent-appt-time {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.hs-dent-queue-pill {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  margin-bottom: 8px;
+}
+
+.hs-dent-queue-pill > :last-child {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.hs-dent-quick-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 8px;
+}
+
+.hs-dent-quick-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 24px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 20px;
+  border: none;
+  background: #fff;
+  border-top: 1px solid #f1f5f9;
+  cursor: pointer;
+  font-size: 14px;
+  color: #0f172a;
+  text-align: left;
+  min-height: 52px;
+  box-sizing: border-box;
+}
+
+.hs-dent-quick-row:first-of-type {
+  border-top: none;
+}
+
+.hs-dent-quick-row:hover {
+  background: #f8fafc;
+}
+
+.hs-dent-quick-chevron {
+  margin-left: auto;
+  color: #94a3b8;
+}
+
+.hs-dent-week-chart {
+  padding: 8px 12px 16px;
+}
+
+.hs-dent-recent-list {
+  padding: 4px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hs-dent-recent-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.hs-dent-recent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #22c55e;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.hs-dent-queue-page .hs-dent-q-badge {
+  font-size: 42px;
+  font-weight: 800;
+  color: #1075f9;
+  letter-spacing: 0.02em;
+}
+
+.hs-dent-queue-serving-head {
+  text-align: center;
+}
+
+.hs-dent-upnext-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hs-dent-upnext-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: #64748b;
+  align-items: center;
+}
+
+.hs-dent-upnext-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hs-dent-queue-row {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) minmax(108px, auto);
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  margin-bottom: 10px;
+  min-height: 64px;
+  box-sizing: border-box;
+}
+
+.hs-dent-queue-ticket {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.hs-dent-queue-ticket--wide strong {
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.hs-dent-queue-ticket-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.hs-dent-queue-ticket strong {
+  font-size: 16px;
+  color: #0f172a;
+}
+
+.hs-dent-queue-info strong {
+  display: block;
+  font-size: 15px;
+  margin-bottom: 2px;
+}
+
+.hs-dent-queue-wait {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.hs-dent-doc-queue-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 4px;
+}
+
+.hs-dent-doc-queue-row {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fafbfc;
+  min-height: 58px;
+}
+
+.hs-dent-odont-wrap {
+  padding: 4px 18px 8px;
+}
+
+.hs-dent-queue-page .hs-nurse-quick-grid {
+  gap: 10px;
+}
+
+.hs-dent-queue-page .hs-nurse-quick-grid .hs-btn-secondary {
+  min-height: 48px;
+  height: auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 6px;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  border-radius: 10px;
+}
+
+.hs-dent-records-grid {
+  display: grid;
+  grid-template-columns: 0.38fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.hs-dent-records-search {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 18px;
+  box-sizing: border-box;
+}
+
+.hs-dent-record-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.hs-dent-record-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  cursor: pointer;
+}
+
+.hs-dent-record-item--active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.hs-dent-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 12px;
+}
+
+.hs-dent-open-chart {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 10px;
+}
+
+.hs-dent-detail-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.hs-dent-detail-tab {
+  padding: 12px 16px;
+  border: none;
+  background: none;
+  font-size: 14px;
+  color: #64748b;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.hs-dent-detail-tab--active {
+  color: #0f172a;
+  font-weight: 600;
+  border-bottom-color: #2563eb;
+}
+
+.hs-dent-detail-body {
+  padding: 12px 20px 20px;
+}
+
+.hs-dent-proc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hs-dent-proc-card {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.hs-dent-proc-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #2563eb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.hs-dent-chart-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hs-dent-chart-kpis {
+  margin-bottom: 0;
+}
+
+.hs-dent-chart-kpis .hs-stat-card {
+  min-height: 104px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.hs-dent-chart-kpis .hs-stat-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.hs-dent-chart-kpis .hs-stat-label {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
+.hs-dent-kpi-inline-icon {
+  color: #64748b;
+}
+
+.hs-dent-chart-grid {
+  display: grid;
+  grid-template-columns: 0.42fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.hs-dent-chart-main {
+  padding-bottom: 18px;
+}
+
+.hs-odont-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 18px 2px;
+}
+
+.hs-odont-toggle {
+  display: inline-flex;
+  padding: 2px;
+  background: #f8fbff;
+  border-radius: 999px;
+  border: 1px solid #dbe7f7;
+}
+
+.hs-odont-toggle-btn {
+  border: none;
+  background: transparent;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6e82a0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.hs-odont-toggle-btn--on {
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.hs-odont-paint-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 18px 10px;
+}
+
+.hs-odont-paint {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid #d9e5f5;
+  background: #fff;
+  font-size: 13px;
+  color: #647b99;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.hs-odont-paint--active {
+  border-color: #55a1ff;
+  background: #ffffff;
+  color: #1d4ed8;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px #dbeafe inset;
+}
+
+.hs-dent-proc-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 18px 14px;
+}
+
+.hs-dent-proc-pill {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 12px;
+  color: #475569;
+  cursor: pointer;
+}
+
+.hs-dent-proc-pill--active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+  font-weight: 600;
+}
+
+.hs-dent-chart-split {
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: 14px;
+  padding: 0 18px;
+  align-items: start;
+}
+
+.hs-dent-chart-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hs-dent-textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 72px;
+}
+
+.hs-dent-follow-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hs-dent-follow-card .hs-modal-field {
+  margin: 0;
+}
+
+.hs-dent-fu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px 20px 12px;
+}
+
+.hs-dent-fu-head.cases-panel-header {
+  flex-direction: row;
+  gap: 12px;
+}
+
+.hs-dent-fu-head .cases-panel-title {
+  margin: 0;
+}
+
+.hs-dent-fu-search {
+  width: min(100%, 260px);
+}
+
+.hs-dent-fu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 20px 20px;
+  box-sizing: border-box;
+}
+
+.hs-dent-fu-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto minmax(108px, auto);
+  gap: 16px;
+  align-items: center;
+  padding: 12px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  min-height: 72px;
+}
+
+.hs-dent-fu-status {
+  justify-self: end;
+  align-self: center;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.hs-dent-fu-datebox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  padding: 8px 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+}
+
+.hs-dent-fu-mon {
+  font-size: 10px;
+  font-weight: 700;
+  color: #2563eb;
+  letter-spacing: 0.06em;
+}
+
+.hs-dent-fu-datebox strong {
+  font-size: 20px;
+  color: #1d4ed8;
+  line-height: 1;
+}
+
+.hs-dent-fu-main strong {
+  font-size: 15px;
+}
+
+.hs-dent-reschedule {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+  justify-self: end;
+}
+
+.hs-dent-reschedule:hover {
+  color: #0f172a;
+}
+
+@media (max-width: 1100px) {
+  .hs-dent-kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hs-dent-main-grid,
+  .hs-dent-records-grid,
+  .hs-dent-chart-grid,
+  .hs-dent-chart-split {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-dent-queue-row {
+    grid-template-columns: 88px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+  }
+
+  .hs-dent-queue-wait {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .hs-dent-fu-row {
+    grid-template-columns: 64px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+  }
+
+  .hs-dent-fu-status {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .hs-dent-reschedule {
+    grid-column: 1 / -1;
+    justify-self: end;
+    width: 100%;
+    max-width: 200px;
+    margin-left: auto;
+  }
 }

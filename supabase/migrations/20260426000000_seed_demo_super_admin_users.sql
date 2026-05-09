@@ -5,7 +5,8 @@
 -- on trigger public.handle_new_user() to insert public.profiles.
 -- If a user already exists (same email), updates password + metadata + profile.
 --
--- Password (change after first login in production): faparina0207
+-- Demo password (replace in this file before running in any shared environment; rotate after first login):
+--   CampusCare-Demo-ChangeMe!
 --
 -- Run via: supabase db push / migration, or paste into Dashboard → SQL → Run.
 -- Safe to run more than once (idempotent by email).
@@ -28,14 +29,14 @@ begin
     '00000000-0000-0000-0000-000000000000'::uuid
   ) into inst;
 
-  epw := crypt('faparina0207', gen_salt('bf'));
+  epw := crypt('CampusCare-Demo-ChangeMe!', gen_salt('bf'));
 
   for r in
     select * from (
       values
-        ('hsosupport.campuscare@gmail.com'::text, 'health'::text, 'HSO'::text, 'Super Admin'::text),
-        ('dosupport.campuscare@gmail.com', 'discipline', 'DO', 'Super Admin'),
-        ('sdaosupport.campuscare@gmail.com', 'development', 'SDAO', 'Super Admin')
+        ('demo-hso@example.edu'::text, 'health'::text, 'HSO'::text, 'Super Admin'::text),
+        ('demo-do@example.edu', 'discipline', 'DO', 'Super Admin'),
+        ('demo-sdao@example.edu', 'development', 'SDAO', 'Super Admin')
     ) as t(email, office, fn, ln)
   loop
     meta := jsonb_build_object(

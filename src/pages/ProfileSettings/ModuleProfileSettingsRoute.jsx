@@ -18,9 +18,10 @@ import {
   profileSettingsPathForSessionOffice,
 } from "../../utils/profileSettingsRoutes";
 import { readCampusCareSession } from "../../utils/campusCareSession";
+import { normalizeHsoDesignation } from "../../utils/hsoAccess";
 import { DisciplineOfficeTopBar } from "../DODashboard/DisciplineOfficeTopBar";
 import { SDAO_NAV_ITEMS, SDAO_NOTIFICATIONS } from "../SDAO/SDAO";
-import { HEALTH_NAV_ITEMS, HS_NOTIFICATIONS } from "../HealthServices/HealthServices";
+import { HEALTH_NAV_ITEMS, HS_NOTIFICATIONS } from "../HealthServices/hsoNavConfig";
 import "../SDAO/SDAO.css";
 import "../HealthServices/HealthServices.css";
 
@@ -55,8 +56,16 @@ export default function ModuleProfileSettingsRoute({ variant }) {
   const userRole = session?.role || "—";
 
   const canInterOfficeDocRequest = canCreateDocumentRequest(session?.office);
+  const hsoDesignation = normalizeHsoDesignation(session?.designation);
   const isStudentSession = isStudentLikeCampusRole(session?.role);
   const showSdaoDocRequestNav = canInterOfficeDocRequest || isStudentSession;
+  const hsoNavAllowedByDesignation = useMemo(() => {
+    if (hsoDesignation === "admin") {
+      return new Set(["dashboard", "userManagement", "staffScheduling", "queue", "reports", "settings"]);
+    }
+    if (hsoDesignation === "nurse") return new Set(["dashboard", "checkin", "queue", "visits", "records", "appointments", "queueDisplay"]);
+    return new Set(["dashboard", "consultation", "visits", "records", "appointments", "queueDisplay"]);
+  }, [hsoDesignation]);
 
   const sdaoNavItems = useMemo(() => {
     if (showSdaoDocRequestNav) return SDAO_NAV_ITEMS;
@@ -64,9 +73,10 @@ export default function ModuleProfileSettingsRoute({ variant }) {
   }, [showSdaoDocRequestNav]);
 
   const healthNavItems = useMemo(() => {
-    if (canInterOfficeDocRequest) return HEALTH_NAV_ITEMS;
-    return HEALTH_NAV_ITEMS.filter((i) => i.id !== "docrequests");
-  }, [canInterOfficeDocRequest]);
+    return HEALTH_NAV_ITEMS.filter(
+      (i) => hsoNavAllowedByDesignation.has(i.id) && (canInterOfficeDocRequest || i.id !== "docrequests"),
+    );
+  }, [canInterOfficeDocRequest, hsoNavAllowedByDesignation]);
 
   const workflow =
     variant === "sdao" ? "development" : variant === "hso" ? "health" : "discipline";

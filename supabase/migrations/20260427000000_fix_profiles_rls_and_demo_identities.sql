@@ -60,9 +60,9 @@ from auth.users u
 where i.user_id = u.id
   and i.provider = 'email'
   and lower(u.email) in (
-    'hsosupport.campuscare@gmail.com',
-    'dosupport.campuscare@gmail.com',
-    'sdaosupport.campuscare@gmail.com'
+    'demo-hso@example.edu',
+    'demo-do@example.edu',
+    'demo-sdao@example.edu'
   )
   and i.provider_id is distinct from u.id::text;
 

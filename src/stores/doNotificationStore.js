@@ -6,6 +6,24 @@ export const useDONotificationStore = create(
   persist(
     (set) => ({
       notifications: DEFAULT_NOTIFICATIONS,
+      setNotifications: (rows) =>
+        set(() => ({
+          notifications: Array.isArray(rows) ? rows.slice(0, 80) : [],
+        })),
+      upsertNotification: (n) =>
+        set((s) => {
+          const next = [
+            {
+              id: n.id,
+              title: n.title,
+              body: n.body,
+              createdAt: n.createdAt || new Date().toLocaleString(),
+              unread: n.unread !== false,
+            },
+            ...s.notifications.filter((x) => String(x.id) !== String(n.id)),
+          ].slice(0, 80);
+          return { notifications: next };
+        }),
       prependNotification: (n) =>
         set((s) => ({
           notifications: [

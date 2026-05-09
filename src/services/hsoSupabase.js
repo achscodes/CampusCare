@@ -157,6 +157,20 @@ export function mapAppointmentRow(r) {
     duration: r.duration?.trim() || "—",
     purpose: r.purpose?.trim() || "—",
     notes: r.notes?.trim() || "",
+    designation: String(r.designation || "").toLowerCase() || "physician",
+    consultationType: r.consultation_type?.trim() || r.purpose?.trim() || "General Check-up",
+    additionalComments: r.additional_comments?.trim() || "",
+    workflowStatus: String(r.workflow_status || r.status || "booked").toLowerCase(),
+    checkinCode: r.checkin_code?.trim() || "",
+    checkinValidFrom: r.checkin_valid_from || null,
+    checkinValidUntil: r.checkin_valid_until || null,
+    checkedInAt: r.checked_in_at || null,
+    queueNumber: r.queue_number ? Number(r.queue_number) : null,
+    providerQueue: String(r.provider_queue || "").toLowerCase() || null,
+    nurseVitals: r.nurse_vitals || null,
+    nurseCompletedAt: r.nurse_assessment_completed_at || null,
+    consultationStartedAt: r.consultation_started_at || null,
+    consultationCompletedAt: r.consultation_completed_at || null,
   };
 }
 
@@ -184,6 +198,92 @@ export function mapReferralRow(r) {
     urgent: Boolean(r.urgent),
     attachments: Array.isArray(r.attachments) ? r.attachments : [],
     timeline: Array.isArray(r.timeline) ? r.timeline : [],
+  };
+}
+
+function inferDesignationFromProfile(profile) {
+  const raw = String(profile?.designation || "").trim().toLowerCase();
+  if (["nurse", "physician", "dentist", "admin"].includes(raw)) return raw;
+
+  const roleRaw = String(profile?.role || "").trim().toLowerCase();
+  if (roleRaw.includes("nurse")) return "nurse";
+  if (roleRaw.includes("dentist")) return "dentist";
+  if (roleRaw.includes("physician") || roleRaw.includes("doctor")) return "physician";
+  if (roleRaw.includes("admin")) return "admin";
+  return "admin";
+}
+
+function mapProfileToStaffRow(profile) {
+  const designation = inferDesignationFromProfile(profile);
+  const first = String(profile?.first_name || "").trim();
+  const middle = String(profile?.middle_initial || "").trim();
+  const last = String(profile?.last_name || "").trim();
+  const middleToken = middle ? `${middle}.` : "";
+  const fullName = [first, middleToken, last].filter(Boolean).join(" ").trim() || "HSO Staff";
+  const role = designation === "admin"
+    ? "Admin"
+    : designation === "nurse"
+      ? "Nurse"
+      : designation === "dentist"
+        ? "Dentist"
+        : "Physician";
+  const titlePrefix = designation === "nurse" ? "Nurse" : designation === "admin" ? "" : "Dr.";
+  const status = String(profile?.account_status || "").toLowerCase() === "approved" ? "on-duty" : "off-duty";
+
+  return {
+    id: String(profile.id),
+    name: fullName,
+    titlePrefix,
+    role,
+    designation,
+    status,
+    patientLoad: 0,
+    email: String(profile?.email || "").trim() || "—",
+    lastLogin: profile?.updated_at ? formatShortDate(profile.updated_at) : "—",
+    schedule: { mon: "—", tue: "—", wed: "—", thu: "—", fri: "—", sat: "—" },
+    shift: "—",
+    requestedAt: profile?.created_at ? formatShortDate(profile.created_at) : "—",
+    accountStatus: String(profile?.account_status || "pending").toLowerCase(),
+  };
+}
+
+/** @param {import("@supabase/supabase-js").SupabaseClient} supabase */
+export async function loadHsoStaffFromSupabase(supabase) {
+  const selectVariants = [
+    "id, first_name, middle_initial, last_name, office, role, account_status, updated_at, created_at, designation, email",
+    "id, first_name, middle_initial, last_name, office, role, account_status, updated_at, created_at",
+  ];
+  let data = null;
+  let error = null;
+  for (const selectCols of selectVariants) {
+    const res = await supabase
+      .from("profiles")
+      .select(selectCols)
+      .eq("office", "health")
+      .order("created_at", { ascending: false });
+    if (!res.error) {
+      data = res.data;
+      error = null;
+      break;
+    }
+    error = res.error;
+  }
+
+  if (error) {
+    return {
+      ok: false,
+      error,
+      staffRows: [],
+      pendingApprovals: [],
+    };
+  }
+
+  const staffRows = (data || []).map(mapProfileToStaffRow);
+  return {
+    ok: true,
+    error: null,
+    staffRows,
+    pendingApprovals: staffRows.filter((r) => r.accountStatus === "pending"),
   };
 }
 

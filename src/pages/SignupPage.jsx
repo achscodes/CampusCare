@@ -26,6 +26,8 @@ import {
 } from "../utils/signupFieldValidation";
 import { showToast } from "../utils/toast";
 import { clearCampusCareSession, writeCampusCareSession } from "../utils/campusCareSession";
+import { devLog, devWarn } from "../utils/devLog";
+import { HSO_DESIGNATION_OPTIONS } from "../utils/hsoAccess";
 
 const SignupPage = () => {
   const navigate = useNavigate();
@@ -39,6 +41,7 @@ const SignupPage = () => {
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [office, setOffice] = useState("");
+  const [hsoDesignation, setHsoDesignation] = useState("nurse");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [policiesAccepted, setPoliciesAccepted] = useState(false);
@@ -56,6 +59,16 @@ const SignupPage = () => {
       guidance: "Guidance Services",
       discipline: "Discipline Office",
       development: "Student Development and Activities Office",
+    }),
+    [],
+  );
+
+  const hsoRoleByDesignation = useMemo(
+    () => ({
+      nurse: "Nurse",
+      physician: "Physician",
+      dentist: "Dentist",
+      admin: "Admin",
     }),
     [],
   );
@@ -87,6 +100,9 @@ const SignupPage = () => {
     }
 
     if (!office) nextErrors.office = "Please select your office.";
+    if (office === "health" && !hsoDesignation) {
+      nextErrors.hsoDesignation = "Please select HSO designation.";
+    }
 
     const pwErr = validateStaffPassword(password);
     if (pwErr) nextErrors.password = pwErr;
@@ -109,13 +125,19 @@ const SignupPage = () => {
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
-    const { officeKey, role } = resolveSignupOfficeAndRole(office, roleByOffice);
+    const resolved = resolveSignupOfficeAndRole(office, roleByOffice);
+    const officeKey = resolved.officeKey;
+    const role = officeKey === "health"
+      ? (hsoRoleByDesignation[hsoDesignation] || "Nurse")
+      : resolved.role;
+    const normalizedDesignation = officeKey === "health" ? hsoDesignation : undefined;
+    const accountStatus = officeKey === "health" && normalizedDesignation === "admin" ? "approved" : "pending";
 
     if (isSupabaseConfigured() && supabase) {
       setSubmitting(true);
       setFormError("");
-      console.log("[AUTH] → Attempting Supabase signup for:", email.trim());
-      
+      devLog("[AUTH] Attempting Supabase signup for:", email.trim());
+
       try {
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
@@ -128,50 +150,52 @@ const SignupPage = () => {
               last_name: lastName.trim(),
               office: officeKey,
               role,
+              designation: normalizedDesignation,
+              account_status: accountStatus,
             },
           },
         });
         setSubmitting(false);
 
         if (error) {
-          console.error("[AUTH] ✗ Signup failed:", error);
+          devWarn("[AUTH] Signup failed:", error);
           setFormError(formatAuthError(error));
           return;
         }
 
-        console.log("[AUTH] ✓ Supabase signup successful");
+        devLog("[AUTH] Supabase signup successful");
 
         if (data.user && !data.session) {
-          console.log("[AUTH] → Email confirmation required");
+          devLog("[AUTH] Email confirmation required");
           setFormError("");
           showToast("Check your email to confirm your account, then sign in.", { variant: "info" });
           navigate("/signin", {
             state: {
               message:
-                "Check your email to confirm your account, then sign in. After confirmation, you will be routed to Super Admin or your office workspace.",
+                "Check your email to confirm your account, then sign in. After confirmation, you will be routed to your office workspace.",
             },
           });
           return;
         }
 
         if (data.session && data.user) {
-          console.log("[AUTH] → Immediate session created, syncing profile...");
+          devLog("[AUTH] Immediate session created, syncing profile...");
           const sync = await syncCampusCareSessionFromSupabaseUser(data.user, {
             rememberMe: false,
             emailFallback: email.trim(),
           });
           if (!sync.ok) {
-            console.warn("[AUTH] ✗ Session sync failed:", sync.accountStatus);
+            devWarn("[AUTH] Session sync failed:", sync.accountStatus);
             await supabase.auth.signOut();
             clearCampusCareSession();
             setFormError(
               sync.accountStatus === "rejected"
                 ? "Your account was rejected. Contact your office administrator."
-                : "Your account is pending approval from a Super Admin before you can sign in.",
+                : "Your account is pending approval from your office administrator before you can sign in.",
             );
             return;
           }
-          console.log("[AUTH] ✓ Signup and session created successfully");
+          devLog("[AUTH] Signup and session created");
           const dest = isSuperAdminSession(sync.session)
             ? getSuperAdminRouteForOffice(sync.session.office)
             : getHomeRouteForOffice(sync.session.office);
@@ -180,20 +204,20 @@ const SignupPage = () => {
           return;
         }
 
-        console.log("[AUTH] ✓ Signup completed, awaiting confirmation");
+        devLog("[AUTH] Signup completed, awaiting confirmation");
         setFormError("");
         showToast("Account created. You can sign in now.", { variant: "success" });
         navigate("/signin", { state: { message: "Account created. You can sign in now." } });
         return;
       } catch (err) {
-        console.error("[AUTH] ✗ Unexpected error during signup:", err);
+        devWarn("[AUTH] Unexpected error during signup:", err);
         setSubmitting(false);
         setFormError(err?.message || "An unexpected error occurred. Please try again.");
         return;
       }
     }
 
-    console.log("[AUTH] → Using offline mode for signup");
+    devLog("[AUTH] Offline mode for signup");
     try {
       const created = registerUser({
         firstName: firstName.trim(),
@@ -203,8 +227,9 @@ const SignupPage = () => {
         password,
         office: officeKey,
         role,
+        designation: normalizedDesignation,
       });
-      console.log("[AUTH] ✓ Offline user registered");
+      devLog("[AUTH] Offline user registered");
       setFormError("");
       if (isSuperAdminSession({ role })) {
         const session = {
@@ -215,6 +240,7 @@ const SignupPage = () => {
           name: `${created.firstName} ${created.lastName}`.trim(),
           rememberMe: false,
           accountStatus: created.accountStatus ?? "approved",
+          designation: normalizedDesignation,
         };
         writeCampusCareSession(session, false);
         showToast("Account created. Welcome to CampusCare.", { variant: "success" });
@@ -224,7 +250,7 @@ const SignupPage = () => {
         navigate("/signin", { state: { message: "Account created. You can sign in now." } });
       }
     } catch (err) {
-      console.error("[AUTH] ✗ Offline registration failed:", err);
+      devWarn("[AUTH] Offline registration failed:", err);
       setFormError(err?.message || "Unable to create account.");
     }
   };
@@ -241,7 +267,7 @@ const SignupPage = () => {
 
           <h1 className="auth-split-title">Create Your Account</h1>
           <p className="auth-split-subtitle">
-            All fields marked with * are required. Choose your office or a Super Admin role for correct access after sign-in.
+            All fields marked with * are required. Choose your office and, for HSO staff, your designation for role-based access.
           </p>
 
           <form className="signup-form auth-form-fields" onSubmit={handleSubmit} noValidate>
@@ -384,6 +410,37 @@ const SignupPage = () => {
                 ) : null}
               </div>
             </div>
+
+            {office === "health" ? (
+              <div className="form-group">
+                <label htmlFor="hsoDesignation">HSO Designation *</label>
+                <select
+                  id="hsoDesignation"
+                  name="hsoDesignation"
+                  className={`form-select${fieldErrors.hsoDesignation ? " form-input-error" : ""}`}
+                  value={hsoDesignation}
+                  onChange={(e) => {
+                    setHsoDesignation(e.target.value);
+                    clearFieldError("hsoDesignation");
+                  }}
+                  aria-invalid={Boolean(fieldErrors.hsoDesignation)}
+                  aria-describedby={fieldErrors.hsoDesignation ? "hsoDesignation-error" : undefined}
+                >
+                  {HSO_DESIGNATION_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="form-feedback-slot" id="hsoDesignation-error">
+                  {fieldErrors.hsoDesignation ? (
+                    <p className="form-error" role="alert">
+                      {fieldErrors.hsoDesignation}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
 
             <div className="form-group">
               <label htmlFor="password">Password *</label>

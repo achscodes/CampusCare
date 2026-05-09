@@ -1,16 +1,18 @@
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { isSuperAdminSession } from "./superAdmin";
 import { clearCampusCareSession, writeCampusCareSession } from "./campusCareSession";
+import { devLog, devWarn } from "./devLog";
+import { isHsoAdminSession, normalizeHsoDesignation } from "./hsoAccess";
 
 export async function logoutCampusCare() {
   clearCampusCareSession();
   if (isSupabaseConfigured() && supabase) {
     try {
-      console.log("[AUTH] Signing out from Supabase...");
+      devLog("[AUTH] Signing out from Supabase...");
       await supabase.auth.signOut();
-      console.log("[AUTH] ✓ Signed out successfully from Supabase");
+      devLog("[AUTH] Signed out from Supabase");
     } catch (err) {
-      console.error("[AUTH] ✗ Error signing out:", err);
+      devWarn("[AUTH] Error signing out:", err);
     }
   }
 }
@@ -24,32 +26,26 @@ export async function logoutCampusCare() {
 export async function syncCampusCareSessionFromSupabaseUser(authUser, opts = {}) {
   const { rememberMe = false, emailFallback = "" } = opts;
   if (!supabase || !authUser) {
-    console.error("[AUTH] ✗ syncCampusCareSessionFromSupabaseUser: Missing supabase or authUser");
+    devWarn("[AUTH] syncCampusCareSessionFromSupabaseUser: missing supabase or authUser");
     return { ok: false };
   }
 
   try {
     const meta = authUser.user_metadata || {};
-    console.log("[AUTH] → Syncing session for user:", authUser.id);
+    devLog("[AUTH] Syncing session for user:", authUser.id);
 
-    let pres = await supabase
-      .from("profiles")
-      .select("first_name, middle_initial, last_name, office, role, account_status")
-      .eq("id", authUser.id)
-      .maybeSingle();
-    
-    if (pres.error) {
-      console.warn("[AUTH] ⚠ Profile query error (with account_status):", pres.error);
-      pres = await supabase
-        .from("profiles")
-        .select("first_name, middle_initial, last_name, office, role")
-        .eq("id", authUser.id)
-        .maybeSingle();
-      if (pres.error) {
-        console.error("[AUTH] ✗ Profile query error (fallback):", pres.error);
-      }
+    const profileSelectVariants = [
+      "first_name, middle_initial, last_name, office, role, account_status, designation",
+      "first_name, middle_initial, last_name, office, role, account_status",
+      "first_name, middle_initial, last_name, office, role",
+    ];
+    let pres = null;
+    for (const selectCols of profileSelectVariants) {
+      pres = await supabase.from("profiles").select(selectCols).eq("id", authUser.id).maybeSingle();
+      if (!pres.error) break;
+      devWarn("[AUTH] Profile query variant failed:", selectCols, pres.error);
     }
-    const profile = pres.data ?? null;
+    const profile = pres?.data ?? null;
 
     const office = profile?.office ?? meta.office ?? "health";
     const displayName = profile
@@ -57,10 +53,12 @@ export async function syncCampusCareSessionFromSupabaseUser(authUser, opts = {})
       : [meta.first_name, meta.last_name].filter(Boolean).join(" ").trim();
 
     const role = profile?.role ?? meta.role ?? "Staff";
-    const accountStatus = profile?.account_status ?? "approved";
+    const accountStatus = profile?.account_status ?? meta.account_status ?? "approved";
+    const designation = office === "health"
+      ? normalizeHsoDesignation(profile?.designation ?? meta.designation)
+      : undefined;
 
-    // DEBUG: Log office resolution chain
-    console.log("[AUTH] Debug office resolution:", {
+    devLog("[AUTH] Office resolution:", {
       profileOffice: profile?.office,
       metaOffice: meta.office,
       finalOffice: office,
@@ -75,19 +73,21 @@ export async function syncCampusCareSessionFromSupabaseUser(authUser, opts = {})
       name: displayName || authUser.email || emailFallback,
       rememberMe,
       accountStatus,
+      designation,
     };
 
-    console.log("[AUTH] ✓ Session synced. Office:", office, "Role:", role, "Status:", accountStatus);
+    devLog("[AUTH] Session synced. Office:", office, "Role:", role, "Status:", accountStatus);
 
-    if (!isSuperAdminSession(session) && (accountStatus === "pending" || accountStatus === "rejected")) {
-      console.warn("[AUTH] ⚠ Account not approved. Status:", accountStatus);
+    const isApprovalExempt = isSuperAdminSession(session) || isHsoAdminSession(session);
+    if (!isApprovalExempt && (accountStatus === "pending" || accountStatus === "rejected")) {
+      devWarn("[AUTH] Account not approved. Status:", accountStatus);
       return { ok: false, accountStatus };
     }
 
     writeCampusCareSession(session, rememberMe);
     return { ok: true, session };
   } catch (err) {
-    console.error("[AUTH] ✗ Error syncing session:", err);
+    devWarn("[AUTH] Error syncing session:", err);
     return { ok: false };
   }
 }

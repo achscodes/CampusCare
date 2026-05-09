@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useDONotificationStore } from "../../stores/doNotificationStore";
+import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 
 /** Shared notification bell for DO, HSO, and SDAO headers (same store + UI). */
 export default function StaffNotificationBell() {
@@ -7,6 +8,23 @@ export default function StaffNotificationBell() {
   const notifications = useDONotificationStore((s) => s.notifications);
   const markRead = useDONotificationStore((s) => s.markNotificationRead);
   const markAllRead = useDONotificationStore((s) => s.markAllNotificationsRead);
+
+  const handleRead = async (id, unread) => {
+    if (unread && isSupabaseConfigured() && supabase) {
+      await supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("id", id);
+    }
+    markRead(id);
+  };
+
+  const handleMarkAllRead = async () => {
+    if (isSupabaseConfigured() && supabase) {
+      await supabase
+        .from("notifications")
+        .update({ read_at: new Date().toISOString() })
+        .is("read_at", null);
+    }
+    markAllRead();
+  };
 
   const unreadCount = notifications.filter((n) => n.unread).length;
 
@@ -86,7 +104,7 @@ export default function StaffNotificationBell() {
                     cursor: "pointer",
                     border: n.unread ? "1px solid #e9d5ff" : "1px solid transparent",
                   }}
-                  onClick={() => markRead(n.id)}
+                  onClick={() => handleRead(n.id, n.unread)}
                 >
                   <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>{n.title}</div>
                   <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>{n.body}</div>
@@ -101,7 +119,7 @@ export default function StaffNotificationBell() {
               type="button"
               className="cc-btn-secondary"
               style={{ height: 30, padding: "0 12px" }}
-              onClick={() => markAllRead()}
+              onClick={handleMarkAllRead}
             >
               Mark all as read
             </button>

@@ -6,6 +6,7 @@ import LandingPage from "./pages/LandingPage";
 import { profileSettingsPathForSessionOffice } from "./utils/profileSettingsRoutes";
 import { readCampusCareSession } from "./utils/campusCareSession";
 import { useSupabaseAuthRecovery } from "./hooks/useSupabaseAuthRecovery";
+import { isSuperAdminForOffice } from "./utils/superAdmin";
 
 const SignupPage = lazy(() =>
   import("./pages/SignupPage").then((m) => ({ default: m.default ?? m.SignupPage }))
@@ -54,6 +55,9 @@ const StudentRecordsPage = lazy(() =>
 const HealthServices = lazy(() =>
   import("./pages/HealthServices/HealthServices").then((m) => ({ default: m.default ?? m.HealthServices }))
 );
+const HealthQueueDisplayPage = lazy(() =>
+  import("./pages/HealthServices/HealthQueueDisplayPage").then((m) => ({ default: m.default }))
+);
 const SDAO = lazy(() =>
   import("./pages/SDAO/SDAO").then((m) => ({ default: m.default ?? m.SDAO }))
 );
@@ -89,6 +93,28 @@ function LegacyProfileSettingsRedirect() {
   return <Navigate to={profileSettingsPathForSessionOffice(session?.office)} replace />;
 }
 
+function RequireSignedIn({ children }) {
+  const session = readCampusCareSession();
+  if (!session?.userId) return <Navigate to="/signin" replace />;
+  return children;
+}
+
+function RequireOffice({ office, children }) {
+  const session = readCampusCareSession();
+  if (!session?.userId) return <Navigate to="/signin" replace />;
+  if (String(session?.office || "").trim().toLowerCase() !== String(office).trim().toLowerCase()) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
+function RequireSuperAdminOffice({ office, children }) {
+  const session = readCampusCareSession();
+  if (!session?.userId) return <Navigate to="/signin" replace />;
+  if (!isSuperAdminForOffice(session, office)) return <Navigate to="/" replace />;
+  return children;
+}
+
 function App() {
   // Recover existing Supabase session on app load
   useSupabaseAuthRecovery();
@@ -105,26 +131,28 @@ function App() {
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/signin" element={<SigninPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/do" element={<DashboardPage />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/health-services" element={<HealthServices />} />
-            <Route path="/super-admin/hso" element={<SuperAdminPage officeKey="health" />} />
-            <Route path="/super-admin/do" element={<SuperAdminPage officeKey="discipline" />} />
-            <Route path="/super-admin/sdao" element={<SuperAdminPage officeKey="development" />} />
-            <Route path="/sdao" element={<SDAO />} />
-            <Route path="/case-conference" element={<CaseConferencePage />} />
-            <Route path="/student-records" element={<StudentRecordsPage />} />
-            <Route path="/case-management" element={<CaseManagementPage />} />
-            <Route path="/incident-report" element={<IncidentReportPage />} />
-            <Route path="/document-requests" element={<DocumentRequestsPage />} />
-            <Route path="/referrals" element={<ReferralsPage />} />
-            <Route path="/sanctions" element={<SanctionsPage />} />
-            <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/do/profile-settings" element={<ModuleProfileSettingsRoute variant="do" />} />
-            <Route path="/sdao/profile-settings" element={<ModuleProfileSettingsRoute variant="sdao" />} />
-            <Route path="/health-services/profile-settings" element={<ModuleProfileSettingsRoute variant="hso" />} />
+            <Route path="/do" element={<RequireOffice office="discipline"><DashboardPage /></RequireOffice>} />
+            <Route path="/dashboard" element={<RequireOffice office="discipline"><DashboardPage /></RequireOffice>} />
+            <Route path="/health-services" element={<RequireOffice office="health"><HealthServices /></RequireOffice>} />
+            <Route path="/health-services/queue-display" element={<HealthQueueDisplayPage />} />
+            <Route path="/super-admin/hso" element={<RequireSuperAdminOffice office="health"><SuperAdminPage officeKey="health" /></RequireSuperAdminOffice>} />
+            <Route path="/super-admin/do" element={<RequireSuperAdminOffice office="discipline"><SuperAdminPage officeKey="discipline" /></RequireSuperAdminOffice>} />
+            <Route path="/super-admin/sdao" element={<RequireSuperAdminOffice office="development"><SuperAdminPage officeKey="development" /></RequireSuperAdminOffice>} />
+            <Route path="/sdao" element={<RequireOffice office="development"><SDAO /></RequireOffice>} />
+            <Route path="/case-conference" element={<RequireOffice office="discipline"><CaseConferencePage /></RequireOffice>} />
+            <Route path="/student-records" element={<RequireOffice office="discipline"><StudentRecordsPage /></RequireOffice>} />
+            <Route path="/case-management" element={<RequireOffice office="discipline"><CaseManagementPage /></RequireOffice>} />
+            <Route path="/incident-report" element={<RequireOffice office="discipline"><IncidentReportPage /></RequireOffice>} />
+            <Route path="/document-requests" element={<RequireOffice office="discipline"><DocumentRequestsPage /></RequireOffice>} />
+            <Route path="/referrals" element={<RequireOffice office="discipline"><ReferralsPage /></RequireOffice>} />
+            <Route path="/sanctions" element={<RequireOffice office="discipline"><SanctionsPage /></RequireOffice>} />
+            <Route path="/reports" element={<RequireOffice office="discipline"><ReportsPage /></RequireOffice>} />
+            <Route path="/do/profile-settings" element={<RequireOffice office="discipline"><ModuleProfileSettingsRoute variant="do" /></RequireOffice>} />
+            <Route path="/sdao/profile-settings" element={<RequireOffice office="development"><ModuleProfileSettingsRoute variant="sdao" /></RequireOffice>} />
+            <Route path="/health-services/profile-settings" element={<RequireOffice office="health"><ModuleProfileSettingsRoute variant="hso" /></RequireOffice>} />
             <Route path="/profile" element={<LegacyProfileSettingsRedirect />} />
             <Route path="/settings" element={<LegacyProfileSettingsRedirect />} />
+            <Route path="*" element={<RequireSignedIn><Navigate to="/" replace /></RequireSignedIn>} />
           </Routes>
         </Suspense>
       </ToastProvider>

@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { devLog, devWarn } from "../utils/devLog";
 
 /**
  * @param {string | undefined} raw
@@ -46,16 +47,15 @@ export const supabase = isSupabaseConfigured()
     })
   : null;
 
-// Debug logging in browser console
 if (typeof window !== "undefined") {
   if (isSupabaseConfigured()) {
-    console.log("[SUPABASE] ✓ Supabase client initialized successfully");
-    console.log("[SUPABASE] URL:", url);
+    devLog("[SUPABASE] ✓ Supabase client initialized");
+    devLog("[SUPABASE] URL:", url);
   } else {
-    console.warn(
-      "[SUPABASE] ✗ Supabase not configured. Check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local",
+    devWarn(
+      "[SUPABASE] Not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (see .env.example).",
     );
-    console.warn("[SUPABASE] VITE_SUPABASE_URL:", import.meta.env.VITE_SUPABASE_URL ? "✓ Set" : "✗ Missing");
-    console.warn("[SUPABASE] VITE_SUPABASE_ANON_KEY:", anonKey ? "✓ Set" : "✗ Missing");
+    devWarn("[SUPABASE] VITE_SUPABASE_URL:", import.meta.env.VITE_SUPABASE_URL ? "set" : "missing");
+    devWarn("[SUPABASE] anon key:", anonKey ? "set" : "missing");
   }
 }

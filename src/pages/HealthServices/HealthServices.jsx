@@ -1,25 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   AlertCircle,
   AlertTriangle,
-  BarChart3,
   CalendarDays,
+  ChevronRight,
   Clock,
   Download,
   Eye,
-  FileText,
   FileHeart,
-  LayoutDashboard,
+  FileText,
+  Folder,
   Lock,
   LogOut,
   Mail,
+  Phone,
   Plus,
   Printer,
+  Route,
   Send,
+  Smile,
   Sparkles,
   Stethoscope,
+  Thermometer,
   Upload,
   UserPlus,
   Users,
@@ -31,6 +35,8 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Line,
+  LineChart,
   Legend,
   Pie,
   PieChart,
@@ -49,6 +55,7 @@ import InterOfficeNewDocumentRequestModal from "../../components/interOffice/Int
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import {
   loadHsoFromSupabase,
+  loadHsoStaffFromSupabase,
   mapAppointmentRow,
   mapReferralRow,
 } from "../../services/hsoSupabase";
@@ -65,6 +72,19 @@ import { NU_PROGRAM_OPTIONS } from "../../data/nuPrograms";
 import "../DODashboard/DO.css";
 import "./HealthServices.css";
 import { sanitizeDigitsOnlyInput, sanitizePersonNameInput } from "../../utils/signupFieldValidation";
+import { hsoDesignationLabel, normalizeHsoDesignation } from "../../utils/hsoAccess";
+import { HEALTH_NAV_ITEMS, HS_NOTIFICATIONS } from "./hsoNavConfig";
+import DentistOdontogram from "./DentistOdontogram";
+import {
+  HSO_WORKFLOW_STATUS,
+  computeCheckinWindow,
+  consultationTypeOptions,
+  designationToService,
+  generateCheckinCode,
+  normalizeWorkflowStatus,
+  nowInWindow,
+  statusLabel,
+} from "../../utils/hsoWorkflow";
 import {
   INTER_OFFICE_DOC_STATUS,
   DISCIPLINE_REFERRAL_STATUS,
@@ -78,12 +98,30 @@ import {
   normalizeReferralStatus,
 } from "../../utils/interOfficeWorkflow";
 
-const iconProps = { size: 16, strokeWidth: 1.5 };
-
 const PAGE_META = {
   dashboard: {
-    title: "Health Services",
-    subtitle: "Monitor student health visits, appointments, and inter-office referrals",
+    title: "Admin Dashboard",
+    subtitle: "Operational overview of HSO queues, staffing, and service delivery",
+  },
+  userManagement: {
+    title: "User Management",
+    subtitle: "Manage HSO staff accounts, roles, and account status",
+  },
+  staffScheduling: {
+    title: "Staff Scheduling",
+    subtitle: "Manage nurse/physician/dentist shifts and assignment coverage",
+  },
+  checkin: {
+    title: "Check-in Desk",
+    subtitle: "Validate check-in codes and issue queue numbers for nurse assessment",
+  },
+  queue: {
+    title: "Queue Management",
+    subtitle: "Move students through nurse and provider queues in real time",
+  },
+  consultation: {
+    title: "Consultations",
+    subtitle: "Provider queue and findings logging for physician and dentist sessions",
   },
   visits: {
     title: "Student Visits",
@@ -109,20 +147,39 @@ const PAGE_META = {
     title: "Reports & Analytics",
     subtitle: "Health services statistics, metrics, and insights",
   },
+  settings: {
+    title: "Settings",
+    subtitle: "Configure queue policies, check-in windows, and operational defaults",
+  },
+  queueDisplay: {
+    title: "Queue Display",
+    subtitle: "Patient-facing queue board for TV monitor display",
+  },
+  dentalQueue: {
+    title: "Queue Management",
+    subtitle: "Live ticketing in Dentist Station.",
+  },
+  dentalRecords: {
+    title: "Patient Records",
+    subtitle: "Dental history, charts and follow-ups.",
+  },
+  dentalChart: {
+    title: "Dental Dashboard",
+    subtitle: "Charting, procedures and follow-ups.",
+  },
+  dentalFollowups: {
+    title: "Follow-up Appointments",
+    subtitle: "Recall visits, post-procedure reviews and check-backs.",
+  },
 };
 
-export const HEALTH_NAV_ITEMS = [
-  { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard {...iconProps} /> },
-  { id: "visits", label: "Student Visits", icon: <Stethoscope {...iconProps} /> },
-  { id: "records", label: "Medical Records", icon: <FileHeart {...iconProps} /> },
-  { id: "appointments", label: "Appointments", icon: <CalendarDays {...iconProps} /> },
-  { id: "referrals", label: "Referrals", icon: <UserPlus {...iconProps} /> },
-  { id: "docrequests", label: "Document Requests", icon: <FileText {...iconProps} /> },
-  { id: "reports", label: "Reports & Analytics", icon: <BarChart3 {...iconProps} /> },
-];
-
-/** Empty by default — notifications can be wired to Supabase or a store later */
-export const HS_NOTIFICATIONS = [];
+const HEALTH_NAV_BY_DESIGNATION = {
+  // Admin scope intentionally limited to screens present in provided UI reference.
+  admin: ["dashboard", "userManagement", "staffScheduling", "queue", "reports", "settings"],
+  nurse: ["dashboard", "appointments", "checkin", "queue", "records", "settings"],
+  physician: ["dashboard", "visits", "records", "appointments", "queueDisplay"],
+  dentist: ["dashboard", "dentalQueue", "dentalRecords", "dentalChart", "dentalFollowups"],
+};
 
 const REPORTS_CONCERNS_ROWS = [];
 
@@ -183,6 +240,23 @@ function recordRowLastDate(row) {
   return Number.isNaN(parsed) ? null : new Date(parsed);
 }
 
+function EmptyStateMessage({
+  icon: Icon = AlertCircle,
+  title = "No data available.",
+  description = "",
+  compact = false,
+}) {
+  return (
+    <div className={`hs-empty-state${compact ? " hs-empty-state--compact" : ""}`} role="status" aria-live="polite">
+      <div className="hs-empty-state-icon" aria-hidden>
+        <Icon size={18} strokeWidth={1.8} />
+      </div>
+      <p className="hs-empty-state-title">{title}</p>
+      {description ? <p className="hs-empty-state-description">{description}</p> : null}
+    </div>
+  );
+}
+
 const INITIAL_NEW_CONSULT = {
   studentName: "",
   studentId: "",
@@ -223,7 +297,21 @@ const INITIAL_NEW_APPT = {
   phone: "",
   date: "",
   time: "",
-  purpose: "",
+  designation: "physician",
+  consultationType: "General Check-up",
+  additionalComments: "",
+  purpose: "General Check-up",
+};
+
+const INITIAL_NURSE_TRIAGE = {
+  temperature: "",
+  bloodPressure: "",
+  pulse: "",
+  respiratoryRate: "",
+  spo2: "",
+  heightCm: "",
+  weightKg: "",
+  remarks: "",
 };
 
 const INITIAL_NEW_REFERRAL = {
@@ -281,10 +369,13 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const [recordFilterDateFrom, setRecordFilterDateFrom] = useState("");
   const [recordFilterDateTo, setRecordFilterDateTo] = useState("");
   const [recordFilterStudent, setRecordFilterStudent] = useState("");
+  const [certificateSearch, setCertificateSearch] = useState("");
   const [appointmentsList, setAppointmentsList] = useState(() => []);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [referralsList, setReferralsList] = useState(() => []);
   const [disciplineIncomingReferrals, setDisciplineIncomingReferrals] = useState(() => []);
+  const [adminStaffRows, setAdminStaffRows] = useState(() => []);
+  const [pendingApprovalRows, setPendingApprovalRows] = useState(() => []);
   const [selectedReferral, setSelectedReferral] = useState(null);
   const [docRequestsRows, setDocRequestsRows] = useState(() => []);
   const [selectedDocRequest, setSelectedDocRequest] = useState(null);
@@ -297,6 +388,43 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const [referralSaving, setReferralSaving] = useState(false);
   const [docSaving, setDocSaving] = useState(false);
   const [docAcceptingUploadBusy, setDocAcceptingUploadBusy] = useState(false);
+  const [checkinCodeInput, setCheckinCodeInput] = useState("");
+  const [nurseQueueCounter, setNurseQueueCounter] = useState(0);
+  const [checkinPreview, setCheckinPreview] = useState(null);
+  const [nurseStationOnline, setNurseStationOnline] = useState(false);
+  const [activeNurseSessionId, setActiveNurseSessionId] = useState(null);
+  const [nurseTriageForm, setNurseTriageForm] = useState(() => ({ ...INITIAL_NURSE_TRIAGE }));
+  const [transferTarget, setTransferTarget] = useState("physician");
+  const [nurseVisitors, setNurseVisitors] = useState(() => []);
+  const [newVisitorForm, setNewVisitorForm] = useState({ name: "", contactNumber: "", purpose: "" });
+  const [addVisitorOpen, setAddVisitorOpen] = useState(false);
+  const [nurseRecentActivity, setNurseRecentActivity] = useState(() => []);
+  const [recordsQuery, setRecordsQuery] = useState("");
+  const [visitorArchive, setVisitorArchive] = useState(() => []);
+  const [physicianPanelTab, setPhysicianPanelTab] = useState("vitals");
+  const [physicianCertModalOpen, setPhysicianCertModalOpen] = useState(false);
+  const [dentalRecordsSelectedId, setDentalRecordsSelectedId] = useState(null);
+  const [dentalRecordsSearch, setDentalRecordsSearch] = useState("");
+  const [dentalPatientTab, setDentalPatientTab] = useState("procedures");
+  const [dentalOdontogramArch, setDentalOdontogramArch] = useState("permanent");
+  const [dentalOdontogramPaint, setDentalOdontogramPaint] = useState("healthy");
+  const [dentalToothStatus, setDentalToothStatus] = useState(() => ({
+    16: "caries",
+    26: "filled",
+    36: "filled",
+    48: "missing",
+  }));
+  const [dentalProcedurePick, setDentalProcedurePick] = useState("Cleaning");
+  const [dentalFollowupSearch, setDentalFollowupSearch] = useState("");
+  const [physicianConsultForm, setPhysicianConsultForm] = useState({
+    diagnosis: "",
+    prescription: "",
+    notes: "",
+    certReason: "",
+    certFrom: "",
+    certUntil: "",
+    certRecommendation: "",
+  });
   const recordFiltersSnapshot = useRef(null);
 
   const session = useMemo(() => {
@@ -306,19 +434,94 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   useDONotificationsRealtime();
 
   const canInterOfficeDocRequest = canCreateDocumentRequest(session?.office);
+  const userDesignation = normalizeHsoDesignation(session?.designation);
+  const isNurseUser = userDesignation === "nurse";
+  const isPhysicianUser = userDesignation === "physician";
+  const isDentistUser = userDesignation === "dentist";
+  const allowedNavSet = useMemo(
+    () => new Set(HEALTH_NAV_BY_DESIGNATION[userDesignation] || HEALTH_NAV_BY_DESIGNATION.admin),
+    [userDesignation],
+  );
   const healthNavItems = useMemo(() => {
-    if (canInterOfficeDocRequest) return HEALTH_NAV_ITEMS;
-    return HEALTH_NAV_ITEMS.filter((i) => i.id !== "docrequests");
-  }, [canInterOfficeDocRequest]);
+    const filtered = HEALTH_NAV_ITEMS.filter(
+      (i) => allowedNavSet.has(i.id) && (canInterOfficeDocRequest || i.id !== "docrequests"),
+    );
+    if (userDesignation === "nurse") {
+      const nurseLabelMap = {
+        dashboard: "Dashboard",
+        checkin: "Patient Check-In",
+        queue: "Nurse Queue",
+        appointments: "Triage Management",
+        records: "Patient Records",
+        settings: "Settings",
+      };
+      return filtered.map((item) => ({ ...item, label: nurseLabelMap[item.id] || item.label }));
+    }
+    if (userDesignation === "physician") {
+      const physicianLabelMap = {
+        dashboard: "Dashboard",
+        visits: "Physician Queue",
+        records: "Patient Record",
+        appointments: "Medical Certificate",
+        queueDisplay: "Prescription History",
+      };
+      return filtered.map((item) => ({ ...item, label: physicianLabelMap[item.id] || item.label }));
+    }
+    if (userDesignation === "dentist") {
+      const dentistLabelMap = {
+        dashboard: "Dashboard",
+        dentalQueue: "Dental Queue",
+        dentalRecords: "Patients Records",
+        dentalChart: "Dental Chart",
+        dentalFollowups: "Follow-ups",
+      };
+      return filtered.map((item) => ({ ...item, label: dentistLabelMap[item.id] || item.label }));
+    }
+    return filtered;
+  }, [allowedNavSet, canInterOfficeDocRequest, userDesignation]);
 
   const userName = session?.name || "Priscilla C. Pelayo";
-  const userRole = session?.role || "Admin";
+  const userRole = `${hsoDesignationLabel(userDesignation)} · ${session?.role || "Staff"}`;
 
-  const meta = PAGE_META[activeNav] ?? PAGE_META.dashboard;
+  const nurseMetaByNav = {
+    dashboard: { title: "Dashboard", subtitle: "Nurse station overview and patient management" },
+    checkin: { title: "Patient Check-In", subtitle: "Nurse station overview and patient management" },
+    queue: { title: "Queue Management", subtitle: "Live ticketing across all stations." },
+    appointments: { title: "Vital Signs", subtitle: "Capture and review patient vitals before consultation." },
+    records: { title: "Patient Records", subtitle: "Read-only view for nurses - diagnoses are restricted to physicians." },
+    settings: { title: "Settings", subtitle: "Configure queue and station preferences." },
+  };
+  const physicianMetaByNav = {
+    dashboard: { title: "Physician Workspace", subtitle: "Review vitals, consult patients, manage prescriptions." },
+    visits: { title: "Physician Queue", subtitle: "Manage patient queue and flow." },
+    records: { title: "Patient Records", subtitle: "Full clinical history with prescriptions and vitals." },
+    consultation: { title: "Consultation", subtitle: "Review vitals, consult patients, manage prescriptions." },
+    appointments: { title: "Medical Certificates", subtitle: "Issue and track medical certifications." },
+    queueDisplay: { title: "Prescription History", subtitle: "All prescriptions issued from your workspace." },
+  };
+  const dentistMetaByNav = {
+    dashboard: { title: "Dentist Dashboard", subtitle: "Track patients, procedures and follow-ups." },
+    dentalQueue: { title: "Queue Management", subtitle: "Live ticketing in Dentist Station." },
+    dentalRecords: { title: "Patient Records", subtitle: "Dental history, charts and follow-ups." },
+    dentalChart: { title: "Dental Dashboard", subtitle: "Charting, procedures and follow-ups." },
+    dentalFollowups: { title: "Follow-up Appointments", subtitle: "Recall visits, post-procedure reviews and check-backs." },
+  };
+  const meta = isNurseUser
+    ? (nurseMetaByNav[activeNav] || nurseMetaByNav.dashboard)
+    : isPhysicianUser
+      ? (physicianMetaByNav[activeNav] || physicianMetaByNav.dashboard)
+      : isDentistUser
+        ? (dentistMetaByNav[activeNav] ?? dentistMetaByNav.dashboard)
+        : (PAGE_META[activeNav] ?? PAGE_META.dashboard);
 
   useEffect(() => {
     if (!canInterOfficeDocRequest && activeNav === "docrequests") setActiveNav("dashboard");
   }, [canInterOfficeDocRequest, activeNav]);
+
+  useEffect(() => {
+    if (allowedNavSet.has(activeNav)) return;
+    setActiveNav("dashboard");
+  }, [allowedNavSet, activeNav]);
 
   useEffect(() => {
     if (embedReportsOnly) return;
@@ -340,7 +543,10 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       if (!authData?.session) return;
       setHsoLoading(true);
       setHsoLoadError(null);
-      const res = await loadHsoFromSupabase(supabase);
+      const [res, staffRes] = await Promise.all([
+        loadHsoFromSupabase(supabase),
+        loadHsoStaffFromSupabase(supabase),
+      ]);
       if (cancelled) return;
       setHsoLoading(false);
       if (!res.ok) {
@@ -353,6 +559,10 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       setReferralsList(res.referrals);
       setDocRequestsRows(res.documents);
       setDisciplineIncomingReferrals(res.disciplineReferralsIncoming || []);
+      if (staffRes.ok) {
+        setAdminStaffRows(staffRes.staffRows || []);
+        setPendingApprovalRows(staffRes.pendingApprovals || []);
+      }
     })();
     return () => {
       cancelled = true;
@@ -610,11 +820,11 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     setNewReferralOpen(true);
   };
 
-  const openNewDocModal = () => {
+  const openNewDocModal = useCallback(() => {
     if (!canInterOfficeDocRequest) return;
     setHsoNewDocModalKey((k) => k + 1);
     setNewDocOpen(true);
-  };
+  }, [canInterOfficeDocRequest]);
 
   const saveNewAppointment = async () => {
     const miss = [];
@@ -628,11 +838,14 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     if (!newApptForm.phone.trim()) miss.push("Phone");
     if (!newApptForm.date) miss.push("Date");
     if (!newApptForm.time.trim()) miss.push("Time");
-    if (!newApptForm.purpose.trim()) miss.push("Purpose of visit");
+    if (!newApptForm.consultationType.trim()) miss.push("Consultation form answer");
+    if (!newApptForm.designation.trim()) miss.push("Designation");
     if (miss.length) {
       showToast(`Please complete all fields: ${miss.join(", ")}.`, { variant: "warning" });
       return;
     }
+    const checkinCode = generateCheckinCode();
+    const { validFrom, validUntil } = computeCheckinWindow(newApptForm.date, newApptForm.time);
     const payload = {
       student_name: newApptForm.studentName.trim(),
       student_id: newApptForm.studentId.trim(),
@@ -640,10 +853,17 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       student_phone: newApptForm.phone.trim(),
       appointment_date: newApptForm.date,
       appointment_time: newApptForm.time.trim(),
-      purpose: newApptForm.purpose.trim(),
+      purpose: newApptForm.consultationType.trim(),
+      consultation_type: newApptForm.consultationType.trim(),
+      additional_comments: newApptForm.additionalComments.trim() || null,
+      designation: newApptForm.designation,
+      checkin_code: checkinCode,
+      checkin_valid_from: validFrom?.toISOString() || null,
+      checkin_valid_until: validUntil?.toISOString() || null,
+      workflow_status: HSO_WORKFLOW_STATUS.BOOKED,
       status: "pending",
       room: "Medical Room 1",
-      service: "Medical visit",
+      service: designationToService(newApptForm.designation),
       doctor: "—",
       duration: "30 minutes",
       notes: null,
@@ -670,6 +890,13 @@ function HealthServices({ embedReportsOnly = false } = {}) {
             room: payload.room,
             service: payload.service,
             status: "pending",
+            workflowStatus: HSO_WORKFLOW_STATUS.BOOKED,
+            checkinCode,
+            checkinValidFrom: payload.checkin_valid_from,
+            checkinValidUntil: payload.checkin_valid_until,
+            designation: payload.designation,
+            consultationType: payload.consultation_type,
+            additionalComments: payload.additional_comments || "",
             email: payload.student_email || "—",
             phone: payload.student_phone || "—",
             doctor: "—",
@@ -687,6 +914,222 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       showToast(err?.message || "Could not save appointment.", { variant: "error" });
     } finally {
       setApptSaving(false);
+    }
+  };
+
+  const persistAppointmentWorkflow = async (appointmentId, patch) => {
+    const rowId = String(appointmentId);
+    try {
+      if (isSupabaseConfigured() && supabase) {
+        const { error } = await supabase.from("health_appointments").update(patch).eq("id", rowId);
+        if (error) throw error;
+      }
+      setAppointmentsList((prev) =>
+        prev.map((a) => (String(a.id) === rowId ? { ...a, ...patch, workflowStatus: patch.workflow_status ?? a.workflowStatus } : a)),
+      );
+      return true;
+    } catch (err) {
+      showToast(err?.message || "Could not update queue workflow.", { variant: "error" });
+      return false;
+    } finally {
+      // no-op
+    }
+  };
+
+  const verifyCheckinCode = () => {
+    const code = checkinCodeInput.trim();
+    if (!code) {
+      showToast("Enter check-in code.", { variant: "warning" });
+      return;
+    }
+    const target = appointmentsList.find((a) => a.checkinCode === code);
+    if (!target) {
+      setCheckinPreview(null);
+      showToast("Invalid check-in code.", { variant: "warning" });
+      return;
+    }
+    setCheckinPreview(target);
+  };
+
+  const handleCheckinByCode = async () => {
+    const target = checkinPreview;
+    if (!target) {
+      showToast("Verify appointment code first.", { variant: "warning" });
+      return;
+    }
+    if (!nowInWindow(target.checkinValidFrom, target.checkinValidUntil)) {
+      await persistAppointmentWorkflow(target.id, { workflow_status: HSO_WORKFLOW_STATUS.EXPIRED_CODE });
+      showToast("Check-in code expired or not active yet.", { variant: "warning" });
+      return;
+    }
+    const nextQueue = nurseQueueCounter + 1;
+    setNurseQueueCounter(nextQueue);
+    const ok = await persistAppointmentWorkflow(target.id, {
+      workflow_status: HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE,
+      checked_in_at: new Date().toISOString(),
+      queue_number: nextQueue,
+      status: "confirmed",
+    });
+    if (ok) {
+      setCheckinCodeInput("");
+      setCheckinPreview(null);
+      showToast(`Checked in successfully. Queue #${nextQueue}`, { variant: "success" });
+    }
+  };
+
+  const addNurseActivity = useCallback((entry) => {
+    setNurseRecentActivity((prev) => [entry, ...prev].slice(0, 5));
+  }, []);
+
+  const handleAddVisitor = () => {
+    const name = sanitizePersonNameInput(newVisitorForm.name).trim();
+    const contactNumber = sanitizeDigitsOnlyInput(newVisitorForm.contactNumber).trim();
+    const purpose = newVisitorForm.purpose.trim();
+    if (!name || !contactNumber || !purpose) {
+      showToast("Please complete visitor details.", { variant: "warning" });
+      return;
+    }
+    const queueNumber = nurseQueueCounter + 1;
+    setNurseQueueCounter(queueNumber);
+    setNurseVisitors((prev) => [
+      ...prev,
+      {
+        id: `V-${Date.now()}`,
+        queueNumber,
+        name,
+        contactNumber,
+        purpose,
+        arrivedAt: new Date().toISOString(),
+        workflowStatus: HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE,
+      },
+    ]);
+    setAddVisitorOpen(false);
+    setNewVisitorForm({ name: "", contactNumber: "", purpose: "" });
+  };
+
+  const handleNurseNext = async () => {
+    if (!nurseStationOnline) {
+      showToast("Start the station first.", { variant: "warning" });
+      return;
+    }
+    const nextRow = nurseWaitlistRows.find((r) => r.status === HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE);
+    if (!nextRow) {
+      showToast("No pending students in queue.", { variant: "warning" });
+      return;
+    }
+    setActiveNurseSessionId(nextRow.id);
+    setNurseTriageForm({ ...INITIAL_NURSE_TRIAGE });
+    if (nextRow.source === "student") {
+      await persistAppointmentWorkflow(nextRow.appointmentId, {
+        workflow_status: HSO_WORKFLOW_STATUS.NURSE_IN_PROGRESS,
+        consultation_started_at: new Date().toISOString(),
+      });
+    } else {
+      setNurseVisitors((prev) =>
+        prev.map((v) =>
+          String(v.id) === String(nextRow.appointmentId)
+            ? { ...v, workflowStatus: HSO_WORKFLOW_STATUS.NURSE_IN_PROGRESS }
+            : v,
+        ),
+      );
+    }
+  };
+
+  const handleNurseComplete = async () => {
+    if (!activeNurseSession) return;
+    if (activeNurseSession.source === "student") {
+      await persistAppointmentWorkflow(activeNurseSession.appointmentId, {
+        workflow_status: HSO_WORKFLOW_STATUS.COMPLETED,
+        consultation_completed_at: new Date().toISOString(),
+        nurse_vitals: nurseTriageForm,
+        status: "completed",
+      });
+    } else {
+      setNurseVisitors((prev) => prev.filter((v) => String(v.id) !== String(activeNurseSession.appointmentId)));
+      setVisitorArchive((prev) => [
+        {
+          ...activeNurseSession,
+          completedAt: new Date().toISOString(),
+          disposition: "Completed",
+        },
+        ...prev,
+      ]);
+    }
+    addNurseActivity({
+      id: `n-complete-${Date.now()}`,
+      queueNumber: activeNurseSession.queueNumber,
+      name: activeNurseSession.name,
+      action: "Completed triage",
+      at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    });
+    setActiveNurseSessionId(null);
+    setNurseTriageForm({ ...INITIAL_NURSE_TRIAGE });
+  };
+
+  const handleNurseTransfer = async (overrideTarget) => {
+    if (!activeNurseSession) return;
+    const resolvedTarget = overrideTarget || transferTarget;
+    if (activeNurseSession.source === "student") {
+      await persistAppointmentWorkflow(activeNurseSession.appointmentId, {
+        workflow_status: HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER,
+        provider_queue: resolvedTarget,
+        nurse_vitals: nurseTriageForm,
+      });
+    } else {
+      setNurseVisitors((prev) => prev.filter((v) => String(v.id) !== String(activeNurseSession.appointmentId)));
+      setVisitorArchive((prev) => [
+        {
+          ...activeNurseSession,
+          completedAt: new Date().toISOString(),
+          disposition: `Transferred to ${resolvedTarget}`,
+        },
+        ...prev,
+      ]);
+    }
+    addNurseActivity({
+      id: `n-transfer-${Date.now()}`,
+      queueNumber: activeNurseSession.queueNumber,
+      name: activeNurseSession.name,
+      action: `Forwarded to ${resolvedTarget}`,
+      at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    });
+    setActiveNurseSessionId(null);
+    setNurseTriageForm({ ...INITIAL_NURSE_TRIAGE });
+  };
+
+  const startProviderConsultation = async (appt) => {
+    await persistAppointmentWorkflow(appt.id, {
+      workflow_status: HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS,
+      consultation_started_at: new Date().toISOString(),
+    });
+  };
+
+  const completeProviderConsultation = async (appt) => {
+    const ok = await persistAppointmentWorkflow(appt.id, {
+      workflow_status: HSO_WORKFLOW_STATUS.COMPLETED,
+      consultation_completed_at: new Date().toISOString(),
+      status: "completed",
+    });
+    if (ok) {
+      const row = {
+        id: `from-appt-${appt.id}-${Date.now()}`,
+        student: appt.student,
+        studentId: appt.studentId,
+        type: "Scheduled",
+        followup: false,
+        reason: appt.consultationType || appt.purpose || "Consultation",
+        date: appt.date || formatVisitDateLabel(new Date()),
+        time: appt.time || "—",
+        doctor: userName,
+        status: "completed",
+        bloodPressure: appt.nurseVitals?.bloodPressure || "",
+        temperature: appt.nurseVitals?.temperature || "",
+        heartRate: appt.nurseVitals?.pulse || "",
+        diagnosis: "",
+        treatment: "",
+      };
+      setConsultationRows((prev) => [row, ...prev]);
+      showToast("Consultation completed and logged.", { variant: "success" });
     }
   };
 
@@ -881,27 +1324,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     return rows;
   }, [healthRecordsRows, search, recordFilterStudent, recordFilterStatus, recordFilterDateFrom, recordFilterDateTo]);
 
-  const filteredReportConcerns = useMemo(() => {
-    const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    return REPORTS_CONCERNS_ROWS.filter((row) => {
-      const itemDate = parseIsoDateOnly(row.reportedAt);
-      if (!itemDate) return true;
-      if (reportsTimeFilter === "day") {
-        return itemDate.toDateString() === startOfDay.toDateString();
-      }
-      if (reportsTimeFilter === "week") {
-        const weekAgo = new Date(startOfDay);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        return itemDate >= weekAgo && itemDate <= now;
-      }
-      if (reportsTimeFilter === "month") {
-        return itemDate.getMonth() === now.getMonth() && itemDate.getFullYear() === now.getFullYear();
-      }
-      return true;
-    });
-  }, [reportsTimeFilter]);
-
   const filteredDocs = useMemo(() => {
     return docRequestsRows.filter((d) => {
       if (docStatusFilter === "all") return true;
@@ -923,19 +1345,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       );
     });
   }, [docRequestsRows, search, docStatusFilter, activeNav]);
-
-  const hsoDashboardMetrics = useMemo(() => {
-    const today = formatVisitDateLabel(new Date());
-    const visitsToday = consultationRows.filter((c) => c.date === today).length;
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const apptsToday = appointmentsList.filter((a) => a.dateSort === todayIso).length;
-    const isClosedVisit = (s) => {
-      const x = String(s || "").toLowerCase();
-      return x === "completed" || x === "complete" || x === "cancelled" || x === "canceled";
-    };
-    const activeCases = consultationRows.filter((c) => !isClosedVisit(c.status)).length;
-    return { visitsToday, apptsToday, activeCases };
-  }, [consultationRows, appointmentsList]);
 
   const visitTabStats = useMemo(() => {
     const today = formatVisitDateLabel(new Date());
@@ -972,6 +1381,267 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     return { todayCount, pending, confirmed, total: list.length };
   }, [appointmentsList]);
 
+  const certificatesList = useMemo(
+    () =>
+      consultationRows
+        .filter((row) => String(row.certificateReason || row.certReason || "").trim())
+        .map((row, index) => ({
+          id: row.id || `cert-${index}`,
+          patient: row.student || row.patient || "—",
+          reason: row.certificateReason || row.certReason || "—",
+          period: row.certificatePeriod || "—",
+          issuedAt: row.date || "—",
+          status: row.certificateStatus || "issued",
+        })),
+    [consultationRows],
+  );
+
+  const physicianPrescriptionRows = useMemo(
+    () =>
+      consultationRows
+        .filter((row) => String(row.prescription || "").trim())
+        .map((row, index) => ({
+          id: row.id || `rx-${index}`,
+          patient: row.student || row.patient || "—",
+          drug: row.prescription,
+          instructions: row.notes || "—",
+          date: row.date || "—",
+          status: row.status || "active",
+        })),
+    [consultationRows],
+  );
+
+  const workflowRows = useMemo(
+    () =>
+      appointmentsList.map((a) => ({
+        ...a,
+        workflowStatus: normalizeWorkflowStatus(a.workflowStatus || a.status),
+      })),
+    [appointmentsList],
+  );
+
+  const queueStats = useMemo(() => {
+    const stat = (s) => workflowRows.filter((r) => r.workflowStatus === s).length;
+    return {
+      booked: stat(HSO_WORKFLOW_STATUS.BOOKED),
+      checkinOpen: stat(HSO_WORKFLOW_STATUS.CHECKIN_WINDOW_OPEN),
+      waitingNurse: stat(HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE),
+      waitingProvider: stat(HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER),
+      inProgress: stat(HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS),
+      completed: stat(HSO_WORKFLOW_STATUS.COMPLETED),
+    };
+  }, [workflowRows]);
+
+  const clinicalStaffRows = useMemo(
+    () => adminStaffRows.filter((r) => ["nurse", "physician", "dentist"].includes(String(r.designation || "").toLowerCase())),
+    [adminStaffRows],
+  );
+
+  const approvedClinicalStaffRows = useMemo(
+    () => clinicalStaffRows.filter((r) => String(r.accountStatus || "").toLowerCase() === "approved"),
+    [clinicalStaffRows],
+  );
+
+  const pendingStaffApprovalRows = useMemo(
+    () => pendingApprovalRows.filter((r) => ["nurse", "physician", "dentist"].includes(String(r.designation || "").toLowerCase())),
+    [pendingApprovalRows],
+  );
+
+  const staffingSummary = useMemo(() => {
+    const c = (d) => approvedClinicalStaffRows.filter((r) => r.designation === d).length;
+    const onDuty = approvedClinicalStaffRows.filter((r) => r.status === "on-duty").length;
+    const offDuty = approvedClinicalStaffRows.filter((r) => r.status === "off-duty").length;
+    return {
+      nurse: c("nurse"),
+      physician: c("physician"),
+      dentist: c("dentist"),
+      total: approvedClinicalStaffRows.length,
+      onDuty,
+      offDuty,
+    };
+  }, [approvedClinicalStaffRows]);
+
+  const approvePendingStaff = async (row) => {
+    try {
+      if (isSupabaseConfigured() && supabase) {
+        const { error } = await supabase
+          .from("profiles")
+          .update({ account_status: "approved" })
+          .eq("id", row.id)
+          .eq("office", "health");
+        if (error) throw error;
+      }
+      setAdminStaffRows((prev) =>
+        prev.map((r) =>
+          String(r.id) === String(row.id)
+            ? { ...r, accountStatus: "approved", status: "on-duty" }
+            : r,
+        ),
+      );
+      setPendingApprovalRows((prev) => prev.filter((r) => String(r.id) !== String(row.id)));
+      showToast("Staff account approved.", { variant: "success" });
+    } catch (err) {
+      showToast(err?.message || "Could not approve staff account.", { variant: "error" });
+    }
+  };
+
+  const prefixedName = (r) => `${r.titlePrefix} ${r.name}`.trim();
+
+  const providerQueueRows = useMemo(
+    () =>
+      workflowRows
+        .filter((r) =>
+          [HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER, HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS].includes(r.workflowStatus),
+        )
+        .sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)),
+    [workflowRows],
+  );
+
+  const dentistQueueRows = useMemo(
+    () =>
+      providerQueueRows.filter((r) => (r.providerQueue || r.designation || "").toLowerCase() === "dentist"),
+    [providerQueueRows],
+  );
+
+  const dentalWeekBarData = useMemo(
+    () => [
+      { day: "Mon", total: 8 },
+      { day: "Tue", total: 12 },
+      { day: "Wed", total: 6 },
+      { day: "Thu", total: 10 },
+      { day: "Fri", total: 4 },
+    ],
+    [],
+  );
+
+  const dentalFollowupRows = useMemo(() => {
+    const rows = appointmentsList
+      .filter((a) => {
+        const st = String(a.status || a.workflowStatus || "").toLowerCase();
+        return a.followup || st.includes("pending") || st.includes("confirm") || st.includes("book");
+      })
+      .map((a) => ({
+        id: a.id,
+        student: a.student || "—",
+        studentId: a.studentId || "",
+        dateSort: a.dateSort || a.date,
+        time: a.time || "09:00 AM",
+        reason: a.consultationType || a.purpose || a.service || "Recall visit",
+        status: String(a.status || "pending").toLowerCase().includes("confirm") ? "confirmed" : "pending",
+      }));
+    return rows.slice(0, 24);
+  }, [appointmentsList]);
+
+  useEffect(() => {
+    if (!isDentistUser) return;
+    if (!healthRecordsRows.length) {
+      setDentalRecordsSelectedId(null);
+      return;
+    }
+    setDentalRecordsSelectedId((prev) => {
+      if (prev && healthRecordsRows.some((r) => String(r.id) === String(prev))) return prev;
+      return healthRecordsRows[0]?.id ?? null;
+    });
+  }, [isDentistUser, healthRecordsRows]);
+
+  const stationQueueRows = useMemo(() => {
+    const rows = workflowRows.filter((r) =>
+      [
+        HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE,
+        HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER,
+        HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS,
+      ].includes(r.workflowStatus),
+    );
+    return {
+      nurse: rows.filter((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE).slice(0, 4),
+      physician: rows.filter((r) => (r.providerQueue || r.designation) === "physician").slice(0, 4),
+      dentist: rows.filter((r) => (r.providerQueue || r.designation) === "dentist").slice(0, 4),
+    };
+  }, [workflowRows]);
+
+  const nurseWaitlistRows = useMemo(() => {
+    const appointmentRows = workflowRows
+      .filter((r) =>
+        [HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE, HSO_WORKFLOW_STATUS.NURSE_IN_PROGRESS].includes(r.workflowStatus),
+      )
+      .map((r) => ({
+        id: `student-${r.id}`,
+        source: "student",
+        appointmentId: r.id,
+        queueNumber: r.queueNumber || 0,
+        name: r.student || "Unknown Student",
+        studentId: r.studentId || "—",
+        arrivedAt: r.checkedInAt || r.checkinValidFrom || "",
+        status: r.workflowStatus,
+        reason: r.consultationType || r.purpose || "General concern",
+      }));
+    const visitorRows = nurseVisitors.map((v) => ({
+      id: `visitor-${v.id}`,
+      source: "visitor",
+      appointmentId: v.id,
+      queueNumber: v.queueNumber || 0,
+      name: v.name,
+      studentId: "Visitor",
+      arrivedAt: v.arrivedAt,
+      status: v.workflowStatus,
+      reason: v.purpose || "Walk-in concern",
+    }));
+    return [...appointmentRows, ...visitorRows].sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0));
+  }, [workflowRows, nurseVisitors]);
+
+  const activeNurseSession = useMemo(
+    () => nurseWaitlistRows.find((r) => String(r.id) === String(activeNurseSessionId)) || null,
+    [nurseWaitlistRows, activeNurseSessionId],
+  );
+
+  const nurseDashboardStats = useMemo(() => {
+    const checkedIn = workflowRows.filter((r) =>
+      [
+        HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE,
+        HSO_WORKFLOW_STATUS.NURSE_IN_PROGRESS,
+        HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER,
+        HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS,
+      ].includes(r.workflowStatus),
+    ).length;
+    const pendingTriage = workflowRows.filter((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE).length;
+    const waitedMinutes = workflowRows
+      .filter((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE && r.checkedInAt)
+      .map((r) => Math.max(0, Math.round((Date.now() - new Date(r.checkedInAt).getTime()) / 60000)));
+    const avgWaitMins = waitedMinutes.length
+      ? Math.round(waitedMinutes.reduce((sum, m) => sum + m, 0) / waitedMinutes.length)
+      : 0;
+    return { checkedIn, pendingTriage, avgWaitMins };
+  }, [workflowRows]);
+
+  const nurseNowServing = useMemo(() => {
+    const fromStudent = workflowRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.NURSE_IN_PROGRESS);
+    if (fromStudent) return fromStudent;
+    const fromVisitor = nurseVisitors.find((v) => v.workflowStatus === HSO_WORKFLOW_STATUS.NURSE_IN_PROGRESS);
+    return fromVisitor || null;
+  }, [workflowRows, nurseVisitors]);
+
+  useEffect(() => {
+    const maxAppointmentQueue = appointmentsList.reduce(
+      (max, row) => Math.max(max, Number(row.queueNumber || 0)),
+      0,
+    );
+    const maxVisitorQueue = nurseVisitors.reduce((max, row) => Math.max(max, Number(row.queueNumber || 0)), 0);
+    const nextBaseline = Math.max(maxAppointmentQueue, maxVisitorQueue);
+    setNurseQueueCounter((prev) => (prev < nextBaseline ? nextBaseline : prev));
+  }, [appointmentsList, nurseVisitors]);
+
+  useEffect(() => {
+    const updates = workflowRows.filter(
+      (r) =>
+        normalizeWorkflowStatus(r.workflowStatus) === HSO_WORKFLOW_STATUS.BOOKED &&
+        nowInWindow(r.checkinValidFrom, r.checkinValidUntil),
+    );
+    if (!updates.length) return;
+    updates.forEach((r) => {
+      persistAppointmentWorkflow(r.id, { workflow_status: HSO_WORKFLOW_STATUS.CHECKIN_WINDOW_OPEN });
+    });
+  }, [workflowRows]);
+
   const referralsTabStats = useMemo(() => {
     const list = referralsList;
     const st = (r) => String(r.status || "").toLowerCase();
@@ -994,50 +1664,532 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     };
   }, [docRequestsRows]);
 
-  const urgentCasesPanel = useMemo(() => {
-    return referralsList
-      .filter((r) => r.urgent)
-      .slice(0, 6)
-      .map((r) => ({ student: r.student, desc: r.reason, ago: r.date }));
-  }, [referralsList]);
-
-  const reportsMonthlyTrend = useMemo(() => [], []);
-  const reportsDonutData = useMemo(() => [], []);
-
-  const reportsServiceBreakdown = useMemo(() => {
-    const consultations = consultationRows.length;
-    const referralCount = referralsList.length;
-    const followups = consultationRows.filter((c) => c.followup).length;
-    const apptCount = appointmentsList.length;
-    const sum = consultations + referralCount + followups + apptCount;
-    const pct = (n) => (sum > 0 ? `${((n / sum) * 100).toFixed(1)}%` : "0%");
+  const reportsDonutData = useMemo(() => {
+    const physician = appointmentsList.filter((r) => (r.designation || "").toLowerCase() === "physician").length;
+    const dentist = appointmentsList.filter((r) => (r.designation || "").toLowerCase() === "dentist").length;
     return [
-      { label: "Consultations", value: consultations, pct: pct(consultations), accent: "hs-breakdown-card--blue" },
-      { label: "Referrals", value: referralCount, pct: pct(referralCount), accent: "hs-breakdown-card--purple" },
-      { label: "Follow-ups flagged", value: followups, pct: pct(followups), accent: "hs-breakdown-card--green" },
-      { label: "Appointments", value: apptCount, pct: pct(apptCount), accent: "hs-breakdown-card--orange" },
-    ];
-  }, [consultationRows, referralsList, appointmentsList]);
+      { name: "Physician", value: physician, color: "#3b82f6" },
+      { name: "Dentist", value: dentist, color: "#10b981" },
+    ].filter((x) => x.value > 0);
+  }, [appointmentsList]);
 
-  const reportsKpi = useMemo(() => {
-    const urgent = referralsList.filter((r) => r.urgent).length;
-    return {
-      studentsServed: healthRecordsRows.length,
-      totalConsultations: consultationRows.length,
-      urgentCases: urgent,
+  const dailyVisitsTrend = useMemo(() => {
+    const out = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i -= 1) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const iso = d.toISOString().slice(0, 10);
+      const day = d.toLocaleDateString("en-US", { weekday: "short" });
+      const visits = appointmentsList.filter((a) => a.dateSort === iso).length;
+      out.push({ day, visits });
+    }
+    return out;
+  }, [appointmentsList]);
+
+  const peakHoursSeries = useMemo(() => {
+    const labels = ["8a", "9a", "10a", "11a", "12p", "1p", "2p", "3p", "4p", "5p"];
+    const slots = new Map(labels.map((l) => [l, 0]));
+    const toLabel = (time) => {
+      const raw = String(time || "").trim();
+      if (!raw) return null;
+      const m24 = raw.match(/^([01]?\d|2[0-3]):([0-5]\d)/);
+      if (m24) {
+        let h = Number(m24[1]);
+        const mer = h >= 12 ? "p" : "a";
+        h = h % 12 || 12;
+        return `${h}${mer}`;
+      }
+      const m12 = raw.toLowerCase().match(/^([1-9]|1[0-2])(?::([0-5]\d))?\s*([ap])m?$/);
+      if (m12) return `${m12[1]}${m12[3]}`;
+      return null;
     };
-  }, [healthRecordsRows, consultationRows, referralsList]);
+    appointmentsList.forEach((a) => {
+      const lbl = toLabel(a.time);
+      if (!lbl || !slots.has(lbl)) return;
+      slots.set(lbl, (slots.get(lbl) || 0) + 1);
+    });
+    return labels.map((hour) => ({ hour, total: slots.get(hour) || 0 }));
+  }, [appointmentsList]);
+
+  const topComplaints = useMemo(() => {
+    const tally = new Map();
+    appointmentsList.forEach((a) => {
+      const key = (a.consultationType || a.purpose || "General Check-up").trim();
+      tally.set(key, (tally.get(key) || 0) + 1);
+    });
+    return [...tally.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+  }, [appointmentsList]);
+
 
   const renderDashboard = () => {
-    const recentForTable = consultationRows.slice(0, 4);
+    if (isNurseUser) {
+      const dashboardQueueRows = nurseWaitlistRows.slice(0, 5);
+      const servingQueueNum = nurseNowServing?.queueNumber
+        ? String(nurseNowServing.queueNumber).padStart(4, "0")
+        : "0001";
+      return (
+        <div className="hs-nurse-shell">
+          <div className="hs-nurse-kpi-row">
+            {[
+              { label: "Patients in Queue", value: nurseDashboardStats.checkedIn, Icon: Users, tone: "blue" },
+              { label: "In Progress", value: nurseDashboardStats.pendingTriage, Icon: Activity, tone: "green" },
+              { label: "Completed Today", value: nurseRecentActivity.length, Icon: Clock, tone: "orange" },
+              {
+                label: "Avg Wait Time (min)",
+                value: nurseDashboardStats.avgWaitMins,
+                Icon: Thermometer,
+                tone: "red",
+              },
+            ].map((s) => (
+              <div key={s.label} className="hs-stat-card hs-nurse-kpi">
+                <div className="hs-stat-card-top">
+                  <div className={`hs-nurse-kpi-icon hs-nurse-kpi-icon--${s.tone}`}><s.Icon size={16} strokeWidth={1.8} /></div>
+                  <p className="hs-stat-value">{s.value}</p>
+                </div>
+                <p className="hs-stat-label">{s.label}</p>
+              </div>
+            ))}
+          </div>
+          <div className="hs-nurse-dash-layout">
+            <div className="cases-panel hs-panel-elevated hs-nurse-card hs-nurse-card--queue">
+              <div className="cases-panel-header">
+                <div className="cases-panel-title cases-panel-title--strong">Nurse Queue</div>
+                <p className="hs-list-sub hs-list-sub--tight">Patients waiting for vital signs assessment</p>
+              </div>
+              <div className="cc-modal-body">
+                {dashboardQueueRows.map((row) => (
+                  <div key={row.id} className="hs-nurse-ticket hs-nurse-ticket--dashboard">
+                    <div className="hs-nurse-ticket-no">
+                      <span>TICKET</span>
+                      <strong>{String(row.queueNumber || 0).padStart(4, "0")}</strong>
+                    </div>
+                    <div>
+                      <strong>{row.name}</strong>
+                      <p>{String(row.reason || "Physician").includes("Dental") ? "Dentist" : "Physician"}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="hs-nurse-mid-col">
+              <div className="cases-panel hs-panel-elevated hs-nurse-card">
+                <div className="cases-panel-header">
+                  <div className="cases-panel-title cases-panel-title--strong">Now Serving</div>
+                </div>
+                <div className="cc-modal-body">
+                  <div className="hs-nurse-now-serving-strip">
+                    <strong>{servingQueueNum}</strong>
+                    <div>
+                      <p>{nurseNowServing?.student || nurseNowServing?.name || "No patient in service"}</p>
+                      <span>Physician</span>
+                    </div>
+                    <span className="hs-pill hs-pill-ongoing">In Progress</span>
+                  </div>
+                </div>
+              </div>
+              <div className="cases-panel hs-panel-elevated hs-nurse-card hs-nurse-form">
+                <div className="cases-panel-header">
+                  <div className="cases-panel-title cases-panel-title--strong">Patient Check-In</div>
+                  <p className="hs-list-sub hs-list-sub--tight">Enter patient check-in code</p>
+                </div>
+                <div className="cc-modal-body">
+                  <div className="hs-modal-field">
+                    <label>Check-In Code</label>
+                    <input
+                      placeholder="Enter code"
+                      value={checkinCodeInput}
+                      onChange={(e) => setCheckinCodeInput(sanitizeDigitsOnlyInput(e.target.value))}
+                    />
+                  </div>
+                  <button type="button" className="hs-btn-primary hs-nurse-full-btn" onClick={verifyCheckinCode} style={{ marginTop: 10 }}>
+                    Check In Patient
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="hs-nurse-right-col">
+              <div className="cases-panel hs-panel-elevated hs-nurse-card hs-nurse-form">
+                <div className="cases-panel-header">
+                  <div className="cases-panel-title cases-panel-title--strong">Vital Signs</div>
+                  <p className="hs-list-sub hs-list-sub--tight">
+                    For {nurseNowServing?.student || nurseNowServing?.name || "selected patient"}
+                  </p>
+                </div>
+                <div className="cc-modal-body">
+                  <div className="hs-modal-field"><label>Temperature (°C)</label><input value={nurseTriageForm.temperature || "36.5"} onChange={(e) => setNurseTriageForm((f) => ({ ...f, temperature: e.target.value }))} /></div>
+                  <div className="hs-modal-field"><label>Blood Pressure</label><input value={nurseTriageForm.bloodPressure || "120/80"} onChange={(e) => setNurseTriageForm((f) => ({ ...f, bloodPressure: e.target.value }))} /></div>
+                  <div className="hs-modal-field"><label>Pulse</label><input value={nurseTriageForm.pulse || "72 bpm"} onChange={(e) => setNurseTriageForm((f) => ({ ...f, pulse: e.target.value }))} /></div>
+                  <div className="hs-modal-field"><label>Resp. Rate</label><input value={nurseTriageForm.respiratoryRate || "16 rpm"} onChange={(e) => setNurseTriageForm((f) => ({ ...f, respiratoryRate: e.target.value }))} /></div>
+                  <div className="hs-modal-field"><label>Notes</label><textarea placeholder="Observations, concerns, allergies..." value={nurseTriageForm.remarks} onChange={(e) => setNurseTriageForm((f) => ({ ...f, remarks: e.target.value }))} /></div>
+                  <div className="hs-nurse-vitals-actions">
+                    <button type="button" className="hs-btn-success" onClick={handleNurseComplete}>Complete</button>
+                    <button type="button" className="hs-btn-primary" onClick={handleNurseNext}>Next</button>
+                  </div>
+                </div>
+              </div>
+              <div className="cases-panel hs-panel-elevated hs-nurse-card">
+                <div className="cases-panel-header">
+                  <div className="cases-panel-title cases-panel-title--strong">Route Patient</div>
+                </div>
+                <div className="cc-modal-body hs-nurse-route-actions">
+                  <button type="button" className="hs-btn-secondary" onClick={() => { setTransferTarget("physician"); handleNurseTransfer("physician"); }}>
+                    <Stethoscope size={14} /> Send to Physician
+                  </button>
+                  <button type="button" className="hs-btn-secondary" onClick={() => { setTransferTarget("dentist"); handleNurseTransfer("dentist"); }}>
+                    <Activity size={14} /> Send to Dentist
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (isPhysicianUser) {
+      const physicianQueueRows = workflowRows
+        .filter((r) =>
+          [HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER, HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS].includes(r.workflowStatus),
+        )
+        .filter((r) => (r.providerQueue || r.designation || "").toLowerCase() === "physician")
+        .slice(0, 5);
+      const active = physicianQueueRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS) || physicianQueueRows[0];
+      const historyRows = consultationRows
+        .filter((row) =>
+          active?.studentId
+            ? String(row.studentId || "").toLowerCase() === String(active.studentId || "").toLowerCase()
+            : String(row.student || "").toLowerCase() === String(active?.student || "").toLowerCase(),
+        )
+        .slice(0, 6);
+      const activeRow = active || physicianQueueRows[0] || null;
+      return (
+        <div className="hs-phys-shell">
+          <div className="hs-phys-kpi-row">
+            <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{physicianQueueRows.length}</p><p className="hs-stat-label">IN QUEUE</p></div>
+            <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{consultationRows.length}</p><p className="hs-stat-label">CONSULTATIONS TODAY</p></div>
+            <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{certificatesList.length}</p><p className="hs-stat-label">Certificates Issued</p></div>
+          </div>
+          <div className="hs-phys-main-grid">
+            <div className="cases-panel hs-panel-elevated hs-phys-card">
+              <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">Physician Queue</div></div>
+              <div className="cc-modal-body">
+                {physicianQueueRows.map((r) => (
+                  <div className={`hs-phys-queue-item ${activeRow?.id === r.id ? "hs-phys-queue-item--active" : ""}`} key={r.id}>
+                    <div className="hs-phys-queue-no">{`Q${String(r.queueNumber || 0).padStart(2, "0")}`}</div>
+                    <div className="hs-phys-queue-main">
+                      <strong>{r.student}</strong>
+                      <p>{r.reason || "—"}</p>
+                    </div>
+                    <div className="hs-phys-queue-right">
+                      <p>{`${Math.max(12, (r.queueNumber || 1) * 3)}m`}</p>
+                      <span>Waiting</span>
+                    </div>
+                  </div>
+                ))}
+                {!physicianQueueRows.length ? (
+                  <EmptyStateMessage
+                    icon={Users}
+                    title="No waiting patients at the moment."
+                    description="New patients will appear here once done with checking the vital signs."
+                  />
+                ) : null}
+              </div>
+            </div>
+            <div className="cases-panel hs-panel-elevated hs-phys-card">
+              <div className="cases-panel-header">
+                <div className={`hs-phys-active-title-wrap${!activeRow ? " hs-phys-active-title-wrap--empty" : ""}`}>
+                  {activeRow?.queueNumber ? (
+                    <span className="hs-phys-active-q">{`Q${String(activeRow.queueNumber).padStart(2, "0")}`}</span>
+                  ) : null}
+                  <div>
+                    <div className="cases-panel-title cases-panel-title--strong">{activeRow?.student || "No active patient selected."}</div>
+                    {activeRow ? (
+                      <p className="hs-stat-meta">{`${activeRow?.studentId || "—"} · ${activeRow?.reason || "—"}`}</p>
+                    ) : (
+                      <p className="hs-stat-meta">Select a student from the queue to begin consultation.</p>
+                    )}
+                  </div>
+                </div>
+                {activeRow ? (
+                  <div className="hs-phys-panel-actions">
+                    <button
+                      type="button"
+                      className="hs-btn-secondary"
+                      onClick={() => setPhysicianCertModalOpen(true)}
+                    >
+                      Medical Certificate
+                    </button>
+                    <button type="button" className="hs-btn-primary">Complete</button>
+                  </div>
+                ) : null}
+              </div>
+              <div className="cc-modal-body">
+                {!activeRow ? (
+                  <EmptyStateMessage
+                    icon={Stethoscope}
+                    title="No active patient selected."
+                    description="Select a student from the queue to begin consultation."
+                  />
+                ) : (
+                  <>
+                    <div className="hs-phys-tab-row">
+                        {[
+                        { id: "vitals", label: "Vitals" },
+                        { id: "history", label: "History" },
+                      ].map((tab) => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          className={`hs-phys-tab-btn ${physicianPanelTab === tab.id ? "hs-phys-tab-btn--active" : ""}`}
+                          onClick={() => setPhysicianPanelTab(tab.id)}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                    {physicianPanelTab === "vitals" ? (
+                      <div className="hs-phys-vitals-form">
+                        <div className="hs-phys-vitals-grid">
+                          <div><span>Temp</span><strong>{activeRow?.nurseVitals?.temperature || "—"}</strong></div>
+                          <div><span>BP</span><strong>{activeRow?.nurseVitals?.bloodPressure || "—"}</strong></div>
+                          <div><span>Pulse</span><strong>{activeRow?.nurseVitals?.pulse || "—"}</strong></div>
+                          <div><span>Resp</span><strong>{activeRow?.nurseVitals?.respiratoryRate || "—"}</strong></div>
+                        </div>
+                        <p className="hs-stat-meta" style={{ marginTop: 10 }}>Recorded by triage nurse.</p>
+                      </div>
+                    ) : null}
+                    {physicianPanelTab === "history" ? (
+                      <div>
+                        {historyRows.map((h) => (
+                          <div className="hs-nurse-ticket" key={h.id}>
+                            <p style={{ margin: 0, color: "#64748b" }}>{h.date}</p>
+                            <strong>{h.reason} · Rx {h.treatment || "No prescription recorded"}</strong>
+                          </div>
+                        ))}
+                        {!historyRows.length ? (
+                          <EmptyStateMessage
+                            compact
+                            icon={FileText}
+                            title="No consultation history available."
+                          />
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (isDentistUser) {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const qLen = dentistQueueRows.length;
+      const proceduresToday = consultationRows.length;
+      const avgWaitMins = qLen ? Math.min(45, 11 + qLen * 3) : 0;
+      const followWeekCount = dentalFollowupRows.length;
+      const currentPt =
+        dentistQueueRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS) ||
+        dentistQueueRows[0] ||
+        null;
+      const todayAppts = appointmentsList.filter((a) => a.dateSort === todayIso).slice(0, 8);
+      const queueSnap = dentistQueueRows.slice(0, 4);
+      const recentProc = consultationRows.slice(0, 4);
+      return (
+        <div className="hs-dent-shell">
+          <div className="hs-dent-kpi-row">
+            {[
+              { label: "Patients in Queue", value: String(qLen), Icon: Users, tone: "blue" },
+              { label: "Procedures Today", value: String(proceduresToday), Icon: CheckCircle, tone: "green" },
+              { label: "Avg Wait Time", value: qLen ? `${avgWaitMins}m` : "—", Icon: Clock, tone: "purple" },
+              { label: "Follow-ups This Week", value: String(followWeekCount), Icon: CalendarDays, tone: "orange" },
+            ].map((s) => (
+              <div key={s.label} className="hs-stat-card hs-dent-kpi-card">
+                <div className="hs-stat-card-top">
+                  <p className="hs-stat-value">{s.value}</p>
+                  <div className={`hs-dent-kpi-icon hs-dent-kpi-icon--${s.tone}`} aria-hidden>
+                    <s.Icon size={18} strokeWidth={1.8} />
+                  </div>
+                </div>
+                <p className="hs-stat-label">{s.label}</p>
+              </div>
+            ))}
+          </div>
+          <div className="hs-dent-main-grid">
+            <div className="hs-dent-left-col">
+              <div className="cases-panel hs-panel-elevated hs-dent-card">
+                <div className="hs-dent-card-pad">
+                  <p className="hs-dent-kicker">CURRENT</p>
+                  {currentPt ? (
+                    <>
+                      <h3 className="hs-dent-patient-name">{currentPt.student}</h3>
+                      <p className="hs-stat-meta">
+                        {currentPt.studentId || "—"} · {currentPt.service || "BSA-2"} ·{" "}
+                        <span className="hs-dent-priority">Nursing Priority</span>
+                      </p>
+                      <p className="hs-dent-concern">
+                        Concern: {currentPt.consultationType || currentPt.purpose || "Dental check"}
+                      </p>
+                      <div className="hs-dent-btn-stack">
+                        <button type="button" className="hs-btn-primary hs-dent-btn" onClick={() => setActiveNav("dentalChart")}>
+                          Open Dental Chart
+                        </button>
+                        <button type="button" className="hs-btn-secondary hs-dent-btn" onClick={() => setActiveNav("dentalQueue")}>
+                          View Queue
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <EmptyStateMessage
+                      icon={Users}
+                      title="No patient in chair."
+                      description="When students are queued for the dentist station, the current patient will appear here."
+                    />
+                  )}
+                </div>
+              </div>
+              <div className="cases-panel hs-panel-elevated hs-dent-card">
+                <div className="hs-dent-card-head">
+                  <div className="cases-panel-title cases-panel-title--strong">Today&apos;s Appointments</div>
+                  <button type="button" className="hs-link-action" onClick={() => setActiveNav("dentalFollowups")}>
+                    + Schedule
+                  </button>
+                </div>
+                <div className="hs-dent-appt-list">
+                  {todayAppts.length ? (
+                    todayAppts.map((a) => (
+                      <div key={a.id} className="hs-dent-appt-row">
+                        <span className="hs-dent-appt-time">{a.time || "—"}</span>
+                        <div>
+                          <strong>{a.student}</strong>
+                          <p className="hs-stat-meta">{a.consultationType || a.purpose || "Dental"}</p>
+                        </div>
+                        <span className={pillClass(statusLabel(a.workflowStatus || a.status))}>
+                          {statusLabel(a.workflowStatus || a.status)}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="hs-stat-meta">No appointments scheduled for today.</p>
+                  )}
+                </div>
+              </div>
+              <div className="cases-panel hs-panel-elevated hs-dent-card">
+                <div className="cases-panel-header">
+                  <div>
+                    <div className="cases-panel-title cases-panel-title--strong">Queue Snapshot</div>
+                    <p className="hs-list-sub hs-list-sub--tight">Next patient in waiting</p>
+                  </div>
+                </div>
+                <div className="cc-modal-body">
+                  {queueSnap.length ? (
+                    queueSnap.map((r) => (
+                      <div key={r.id} className="hs-dent-queue-pill">
+                        <div>
+                          <strong>{`Q${String(r.queueNumber || 0).padStart(2, "0")}`}</strong>
+                          <p>{r.student}</p>
+                          <p className="hs-stat-meta">{r.consultationType || r.purpose || "Dental check"}</p>
+                        </div>
+                        <span className="hs-stat-meta">{`${Math.max(5, (r.queueNumber || 1) * 2)}m Waiting`}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="hs-stat-meta">No patients waiting in dentist queue.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="hs-dent-right-col">
+              <div className="cases-panel hs-panel-elevated hs-dent-card">
+                <div className="cases-panel-header hs-dent-panel-head--compact">
+                  <div className="cases-panel-title cases-panel-title--strong">Quick Actions</div>
+                </div>
+                <div className="hs-dent-quick-list">
+                  {[
+                    { label: "Dental Chart", Icon: Activity, nav: "dentalChart" },
+                    { label: "Dental Queue", Icon: FileText, nav: "dentalQueue" },
+                    { label: "Schedule Follow-up", Icon: CalendarDays, nav: "dentalFollowups" },
+                    { label: "Patient Records", Icon: Folder, nav: "dentalRecords" },
+                  ].map((q) => (
+                    <button key={q.label} type="button" className="hs-dent-quick-row" onClick={() => setActiveNav(q.nav)}>
+                      <q.Icon size={16} strokeWidth={1.7} aria-hidden />
+                      <span>{q.label}</span>
+                      <ChevronRight size={16} className="hs-dent-quick-chevron" aria-hidden />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="cases-panel hs-panel-elevated hs-dent-card">
+                <div className="cases-panel-header">
+                  <div>
+                    <div className="cases-panel-title cases-panel-title--strong">This Week</div>
+                    <p className="hs-list-sub hs-list-sub--tight">Procedure breakdown</p>
+                  </div>
+                </div>
+                <div className="hs-dent-week-chart">
+                  <ResponsiveContainer width="100%" height={160}>
+                    <BarChart data={dentalWeekBarData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+                      <YAxis hide />
+                      <Tooltip />
+                      <Bar dataKey="total" radius={[6, 6, 0, 0]}>
+                        {dentalWeekBarData.map((entry, index) => (
+                          <Cell key={entry.day} fill={["#3b82f6", "#6366f1", "#8b5cf6", "#f97316", "#eab308"][index % 5]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="cases-panel hs-panel-elevated hs-dent-card">
+                <div className="cases-panel-header">
+                  <div>
+                    <div className="cases-panel-title cases-panel-title--strong">Recent Procedures</div>
+                    <p className="hs-list-sub hs-list-sub--tight">Last completed</p>
+                  </div>
+                </div>
+                <div className="hs-dent-recent-list">
+                  {recentProc.length ? (
+                    recentProc.map((c) => (
+                      <div key={c.id} className="hs-dent-recent-row">
+                        <span className="hs-dent-recent-dot" aria-hidden />
+                        <div>
+                          <strong>{c.student}</strong>
+                          <p className="hs-stat-meta">{c.reason || "Procedure"}</p>
+                          <p className="hs-stat-meta">{c.date || "Today"}</p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="hs-stat-meta">No recent procedures logged.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const totalPatientsToday = new Set(
+      appointmentsList
+        .filter((a) => a.dateSort === new Date().toISOString().slice(0, 10))
+        .map((a) => a.studentId || a.student),
+    ).size;
+    const activeQueues = queueStats.waitingNurse + queueStats.waitingProvider + queueStats.inProgress;
+    const staffsOnDuty = staffingSummary.onDuty;
     return (
       <>
-        <section className="do-home-metrics" aria-label="Visit and appointment summary">
+        <section className="do-home-metrics" aria-label="Admin dashboard metrics">
           <div className="do-metric-card hs-do-metric--visits">
             <div className="do-metric-body">
-              <p className="do-metric-value">{hsoDashboardMetrics.visitsToday}</p>
-              <p className="do-metric-label">Today&apos;s Visits</p>
-              <p className="do-metric-hint">Recorded for {formatVisitDateLabel(new Date())}</p>
+              <p className="do-metric-value">{totalPatientsToday}</p>
+              <p className="do-metric-label">Total Patients Today</p>
+              <p className="do-metric-hint">Unique student visits</p>
             </div>
             <div className="do-metric-icon" aria-hidden>
               <Sparkles size={24} strokeWidth={2} />
@@ -1045,9 +2197,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
           </div>
           <div className="do-metric-card hs-do-metric--appts">
             <div className="do-metric-body">
-              <p className="do-metric-value">{hsoDashboardMetrics.apptsToday}</p>
-              <p className="do-metric-label">Appointments</p>
-              <p className="do-metric-hint">Scheduled for today</p>
+              <p className="do-metric-value">{activeQueues}</p>
+              <p className="do-metric-label">Active Queues</p>
+              <p className="do-metric-hint">Nurse + physician + dentist</p>
             </div>
             <div className="do-metric-icon" aria-hidden>
               <CalendarDays size={24} strokeWidth={2} />
@@ -1055,9 +2207,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
           </div>
           <div className="do-metric-card hs-do-metric--cases">
             <div className="do-metric-body">
-              <p className="do-metric-value">{hsoDashboardMetrics.activeCases}</p>
-              <p className="do-metric-label">Active Cases</p>
-              <p className="do-metric-hint">Consultations not marked completed</p>
+              <p className="do-metric-value">{staffsOnDuty}</p>
+              <p className="do-metric-label">Staffs on Duty</p>
+              <p className="do-metric-hint">Ready for patient handling</p>
             </div>
             <div className="do-metric-icon" aria-hidden>
               <Users size={24} strokeWidth={2} />
@@ -1068,106 +2220,1063 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         <div className="do-home-split">
           <div className="do-panel">
             <div className="do-panel-header">
-              <h2 className="do-panel-title">Recent Consultations</h2>
-              <p className="do-panel-sub">Today&apos;s student visits</p>
+              <h2 className="do-panel-title">Daily Visits</h2>
+              <p className="do-panel-sub">Last 7 days</p>
             </div>
-            <div className="do-panel-body" style={{ padding: "0 22px" }}>
-              <div className="cases-table-wrapper" style={{ padding: "0 0 8px" }}>
-                <table className="cases-table">
-                  <thead>
-                    <tr>
-                      <th>Student</th>
-                      <th>Time</th>
-                      <th>Reason</th>
-                      <th>Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentForTable.map((c) => {
-                      const statusLabel = consultStatusToLabel(c.status);
-                      return (
-                        <tr key={c.id}>
-                          <td>
-                            <p className="cell-student-name">{c.student}</p>
-                            <p className="cell-student-id">{c.studentId}</p>
-                          </td>
-                          <td className="cell-date">{c.time}</td>
-                          <td className="cell-text">{c.reason}</td>
-                          <td>
-                            <span className={`${pillClass(statusLabel)}`} style={{ textTransform: "lowercase" }}>
-                              {statusLabel}
-                            </span>
-                          </td>
-                          <td>
-                            <button type="button" className="btn-view" onClick={() => setConsultDetail(c)}>
-                              <Eye size={16} strokeWidth={2} aria-hidden />
-                              View
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <div className="do-panel-body" style={{ padding: "18px 22px" }}>
+              <div style={{ width: "100%", height: 220 }}>
+                <ResponsiveContainer>
+                  <LineChart data={dailyVisitsTrend}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="day" />
+                    <YAxis />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="visits" stroke="#2563eb" strokeWidth={2} />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
-            </div>
-            <div className="do-panel-footer">
-              <button
-                type="button"
-                className="do-panel-btn"
-                onClick={() => {
-                  setActiveNav("visits");
-                  setVisitTab("all");
-                }}
-              >
-                View All Consultations
-              </button>
             </div>
           </div>
 
           <div className="do-panel">
             <div className="do-panel-header">
-              <h2 className="do-panel-title">Urgent Cases</h2>
-              <p className="do-panel-sub">Require immediate attention</p>
+              <h2 className="do-panel-title">Peak Hours</h2>
+              <p className="do-panel-sub">Today</p>
             </div>
-            <div className="do-panel-body">
-              {urgentCasesPanel.length ? (
-                urgentCasesPanel.map((u) => (
-                  <div key={u.student + u.ago} className="do-hearing-item">
-                    <p className="do-hearing-name">{u.student}</p>
-                    <p className="do-hearing-meta">
-                      {u.desc}
-                      <br />
-                      {u.ago}
-                    </p>
-                  </div>
-                ))
-              ) : (
-                <p className="hs-stat-meta" style={{ padding: "8px 0" }}>
-                  No urgent referrals flagged.
-                </p>
-              )}
+            <div className="do-panel-body" style={{ padding: "18px 22px" }}>
+              <div style={{ width: "100%", height: 220 }}>
+                <ResponsiveContainer>
+                  <BarChart data={peakHoursSeries}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="hour" />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="total" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
-            <div className="do-panel-footer">
-              <button
-                type="button"
-                className="do-panel-btn"
-                onClick={() => {
-                  setActiveNav("visits");
-                  setVisitTab("followups");
-                }}
-              >
-                View All Alerts
-              </button>
-            </div>
+          </div>
+        </div>
+
+        <div className="cases-panel hs-panel-elevated" style={{ marginTop: 20 }}>
+          <div className="cases-panel-header">
+            <div className="cases-panel-title cases-panel-title--strong">Staff Availability</div>
+          </div>
+          <div className="cases-table-wrapper">
+            <table className="cases-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Patient Load</th>
+                </tr>
+              </thead>
+              <tbody>
+                {approvedClinicalStaffRows.map((r) => (
+                  <tr key={r.id}>
+                    <td className="cell-text">{prefixedName(r)}</td>
+                    <td className="cell-text">{r.role}</td>
+                    <td><span className={pillClass(r.status)}>{r.status === "on-duty" ? "On-Duty" : "Off-Duty"}</span></td>
+                    <td className="cell-text">{r.patientLoad}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </>
     );
   };
 
+  const renderCheckin = () => (
+    isNurseUser ? (
+      <>
+        <div className="cases-panel hs-panel-elevated">
+          <div className="cases-panel-header">
+            <div className="cases-panel-title cases-panel-title--strong">Student Check-In & Validation</div>
+            <p className="hs-list-sub hs-list-sub--tight">Enter appointment code, verify profile, then confirm queueing.</p>
+          </div>
+          <div className="cc-modal-body">
+            <div className="hs-modal-grid">
+              <div className="hs-modal-field">
+                <label>Appointment Code</label>
+                <input value={checkinCodeInput} onChange={(e) => setCheckinCodeInput(sanitizeDigitsOnlyInput(e.target.value))} />
+              </div>
+            </div>
+            <div className="hs-modal-footer" style={{ justifyContent: "flex-start" }}>
+              <button type="button" className="hs-btn-secondary" onClick={verifyCheckinCode}>
+                Verify
+              </button>
+            </div>
+            {checkinPreview ? (
+              <div className="do-panel" style={{ marginTop: 14 }}>
+                <div className="do-panel-header">
+                  <h2 className="do-panel-title">Verification Profile</h2>
+                </div>
+                <div className="do-panel-body" style={{ padding: "12px 16px" }}>
+                  <p className="cell-text"><strong>Photo & Name:</strong> [No photo] {checkinPreview.student}</p>
+                  <p className="cell-text"><strong>Appointment Time:</strong> {checkinPreview.time || "—"}</p>
+                  <p className="cell-text"><strong>Reason:</strong> {checkinPreview.consultationType || checkinPreview.purpose || "—"}</p>
+                  <button type="button" className="hs-btn-primary" onClick={handleCheckinByCode}>
+                    Confirm & Assign Queue Number
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </>
+    ) : (
+    <>
+      <div className="hs-stat-row">
+        <div className="hs-stat-card">
+          <div className="hs-stat-card-top"><p className="hs-stat-value">{queueStats.checkinOpen}</p></div>
+          <p className="hs-stat-label">Check-in Open</p>
+          <p className="hs-stat-meta">Codes currently valid</p>
+        </div>
+        <div className="hs-stat-card">
+          <div className="hs-stat-card-top"><p className="hs-stat-value">{queueStats.waitingNurse}</p></div>
+          <p className="hs-stat-label">Waiting Nurse</p>
+          <p className="hs-stat-meta">Queued from nurse desk</p>
+        </div>
+      </div>
+      <div className="cases-panel hs-panel-elevated">
+        <div className="cases-panel-header">
+          <div className="cases-panel-title cases-panel-title--strong">Check-in Validation</div>
+          <p className="hs-list-sub hs-list-sub--tight">Enter student check-in code to queue for nurse assessment.</p>
+        </div>
+        <div className="cc-modal-body">
+          <div className="hs-modal-grid">
+            <div className="hs-modal-field">
+              <label>Check-in code</label>
+              <input value={checkinCodeInput} onChange={(e) => setCheckinCodeInput(sanitizeDigitsOnlyInput(e.target.value))} />
+            </div>
+          </div>
+          <div className="hs-modal-footer" style={{ justifyContent: "flex-start" }}>
+            <button type="button" className="cc-btn-primary" onClick={handleCheckinByCode}>
+              Validate and Queue
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+    )
+  );
+
+  const renderQueue = () => (
+    isNurseUser ? (
+      <>
+        <div className="hs-nurse-queue-layout">
+          <div className="cases-panel hs-panel-elevated hs-nurse-card">
+            <div className="cases-panel-header">
+              <p className="hs-nurse-serving-label">NOW SERVING</p>
+              <h2 className="hs-nurse-serving-title">QUEUING NUMBER</h2>
+            </div>
+            <div className="cc-modal-body">
+              <div className="hs-nurse-serving-box">
+                {String((activeNurseSession?.queueNumber || nurseNowServing?.queueNumber || 1)).padStart(4, "0")}
+              </div>
+              <div className="hs-nurse-quick-title">QUICK ACTIONS</div>
+              <div className="hs-nurse-quick-grid">
+                <button type="button" className="hs-btn-secondary" onClick={handleNurseComplete} disabled={!activeNurseSession}>
+                  <CheckCircle size={13} /> Complete
+                </button>
+                <button type="button" className="hs-btn-secondary" onClick={handleNurseNext}>
+                  <Send size={13} /> Next
+                </button>
+                <button type="button" className="hs-btn-secondary" onClick={handleNurseTransfer} disabled={!activeNurseSession}>
+                  <Route size={13} /> Transfer
+                </button>
+                <button type="button" className="hs-btn-secondary" onClick={() => setNurseStationOnline(true)}>
+                  <Activity size={13} /> Start
+                </button>
+                <button type="button" className="hs-btn-secondary" onClick={() => { setNurseStationOnline(false); setActiveNurseSessionId(null); }}>
+                  <X size={13} /> Close
+                </button>
+                <button type="button" className="hs-btn-secondary" onClick={() => setAddVisitorOpen(true)}>
+                  <UserPlus size={13} /> Add Visitor
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="cases-panel hs-panel-elevated hs-nurse-card">
+            <div className="cases-panel-header">
+              <div className="cases-panel-title cases-panel-title--strong">Up Next</div>
+              <p className="hs-stat-meta">{`${nurseWaitlistRows.length} in line`}</p>
+            </div>
+            <div className="cc-modal-body">
+              {nurseWaitlistRows.slice(0, 5).map((r) => (
+                <div key={r.id} className="hs-nurse-ticket hs-nurse-ticket--upnext">
+                  <div className="hs-nurse-ticket-no">
+                    <span>TICKET</span>
+                    <strong>{String(r.queueNumber || 0).padStart(4, "0")}</strong>
+                  </div>
+                  <div>
+                    <strong>{r.name}</strong>
+                    <p>{String(r.reason || "Physician").includes("Dental") ? "Dentist" : "Physician"}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </>
+    ) : (
+    <>
+      <div className="hs-stat-row-4">
+        {[
+          { label: "Total Waiting", value: queueStats.waitingNurse + queueStats.waitingProvider },
+          { label: "Nurse Queue", value: stationQueueRows.nurse.length },
+          { label: "Physician Queue", value: stationQueueRows.physician.length },
+          { label: "Dentist Queue", value: stationQueueRows.dentist.length },
+        ].map((s) => (
+          <div key={s.label} className="hs-stat-card">
+            <div className="hs-stat-card-top"><p className="hs-stat-value">{s.value}</p></div>
+            <p className="hs-stat-label">{s.label}</p>
+          </div>
+        ))}
+      </div>
+      <div className="do-home-split">
+        {[
+          { title: "Nurse", rows: stationQueueRows.nurse },
+          { title: "Physician", rows: stationQueueRows.physician },
+          { title: "Dentist", rows: stationQueueRows.dentist },
+        ].map((col) => (
+          <div className="do-panel" key={col.title}>
+            <div className="do-panel-header">
+              <h2 className="do-panel-title">{col.title}</h2>
+              <p className="do-panel-sub">Station queue</p>
+            </div>
+            <div className="do-panel-body" style={{ padding: "0 16px 16px" }}>
+              {col.rows.map((r) => (
+                <div key={r.id} className="hs-consult-row" style={{ gridTemplateColumns: "1fr auto", marginBottom: 8 }}>
+                  <div>
+                    <p className="hs-consult-name">{r.queueNumber ? String(r.queueNumber).padStart(4, "0") : "—"}</p>
+                    <p className="hs-consult-meta">{r.student}</p>
+                  </div>
+                  <span className={pillClass(statusLabel(r.workflowStatus))}>{statusLabel(r.workflowStatus)}</span>
+                </div>
+              ))}
+              {col.rows.length === 0 ? <p className="hs-stat-meta">No waiting patients.</p> : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+    )
+  );
+
+  const renderConsultation = () => (
+    isPhysicianUser ? (
+      <div className="hs-phys-shell">
+        <div className="hs-phys-kpi-row">
+          <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{providerQueueRows.length}</p><p className="hs-stat-label">In Queue</p></div>
+          <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{consultationRows.length}</p><p className="hs-stat-label">Consultations Today</p></div>
+          <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">3</p><p className="hs-stat-label">Certificates Issued</p></div>
+        </div>
+        <div className="hs-phys-main-grid">
+          <div className="cases-panel hs-panel-elevated hs-phys-card">
+            <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">Physician Queue</div></div>
+            <div className="cc-modal-body">
+              {providerQueueRows.slice(0, 5).map((r) => (
+                <div className="hs-nurse-ticket hs-nurse-ticket--upnext" key={r.id}>
+                  <div className="hs-nurse-ticket-no"><span>TICKET</span><strong>{String(r.queueNumber || 0).padStart(3, "0")}</strong></div>
+                  <div><strong>{r.student}</strong><p>{r.reason || "Consultation"}</p></div>
+                </div>
+              ))}
+              {!providerQueueRows.length ? (
+                <EmptyStateMessage
+                  icon={Users}
+                  title="No waiting patients at the moment."
+                  description="New patients will appear here once done with checking the vital signs."
+                />
+              ) : null}
+            </div>
+          </div>
+          <div className="cases-panel hs-panel-elevated hs-phys-card">
+            <div className="cases-panel-header">
+              <div className="cases-panel-title cases-panel-title--strong">{providerQueueRows[0]?.student || "No active patient"}</div>
+              {providerQueueRows[0] ? <button type="button" className="hs-btn-primary">Complete</button> : null}
+            </div>
+            {!providerQueueRows[0] ? (
+              <div className="cc-modal-body">
+                <EmptyStateMessage
+                  icon={Stethoscope}
+                  title="No active patient selected."
+                  description="Select a student from the queue to begin consultation."
+                />
+              </div>
+            ) : (
+              <div className="cc-modal-body hs-phys-vitals-grid">
+                <div><span>Temp</span><strong>{providerQueueRows[0]?.nurseVitals?.temperature || "—"}</strong></div>
+                <div><span>BP</span><strong>{providerQueueRows[0]?.nurseVitals?.bloodPressure || "—"}</strong></div>
+                <div><span>Pulse</span><strong>{providerQueueRows[0]?.nurseVitals?.pulse || "—"}</strong></div>
+                <div><span>Resp</span><strong>{providerQueueRows[0]?.nurseVitals?.respiratoryRate || "—"}</strong></div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    ) : (
+    <div className="cases-panel hs-panel-elevated">
+      <div className="cases-panel-header">
+        <div className="cases-panel-title cases-panel-title--strong">Provider Queue</div>
+      </div>
+      <div className="cases-table-wrapper">
+        <table className="cases-table">
+          <thead><tr><th>Queue #</th><th>Student</th><th>Provider</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>
+            {providerQueueRows.map((a) => (
+              <tr key={a.id}>
+                <td className="cell-case-id">{a.queueNumber ? String(a.queueNumber).padStart(4, "0") : "—"}</td>
+                <td><p className="cell-student-name">{a.student}</p><p className="cell-student-id">{a.studentId}</p></td>
+                <td className="cell-text" style={{ textTransform: "capitalize" }}>{a.providerQueue || a.designation || "physician"}</td>
+                <td><span className={pillClass(statusLabel(a.workflowStatus))}>{statusLabel(a.workflowStatus)}</span></td>
+                <td>
+                  {a.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER ? (
+                    <button type="button" className="hs-btn-primary" onClick={() => startProviderConsultation(a)}>Start</button>
+                  ) : (
+                    <button type="button" className="hs-btn-primary" onClick={() => completeProviderConsultation(a)}>Complete</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    )
+  );
+
+  const renderQueueDisplay = () => {
+    if (isPhysicianUser) {
+      const issuedToday = physicianPrescriptionRows.filter((r) => r.date === formatVisitDateLabel(new Date())).length;
+      return (
+        <>
+          <div className="hs-phys-kpi-row">
+            <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{issuedToday}</p><p className="hs-stat-label">Issued Today</p></div>
+            <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{physicianPrescriptionRows.length}</p><p className="hs-stat-label">Active</p></div>
+            <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">0</p><p className="hs-stat-label">Refill Requests</p></div>
+          </div>
+          <div className="cases-panel hs-panel-elevated hs-phys-card">
+            {physicianPrescriptionRows.length ? (
+              <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">All Prescriptions</div></div>
+            ) : null}
+            <div className="cases-table-wrapper">
+              {physicianPrescriptionRows.length ? (
+                <table className="cases-table">
+                  <thead><tr><th>RX ID</th><th>Patient</th><th>Drug</th><th>Instructions</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {physicianPrescriptionRows.map((row) => (
+                      <tr key={row.id}>
+                        <td>{row.id}</td>
+                        <td>{row.patient}</td>
+                        <td>{row.drug}</td>
+                        <td>{row.instructions}</td>
+                        <td>{row.date}</td>
+                        <td><span className={pillClass(statusLabel(row.status))}>{statusLabel(row.status)}</span></td>
+                        <td>Refill • Print</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="cc-modal-body">
+                  <EmptyStateMessage
+                    icon={FileText}
+                    title="No prescription history available."
+                    description="Issued prescriptions will appear here once consultations include medication orders."
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      );
+    }
+    const nowServing = providerQueueRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS);
+    return (
+      <div className="cases-panel hs-panel-elevated">
+        <div className="cases-panel-header">
+          <div className="cases-panel-title cases-panel-title--strong">Patient Queue Display</div>
+          <p className="hs-list-sub hs-list-sub--tight">Read-only board intended for TV monitor.</p>
+        </div>
+        <div className="cc-modal-body">
+          <h2 style={{ marginTop: 0, color: "#0f172a" }}>
+            Now Serving: {nowServing?.queueNumber ? String(nowServing.queueNumber).padStart(4, "0") : "----"}
+          </h2>
+          <div className="cases-table-wrapper">
+            <table className="cases-table">
+              <thead><tr><th>Queue #</th><th>Station</th><th>Status</th></tr></thead>
+              <tbody>
+                {providerQueueRows.slice(0, 10).map((r) => (
+                  <tr key={r.id}>
+                    <td className="cell-case-id">{r.queueNumber ? String(r.queueNumber).padStart(4, "0") : "—"}</td>
+                    <td className="cell-text" style={{ textTransform: "capitalize" }}>{r.providerQueue || r.designation || "physician"}</td>
+                    <td><span className={pillClass(statusLabel(r.workflowStatus))}>{statusLabel(r.workflowStatus)}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderUserManagement = () => (
+    <>
+      <div className="hs-stat-row">
+        <div className="hs-stat-card"><div className="hs-stat-card-top"><p className="hs-stat-value">{staffingSummary.total}</p></div><p className="hs-stat-label">Total Staff</p></div>
+        <div className="hs-stat-card"><div className="hs-stat-card-top"><p className="hs-stat-value">{staffingSummary.onDuty}</p></div><p className="hs-stat-label">On Duty</p></div>
+        <div className="hs-stat-card"><div className="hs-stat-card-top"><p className="hs-stat-value">{staffingSummary.offDuty}</p></div><p className="hs-stat-label">Off Duty</p></div>
+      </div>
+      <div className="cases-panel hs-panel-elevated">
+        <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">All Accounts</div></div>
+        <div className="cases-table-wrapper">
+          <table className="cases-table">
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+            <tbody>
+              {approvedClinicalStaffRows.map((r) => (
+                <tr key={r.id}>
+                  <td className="cell-text">{prefixedName(r)}</td>
+                  <td className="cell-text">{r.email}</td>
+                  <td className="cell-text">{r.role}</td>
+                  <td><span className={pillClass(r.status)}>{r.status === "on-duty" ? "On-Duty" : "Off-Duty"}</span></td>
+                  <td className="cell-text">{r.lastLogin}</td>
+                  <td className="cell-text"><button type="button" className="hs-link-action">Update</button> <button type="button" className="hs-link-action">Remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="cases-panel hs-panel-elevated" style={{ marginTop: 16 }}>
+        <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">Account Approval</div></div>
+        <div className="cases-table-wrapper">
+          <table className="cases-table">
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Requested At</th><th>Action</th></tr></thead>
+            <tbody>
+              {pendingStaffApprovalRows.map((r) => (
+                <tr key={r.id}>
+                  <td className="cell-text">{r.name}</td>
+                  <td className="cell-text">{r.email}</td>
+                  <td className="cell-text">{r.role}</td>
+                  <td className="cell-text">{r.requestedAt}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="hs-btn-primary"
+                      style={{ height: 30, fontSize: 12 }}
+                      onClick={() => approvePendingStaff(r)}
+                    >
+                      Approve
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+
+  const renderStaffScheduling = () => (
+    <>
+      <div className="cases-panel hs-panel-elevated">
+        <div className="cases-panel-header">
+          <div className="cases-panel-title cases-panel-title--strong">Weekly Schedule</div>
+        </div>
+        <div className="cases-table-wrapper">
+          <table className="cases-table">
+            <thead><tr><th>Staff</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Shift</th></tr></thead>
+            <tbody>
+              {approvedClinicalStaffRows.map((r) => (
+                <tr key={r.id}>
+                  <td className="cell-text">{prefixedName(r)}</td>
+                  <td className="cell-text">{r.schedule.mon}</td>
+                  <td className="cell-text">{r.schedule.tue}</td>
+                  <td className="cell-text">{r.schedule.wed}</td>
+                  <td className="cell-text">{r.schedule.thu}</td>
+                  <td className="cell-text">{r.schedule.fri}</td>
+                  <td className="cell-text">{r.schedule.sat}</td>
+                  <td className="cell-text">{r.shift}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="cases-panel hs-panel-elevated" style={{ marginTop: 16 }}>
+        <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">Clinic & Nursing Office Hours</div></div>
+        <div className="cc-modal-body">
+          <p className="hs-consult-meta">Monday to Friday: 7:00 AM - 9:00 PM</p>
+          <p className="hs-consult-meta" style={{ marginTop: 8 }}>Saturday: 7:00 AM - 7:00 PM</p>
+        </div>
+      </div>
+    </>
+  );
+
+  const renderDentistQueue = () => {
+    const serving = dentistQueueRows[0];
+    const rest = dentistQueueRows.slice(1);
+    const avgWait = dentistQueueRows.length ? Math.min(40, 7 + dentistQueueRows.length * 2) : 0;
+    return (
+      <div className="hs-phys-queue-layout hs-dent-queue-page">
+        <div className="cases-panel hs-panel-elevated hs-phys-card">
+          <div className="cases-panel-header hs-dent-queue-serving-head">
+            <p className="hs-nurse-serving-label">NOW SERVING</p>
+            <h2 className="hs-nurse-serving-title">QUEUING NUMBER</h2>
+          </div>
+          <div className="cc-modal-body">
+            <div className="hs-nurse-serving-box hs-dent-q-badge">
+              {serving?.queueNumber ? `Q${String(serving.queueNumber).padStart(2, "0")}` : "—"}
+            </div>
+            {!dentistQueueRows.length ? (
+              <EmptyStateMessage
+                compact
+                icon={Users}
+                title="No patients in dentist queue."
+                description="Patients routed from triage will appear here."
+              />
+            ) : null}
+            <div className="hs-nurse-quick-title">QUICK ACTIONS</div>
+            <div className="hs-nurse-quick-grid">
+              <button type="button" className="hs-btn-secondary">
+                <CheckCircle size={13} /> Complete
+              </button>
+              <button type="button" className="hs-btn-secondary">
+                <Send size={13} /> Next
+              </button>
+              <button type="button" className="hs-btn-secondary">
+                <Route size={13} /> Transfer
+              </button>
+              <button type="button" className="hs-btn-secondary">
+                <Activity size={13} /> Start
+              </button>
+              <button type="button" className="hs-btn-secondary">
+                <X size={13} /> Close
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="cases-panel hs-panel-elevated hs-phys-card">
+          <div className="cases-panel-header hs-dent-upnext-head">
+            <div className="cases-panel-title cases-panel-title--strong">Up Next</div>
+            <div className="hs-dent-upnext-meta">
+              <span>
+                <Clock size={14} aria-hidden /> Avg. wait {avgWait}m
+              </span>
+              <span>
+                <Users size={14} aria-hidden /> {dentistQueueRows.length} in line
+              </span>
+            </div>
+          </div>
+          <div className="cc-modal-body">
+            {rest.length ? (
+              rest.map((r) => (
+                <div className="hs-dent-queue-row" key={r.id}>
+                  <div className="hs-dent-queue-ticket">
+                    <span className="hs-dent-queue-ticket-label">TICKET</span>
+                    <strong>{`Q${String(r.queueNumber || 0).padStart(2, "0")}`}</strong>
+                  </div>
+                  <div className="hs-dent-queue-info">
+                    <strong>{r.student}</strong>
+                    <p className="hs-stat-meta">Dentist</p>
+                  </div>
+                  <div className="hs-dent-queue-wait">
+                    <Clock size={12} aria-hidden />
+                    <span>~{Math.max(5, (r.queueNumber || 1) * 2)}m Waiting</span>
+                  </div>
+                </div>
+              ))
+            ) : serving ? (
+              <p className="hs-stat-meta">No other patients waiting after the current ticket.</p>
+            ) : (
+              <EmptyStateMessage icon={Users} title="Queue is empty." description="Upcoming dentist tickets will list here." />
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDentistPatientRecords = () => {
+    const q = dentalRecordsSearch.trim().toLowerCase();
+    const filtered = healthRecordsRows.filter((r) => {
+      if (!q) return true;
+      return `${r.student || ""} ${r.studentId || ""}`.toLowerCase().includes(q);
+    });
+    const selected = healthRecordsRows.find((r) => String(r.id) === String(dentalRecordsSelectedId)) || null;
+    const procRows = selected
+      ? consultationRows
+          .filter((row) =>
+            selected.studentId
+              ? String(row.studentId || "").toLowerCase() === String(selected.studentId || "").toLowerCase()
+              : String(row.student || "").toLowerCase() === String(selected.student || "").toLowerCase(),
+          )
+          .slice(0, 12)
+      : [];
+    return (
+      <div className="hs-dent-records-grid">
+        <div className="cases-panel hs-panel-elevated hs-dent-card">
+          <div className="cc-modal-body hs-dent-records-search">
+            <div className="search-bar-wrapper" style={{ marginBottom: 0 }}>
+              <span className="search-icon" aria-hidden>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <circle cx="7" cy="7" r="5.333" stroke="#64748B" strokeWidth="1.5" />
+                  <path d="M13.333 13.333L10 10" stroke="#64748B" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </span>
+              <input
+                className="search-input"
+                placeholder="Search patient..."
+                value={dentalRecordsSearch}
+                onChange={(e) => setDentalRecordsSearch(e.target.value)}
+              />
+            </div>
+            <div className="hs-dent-record-list">
+              {filtered.length ? (
+                filtered.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className={`hs-dent-record-item${String(r.id) === String(dentalRecordsSelectedId) ? " hs-dent-record-item--active" : ""}`}
+                    onClick={() => setDentalRecordsSelectedId(r.id)}
+                  >
+                    <strong>{r.student}</strong>
+                    <p className="hs-stat-meta">{r.program || r.studentId || "—"}</p>
+                  </button>
+                ))
+              ) : (
+                <p className="hs-stat-meta">No patients match your search.</p>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="cases-panel hs-panel-elevated hs-dent-card">
+          {selected ? (
+            <>
+              <div className="hs-dent-detail-head">
+                <div>
+                  <p className="hs-dent-kicker">PATIENT</p>
+                  <h3 className="hs-dent-patient-name">{selected.student}</h3>
+                  <p className="hs-stat-meta">
+                    {selected.program || "—"} · Last visit {selected.last || formatVisitDateLabel(new Date())}
+                  </p>
+                </div>
+                <button type="button" className="hs-btn-secondary hs-dent-open-chart" onClick={() => setActiveNav("dentalChart")}>
+                  <Smile size={14} aria-hidden />
+                  Open Chart
+                </button>
+              </div>
+              <div className="hs-dent-detail-tabs">
+                {[
+                  { id: "procedures", label: "Procedure History" },
+                  { id: "xrays", label: "X-rays" },
+                  { id: "pfollow", label: "Follow-ups" },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`hs-dent-detail-tab${dentalPatientTab === t.id ? " hs-dent-detail-tab--active" : ""}`}
+                    onClick={() => setDentalPatientTab(t.id)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <div className="cc-modal-body hs-dent-detail-body">
+                {dentalPatientTab === "procedures" ? (
+                  procRows.length ? (
+                    <div className="hs-dent-proc-list">
+                      {procRows.map((row) => (
+                        <div key={row.id} className="hs-dent-proc-card">
+                          <div className="hs-dent-proc-icon" aria-hidden>
+                            <Smile size={16} />
+                          </div>
+                          <div>
+                            <p className="hs-stat-meta">{row.date || "—"}</p>
+                            <strong>{row.reason || "Dental procedure"}</strong>
+                            <p className="hs-stat-meta">{row.notes || "No complications"}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyStateMessage compact icon={FileText} title="No procedure history for this patient." />
+                  )
+                ) : null}
+                {dentalPatientTab === "xrays" ? (
+                  <EmptyStateMessage
+                    compact
+                    icon={FileText}
+                    title="No imaging on file."
+                    description="Upload or link radiographs from the charting workflow."
+                  />
+                ) : null}
+                {dentalPatientTab === "pfollow" ? (
+                  dentalFollowupRows.filter((f) => f.studentId === selected.studentId || f.student === selected.student).length ? (
+                    <div className="hs-dent-proc-list">
+                      {dentalFollowupRows
+                        .filter((f) => f.studentId === selected.studentId || f.student === selected.student)
+                        .map((f) => (
+                          <div key={f.id} className="hs-dent-proc-card">
+                            <div className="hs-dent-proc-icon" aria-hidden>
+                              <CalendarDays size={16} />
+                            </div>
+                            <div>
+                              <strong>{f.dateSort || "—"}</strong>
+                              <p className="hs-stat-meta">
+                                {f.time} · {f.reason}
+                              </p>
+                              <span className={pillClass(f.status)}>{f.status}</span>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <EmptyStateMessage compact icon={CalendarDays} title="No follow-ups scheduled." />
+                  )
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <div className="cc-modal-body">
+              <EmptyStateMessage
+                icon={Users}
+                title="No patient selected."
+                description="Choose a patient from the list to view dental records."
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDentistChartWorkspace = () => {
+    const chartQueue = dentistQueueRows.slice(0, 5);
+    const paintOpts = [
+      { id: "healthy", label: "Healthy" },
+      { id: "caries", label: "Caries" },
+      { id: "filled", label: "Filled" },
+      { id: "missing", label: "Missing" },
+    ];
+    const procOpts = ["Cleaning", "Filling", "Extraction", "Root Canal", "X-ray", "Sealant", "Fluoride", "Whitening"];
+    return (
+      <div className="hs-dent-chart-shell">
+        <div className="hs-phys-kpi-row hs-dent-chart-kpis">
+          <div className="hs-stat-card hs-phys-kpi">
+            <div className="hs-stat-card-top">
+              <p className="hs-stat-value">{dentistQueueRows.length}</p>
+              <Users size={18} className="hs-dent-kpi-inline-icon" aria-hidden />
+            </div>
+            <p className="hs-stat-label">IN QUEUE</p>
+          </div>
+          <div className="hs-stat-card hs-phys-kpi">
+            <div className="hs-stat-card-top">
+              <p className="hs-stat-value">{consultationRows.length}</p>
+              <Activity size={18} className="hs-dent-kpi-inline-icon" aria-hidden />
+            </div>
+            <p className="hs-stat-label">PROCEDURES TODAY</p>
+          </div>
+          <div className="hs-stat-card hs-phys-kpi">
+            <div className="hs-stat-card-top">
+              <p className="hs-stat-value">{dentalFollowupRows.length}</p>
+              <CalendarDays size={18} className="hs-dent-kpi-inline-icon" aria-hidden />
+            </div>
+            <p className="hs-stat-label">FOLLOW-UPS SCHEDULED</p>
+          </div>
+        </div>
+        <div className="hs-dent-chart-grid">
+          <div className="cases-panel hs-panel-elevated hs-dent-card">
+            <div className="cases-panel-header">
+              <div className="cases-panel-title cases-panel-title--strong">Doctor Queue</div>
+            </div>
+            <div className="cc-modal-body hs-dent-doc-queue-body">
+              {chartQueue.length ? (
+                chartQueue.map((r) => (
+                  <div className="hs-dent-doc-queue-row" key={r.id}>
+                    <div className="hs-dent-queue-ticket hs-dent-queue-ticket--wide">
+                      <span className="hs-dent-queue-ticket-label">TICKET</span>
+                      <strong>{String(r.queueNumber || 0).padStart(4, "0")}</strong>
+                    </div>
+                    <div className="hs-dent-queue-info">
+                      <strong>{r.student}</strong>
+                      <p className="hs-stat-meta">{r.consultationType || r.purpose || "Dental visit"}</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <EmptyStateMessage compact icon={Users} title="No patients in queue." />
+              )}
+            </div>
+          </div>
+          <div className="cases-panel hs-panel-elevated hs-dent-card hs-dent-chart-main">
+            <div className="hs-odont-header">
+              <div>
+                <div className="cases-panel-title cases-panel-title--strong">Odontogram</div>
+                <p className="hs-list-sub hs-list-sub--tight">FDI / ISO 3950 numbering · clinician&apos;s view</p>
+              </div>
+              <div className="hs-odont-toggle" role="group" aria-label="Dentition type">
+                <button
+                  type="button"
+                  className={dentalOdontogramArch === "permanent" ? "hs-odont-toggle-btn hs-odont-toggle-btn--on" : "hs-odont-toggle-btn"}
+                  onClick={() => setDentalOdontogramArch("permanent")}
+                >
+                  Permanent (32)
+                </button>
+                <button
+                  type="button"
+                  className={dentalOdontogramArch === "primary" ? "hs-odont-toggle-btn hs-odont-toggle-btn--on" : "hs-odont-toggle-btn"}
+                  onClick={() => setDentalOdontogramArch("primary")}
+                >
+                  Primary (20)
+                </button>
+              </div>
+            </div>
+            <div className="hs-odont-paint-row">
+              {paintOpts.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`hs-odont-paint${dentalOdontogramPaint === p.id ? " hs-odont-paint--active" : ""}`}
+                  onClick={() => setDentalOdontogramPaint(p.id)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className="hs-dent-odont-wrap">
+              <DentistOdontogram
+                arch={dentalOdontogramArch === "primary" ? "primary" : "permanent"}
+                paintStatus={dentalOdontogramPaint}
+                teethStatus={dentalToothStatus}
+                onTeethChange={(num, status) => setDentalToothStatus((prev) => ({ ...prev, [num]: status }))}
+              />
+            </div>
+            <div className="hs-dent-proc-pills">
+              {procOpts.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={`hs-dent-proc-pill${dentalProcedurePick === p ? " hs-dent-proc-pill--active" : ""}`}
+                  onClick={() => setDentalProcedurePick(p)}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+            <div className="hs-dent-chart-split">
+              <div className="hs-dent-chart-notes">
+                <label className="hs-stat-meta">Prescription</label>
+                <textarea className="hs-dent-textarea" placeholder="Mefenamic 500mg - q6h - 5 days." rows={3} />
+                <label className="hs-stat-meta">Notes</label>
+                <textarea className="hs-dent-textarea" placeholder="Procedure notes..." rows={3} />
+              </div>
+              <div className="hs-dent-follow-card">
+                <strong>Follow-up</strong>
+                <div className="hs-modal-field">
+                  <label>Date</label>
+                  <input type="date" />
+                </div>
+                <div className="hs-modal-field">
+                  <label>Time</label>
+                  <input type="time" />
+                </div>
+                <div className="hs-modal-field">
+                  <label>Reason</label>
+                  <input placeholder="Recall - Continued treatment" />
+                </div>
+                <button type="button" className="hs-btn-secondary hs-dent-btn hs-dent-btn--block">
+                  Schedule Follow-up
+                </button>
+              </div>
+            </div>
+            <div className="hs-dent-save-wrap">
+              <button type="button" className="hs-btn-primary hs-dent-btn hs-dent-btn--block">
+                Save &amp; Complete Visit
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDentistFollowups = () => {
+    const q = dentalFollowupSearch.trim().toLowerCase();
+    const list = dentalFollowupRows.filter((r) => {
+      if (!q) return true;
+      return `${r.student} ${r.studentId} ${r.reason}`.toLowerCase().includes(q);
+    });
+    const upcoming = dentalFollowupRows.length;
+    const confirmed = dentalFollowupRows.filter((r) => r.status === "confirmed").length;
+    const pending = dentalFollowupRows.filter((r) => r.status === "pending").length;
+    const thisWeek = Math.min(upcoming, 5);
+    return (
+      <>
+        <div className="hs-dent-kpi-row">
+          {[
+            { label: "UPCOMING", value: String(upcoming), Icon: CalendarDays, tone: "blue" },
+            { label: "CONFIRMED", value: String(confirmed), Icon: CheckCircle, tone: "green" },
+            { label: "PENDING", value: String(pending), Icon: Phone, tone: "orange" },
+            { label: "THIS WEEK", value: String(thisWeek), Icon: Clock, tone: "purple" },
+          ].map((s) => (
+            <div key={s.label} className="hs-stat-card hs-dent-kpi-card">
+              <div className="hs-stat-card-top">
+                <p className="hs-stat-value">{s.value}</p>
+                <div className={`hs-dent-kpi-icon hs-dent-kpi-icon--${s.tone}`} aria-hidden>
+                  <s.Icon size={18} strokeWidth={1.8} />
+                </div>
+              </div>
+              <p className="hs-stat-label">{s.label}</p>
+            </div>
+          ))}
+        </div>
+        <div className="cases-panel hs-panel-elevated hs-dent-card">
+          <div className="cases-panel-header hs-dent-fu-head">
+            <div className="cases-panel-title cases-panel-title--strong">Scheduled Follow-ups</div>
+            <input
+              className="hs-filter-input hs-dent-fu-search"
+              placeholder="Search patient..."
+              value={dentalFollowupSearch}
+              onChange={(e) => setDentalFollowupSearch(e.target.value)}
+            />
+          </div>
+          <div className="cc-modal-body hs-dent-fu-list">
+            {list.length ? (
+              list.map((r) => {
+                const ds = r.dateSort ? String(r.dateSort) : "";
+                const [yy, mm, dd] = ds.split("-");
+                const monthLbl = ds
+                  ? new Date(Number(yy), Number(mm) - 1, Number(dd)).toLocaleString("en-US", { month: "short" }).toUpperCase()
+                  : "—";
+                return (
+                  <div key={r.id} className="hs-dent-fu-row">
+                    <div className="hs-dent-fu-datebox">
+                      <span className="hs-dent-fu-mon">{monthLbl}</span>
+                      <strong>{dd || "—"}</strong>
+                    </div>
+                    <div className="hs-dent-fu-main">
+                      <strong>{r.student}</strong>
+                      <p className="hs-stat-meta">
+                        {r.time} · {r.reason}
+                      </p>
+                    </div>
+                    <span className={`hs-dent-fu-status ${pillClass(r.status)}`}>{r.status}</span>
+                    <button type="button" className="hs-dent-reschedule">
+                      <Phone size={14} aria-hidden />
+                      Reschedule
+                    </button>
+                  </div>
+                );
+              })
+            ) : (
+              <EmptyStateMessage
+                icon={CalendarDays}
+                title="No follow-ups scheduled."
+                description="Schedule recalls from the dental chart or appointments."
+              />
+            )}
+          </div>
+        </div>
+      </>
+    );
+  };
+
+  const renderSettings = () => (
+    <div className="cases-panel hs-panel-elevated">
+      <div className="cases-panel-header">
+        <div className="cases-panel-title cases-panel-title--strong">HSO Operational Settings</div>
+      </div>
+      <div className="cc-modal-body">
+        <div className="hs-modal-grid">
+          <div className="hs-modal-field">
+            <label>Check-in window</label>
+            <input value="1 hour before appointment" readOnly />
+          </div>
+          <div className="hs-modal-field">
+            <label>Queue prefix format</label>
+            <input value="4-digit sequential" readOnly />
+          </div>
+          <div className="hs-modal-field">
+            <label>No-show grace period</label>
+            <input value="15 minutes" readOnly />
+          </div>
+          <div className="hs-modal-field">
+            <label>Monitor refresh</label>
+            <input value="8 seconds" readOnly />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   const renderVisits = () => {
+    if (isPhysicianUser) {
+      const physicianQueueRows = workflowRows
+        .filter((r) =>
+          [HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER, HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS].includes(r.workflowStatus),
+        )
+        .filter((r) => (r.providerQueue || r.designation || "").toLowerCase() === "physician")
+        .slice(0, 5);
+      return (
+        <div className="hs-phys-queue-layout">
+          <div className="cases-panel hs-panel-elevated hs-phys-card">
+            <div className="cases-panel-header">
+              <p className="hs-nurse-serving-label">NOW SERVING</p>
+              <h2 className="hs-nurse-serving-title">QUEUING NUMBER</h2>
+            </div>
+            <div className="cc-modal-body">
+              <div className="hs-nurse-serving-box">
+                {physicianQueueRows[0]?.queueNumber
+                  ? String(physicianQueueRows[0].queueNumber).padStart(4, "0")
+                  : "----"}
+              </div>
+              {!physicianQueueRows.length ? (
+                <EmptyStateMessage
+                  compact
+                  icon={Users}
+                  title="No waiting patients at the moment."
+                  description="New patients will appear here once done with checking the vital signs."
+                />
+              ) : null}
+              <div className="hs-nurse-quick-title">QUICK ACTIONS</div>
+              <div className="hs-nurse-quick-grid">
+                <button type="button" className="hs-btn-secondary"><CheckCircle size={13} /> Complete</button>
+                <button type="button" className="hs-btn-secondary"><Send size={13} /> Next</button>
+                <button type="button" className="hs-btn-secondary"><Route size={13} /> Transfer</button>
+                <button type="button" className="hs-btn-secondary"><Activity size={13} /> Start</button>
+                <button type="button" className="hs-btn-secondary"><X size={13} /> Close</button>
+              </div>
+            </div>
+          </div>
+          <div className="cases-panel hs-panel-elevated hs-phys-card">
+            <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">Up Next</div></div>
+            <div className="cc-modal-body">
+              {physicianQueueRows.map((r) => (
+                <div className="hs-nurse-ticket hs-nurse-ticket--upnext" key={r.id}>
+                  <div className="hs-nurse-ticket-no"><span>TICKET</span><strong>{String(r.queueNumber || 0).padStart(4, "0")}</strong></div>
+                  <div><strong>{r.student}</strong><p>{r.providerQueue || "Physician"}</p></div>
+                </div>
+              ))}
+              {!physicianQueueRows.length ? (
+                <EmptyStateMessage
+                  icon={Users}
+                  title="No waiting patients at the moment."
+                  description="New patients will appear here once done with checking the vital signs."
+                />
+              ) : null}
+            </div>
+          </div>
+        </div>
+      );
+    }
     const qv = search.toLowerCase();
     const todayStr = formatVisitDateLabel(new Date());
     const filtered = consultationRows.filter((c) => {
@@ -1293,6 +3402,171 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   };
 
   const renderRecords = () => (
+    isPhysicianUser ? (
+      <div className="hs-phys-records-grid">
+        {(() => {
+          const selectedPatient = healthRecordsRows[0] || null;
+          const patientTimelineRows = consultationRows
+            .filter((row) =>
+              selectedPatient?.studentId
+                ? String(row.studentId || "").toLowerCase() === String(selectedPatient.studentId || "").toLowerCase()
+                : String(row.student || "").toLowerCase() === String(selectedPatient?.student || "").toLowerCase(),
+            )
+            .slice(0, 5);
+          return (
+            <>
+        <div className="cases-panel hs-panel-elevated hs-phys-card">
+          <div className="cc-modal-body hs-phys-records-left">
+            {healthRecordsRows.length ? (
+              <>
+                <div className="hs-modal-field hs-phys-records-search">
+                  <input className="hs-filter-input" placeholder="Search patient..." />
+                </div>
+                <div className="hs-phys-records-list">
+                  {healthRecordsRows.slice(0, 7).map((r) => (
+                    <div key={r.id} className="hs-nurse-ticket">
+                      <strong>{r.student}</strong>
+                      <p>{r.studentId} • {r.allergies || "No known allergies"}</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <EmptyStateMessage
+                compact
+                icon={Users}
+                title="No patient records available."
+                description="Student medical records will appear here after initial visits."
+              />
+            )}
+          </div>
+        </div>
+        <div className="cases-panel hs-panel-elevated hs-phys-card">
+          {selectedPatient ? (
+            <>
+              <div className="cases-panel-header hs-phys-records-header">
+                <div>
+                  <div className="cases-panel-title cases-panel-title--strong">{selectedPatient.student}</div>
+                  <p className="hs-stat-meta">{selectedPatient.studentId} · {selectedPatient.allergies || "No known allergies"}</p>
+                </div>
+                <button type="button" className="hs-btn-secondary">Open Chart</button>
+              </div>
+              <div className="cc-modal-body hs-phys-records-right">
+                <div className="hs-phys-tab-row">
+                  {[
+                    { id: "timeline", label: "Timeline" },
+                    { id: "prescriptions", label: "Prescription" },
+                    { id: "documents", label: "Documents" },
+                  ].map((tab, idx) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      className={`hs-phys-tab-btn ${idx === 0 ? "hs-phys-tab-btn--active" : ""}`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                {patientTimelineRows.length ? (
+                  <div className="hs-phys-records-list">
+                    {patientTimelineRows.map((c) => (
+                      <div key={c.id} className="hs-nurse-ticket">
+                        <strong>{c.date}</strong>
+                        <p>{c.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyStateMessage
+                    compact
+                    icon={FileText}
+                    title="No consultation notes available."
+                    description="Completed consultation entries will appear in this patient chart."
+                  />
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="cc-modal-body">
+              <EmptyStateMessage
+                icon={FileText}
+                title="No patient selected."
+                description="Select a student record from the left panel to open patient chart details."
+              />
+            </div>
+          )}
+        </div>
+            </>
+          );
+        })()}
+      </div>
+    ) : isNurseUser ? (
+      <>
+        <div className="cases-panel hs-panel-elevated">
+          <div className="cases-panel-header">
+            <div className="cases-panel-title cases-panel-title--strong">Patient Records</div>
+          </div>
+          <div className="cc-modal-body">
+            <div className="hs-modal-field" style={{ maxWidth: 340 }}>
+              <label>Search by Student ID or Name</label>
+              <input
+                className="hs-filter-input"
+                value={recordsQuery}
+                onChange={(e) => setRecordsQuery(e.target.value)}
+                placeholder="e.g., 2023-12345 or Maria"
+              />
+            </div>
+          </div>
+          <div className="cases-table-wrapper">
+            <table className="cases-table">
+              <thead><tr><th>Date & Time</th><th>Student</th><th>Vitals Summary</th></tr></thead>
+              <tbody>
+                {consultationRows
+                  .filter((r) => {
+                    const q = String(recordsQuery || "").trim().toLowerCase();
+                    if (!q) return true;
+                    return String(r.student || "").toLowerCase().includes(q) || String(r.studentId || "").toLowerCase().includes(q);
+                  })
+                  .slice(0, 20)
+                  .map((r) => (
+                    <tr key={r.id}>
+                      <td className="cell-text">{`${r.date || "—"} ${r.time || ""}`.trim()}</td>
+                      <td><p className="cell-student-name">{r.student}</p><p className="cell-student-id">{r.studentId}</p></td>
+                      <td className="cell-text">{`${r.bloodPressure || "—"} / ${r.temperature || "—"}°C / ${r.heartRate || "—"} BPM`}</td>
+                    </tr>
+                  ))}
+                {!consultationRows.length ? (
+                  <tr><td className="cell-text" colSpan={3}>No visit timeline records yet.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div className="cases-panel hs-panel-elevated" style={{ marginTop: 16 }}>
+          <div className="cases-panel-header">
+            <div className="cases-panel-title cases-panel-title--strong">Visitor Archive</div>
+          </div>
+          <div className="cases-table-wrapper">
+            <table className="cases-table">
+              <thead><tr><th>Name</th><th>Purpose</th><th>Disposition</th><th>Timestamp</th></tr></thead>
+              <tbody>
+                {visitorArchive.map((v) => (
+                  <tr key={v.id}>
+                    <td className="cell-text">{v.name}</td>
+                    <td className="cell-text">{v.reason || "—"}</td>
+                    <td className="cell-text">{v.disposition || "Completed"}</td>
+                    <td className="cell-text">{v.completedAt ? new Date(v.completedAt).toLocaleString() : "—"}</td>
+                  </tr>
+                ))}
+                {!visitorArchive.length ? (
+                  <tr><td className="cell-text" colSpan={4}>No archived visitors yet.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </>
+    ) : (
     <>
       <div className="hs-stat-row">
         <div className="hs-stat-card">
@@ -1416,9 +3690,108 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         </div>
       </div>
     </>
+    )
   );
 
   const renderAppointments = () => (
+    isPhysicianUser ? (
+      (() => {
+        const certQuery = String(certificateSearch || "").trim().toLowerCase();
+        const filteredCertificates = certificatesList.filter((row) => {
+          if (!certQuery) return true;
+          return `${row.id} ${row.patient} ${row.reason}`.toLowerCase().includes(certQuery);
+        });
+        const pendingPickup = certificatesList.filter((row) => String(row.status).toLowerCase() === "pending").length;
+        return (
+          <>
+            <div className="hs-phys-kpi-row hs-phys-cert-kpis">
+              <div className="hs-stat-card hs-phys-kpi">
+                <div className="hs-stat-card-top">
+                  <p className="hs-stat-value">{certificatesList.length}</p>
+                  <div className="hs-stat-icon" aria-hidden><FileText size={16} strokeWidth={1.8} /></div>
+                </div>
+                <p className="hs-stat-label">Issued This Week</p>
+              </div>
+              <div className="hs-stat-card hs-phys-kpi">
+                <div className="hs-stat-card-top">
+                  <p className="hs-stat-value">{certificatesList.filter((row) => String(row.status).toLowerCase() === "active").length}</p>
+                  <div className="hs-stat-icon hs-stat-icon--success" aria-hidden><CheckCircle size={16} strokeWidth={1.8} /></div>
+                </div>
+                <p className="hs-stat-label">Active Certificates</p>
+              </div>
+              <div className="hs-stat-card hs-phys-kpi">
+                <div className="hs-stat-card-top">
+                  <p className="hs-stat-value">{pendingPickup}</p>
+                  <div className="hs-stat-icon hs-stat-icon--warn" aria-hidden><Clock size={16} strokeWidth={1.8} /></div>
+                </div>
+                <p className="hs-stat-label">Pending Pickup</p>
+              </div>
+            </div>
+            <div className="cases-panel hs-panel-elevated hs-phys-card">
+              {certificatesList.length ? (
+                <div className="cases-panel-header hs-phys-cert-header">
+                  <div className="cases-panel-title cases-panel-title--strong">Recently Issued</div>
+                </div>
+              ) : null}
+              <div className="cases-table-wrapper">
+                {certificatesList.length ? (
+                  <>
+                    <div className="hs-phys-cert-table-tools">
+                      <div className="hs-phys-cert-search-wrap">
+                        <input
+                          className="hs-filter-input"
+                          placeholder="Search by patient or ID..."
+                          value={certificateSearch}
+                          onChange={(e) => setCertificateSearch(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <table className="cases-table">
+                      <thead><tr><th>Cert ID</th><th>Patient</th><th>Reason</th><th>Period</th><th>Issued</th><th>Status</th><th>Actions</th></tr></thead>
+                      <tbody>
+                        {filteredCertificates.map((row) => (
+                          <tr key={row.id}>
+                            <td className="cell-text">{row.id}</td>
+                            <td className="cell-text">{row.patient}</td>
+                            <td className="cell-text">{row.reason}</td>
+                            <td className="cell-text">{row.period}</td>
+                            <td className="cell-text">{row.issuedAt}</td>
+                            <td><span className={pillClass(statusLabel(row.status))}>{statusLabel(row.status)}</span></td>
+                            <td>
+                              <div className="hs-phys-cert-row-actions">
+                                <button type="button" className="hs-icon-btn" aria-label={`Print ${row.id}`}>
+                                  <Printer size={13} strokeWidth={1.9} aria-hidden />
+                                </button>
+                                <button type="button" className="hs-icon-btn" aria-label={`View ${row.id}`}>
+                                  <Eye size={13} strokeWidth={1.9} aria-hidden />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {!filteredCertificates.length ? (
+                          <tr>
+                            <td className="cell-text" colSpan={7}>No certificates match your search.</td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </>
+                ) : (
+                  <div className="cc-modal-body">
+                    <EmptyStateMessage
+                      icon={FileText}
+                      title="No medical certificates issued yet."
+                      description="Issued certificates will appear here once consultations are completed."
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        );
+      })()
+    ) : (
     <>
       <div className="hs-stat-row">
         <div className="hs-stat-card">
@@ -1470,24 +3843,33 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   <CalendarDays size={14} strokeWidth={1.5} aria-hidden />
                   {a.time}
                   <span style={{ color: "#cbd5e1" }}>•</span>
-                  {a.room}
+                  {a.room} · {statusLabel(a.workflowStatus || a.status)}
                 </p>
-                <p className="hs-appt-service">{a.service}</p>
+                <p className="hs-appt-service">{a.service} · {a.consultationType || a.purpose}</p>
               </div>
               <div className="hs-appt-actions">
-                <span className={pillClass(a.status === "confirmed" ? "Completed" : "Waiting")}>
-                  {a.status}
+                <span className={pillClass(statusLabel(a.workflowStatus || a.status))}>
+                  {statusLabel(a.workflowStatus || a.status)}
                 </span>
                 <button type="button" className="hs-btn-outline" onClick={() => setSelectedAppointment(a)}>
                   <Eye size={14} strokeWidth={1.5} aria-hidden />
                   View
                 </button>
-                {a.status === "pending" ? (
-                  <button type="button" className="hs-btn-primary" style={{ height: 34, fontSize: 13 }}>
-                    Confirm
+                {normalizeWorkflowStatus(a.workflowStatus) === HSO_WORKFLOW_STATUS.BOOKED ? (
+                  <button
+                    type="button"
+                    className="hs-btn-primary"
+                    style={{ height: 34, fontSize: 13 }}
+                    onClick={() => persistAppointmentWorkflow(a.id, { workflow_status: HSO_WORKFLOW_STATUS.CHECKIN_WINDOW_OPEN })}
+                  >
+                    Open Check-in
                   </button>
                 ) : (
-                  <button type="button" className="hs-btn-outline">
+                  <button
+                    type="button"
+                    className="hs-btn-outline"
+                    onClick={() => persistAppointmentWorkflow(a.id, { workflow_status: HSO_WORKFLOW_STATUS.CANCELLED, status: "cancelled" })}
+                  >
                     <X size={14} strokeWidth={1.5} aria-hidden />
                     Cancel
                   </button>
@@ -1498,6 +3880,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         </div>
       </div>
     </>
+    )
   );
 
   const renderReferrals = () => (
@@ -1758,221 +4141,132 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       <div className="hs-reports-toolbar hs-reports-toolbar--card">
         <div className="hs-reports-toolbar-row">
           <div className="hs-reports-period-wrap">
-            <label htmlFor="hs-reports-period" className="hs-reports-period-label">
-              Period
-            </label>
-            <select
-              id="hs-reports-period"
-              className="hs-reports-select"
-              value={reportsTimeFilter}
-              onChange={(e) => setReportsTimeFilter(e.target.value)}
-            >
-              <option value="day">This Day</option>
-              <option value="week">This Week</option>
+            <label htmlFor="hs-reports-period" className="hs-reports-period-label">Filter</label>
+            <select id="hs-reports-period" className="hs-reports-select" value={reportsTimeFilter} onChange={(e) => setReportsTimeFilter(e.target.value)}>
+              <option value="week">This week</option>
               <option value="month">This Month</option>
+              <option value="quarter">3 months</option>
+              <option value="year">This year</option>
             </select>
           </div>
-          <div className="hs-reports-actions">
-            <button type="button" className="hs-reports-btn-outline" onClick={() => window.print()}>
-              <Printer size={16} strokeWidth={1.5} aria-hidden />
-              Print
-            </button>
-            <button type="button" className="hs-reports-btn-outline">
-              <Mail size={16} strokeWidth={1.5} aria-hidden />
-              Email
-            </button>
-            <button type="button" className="hs-reports-btn-pdf">
-              <Download size={16} strokeWidth={1.5} aria-hidden />
-              Export PDF
-            </button>
+        </div>
+      </div>
+      <div className="hs-stat-row">
+        <div className="hs-stat-card"><div className="hs-stat-card-top"><p className="hs-stat-value">{appointmentsList.length}</p></div><p className="hs-stat-label">Visits</p></div>
+        <div className="hs-stat-card"><div className="hs-stat-card-top"><p className="hs-stat-value">11</p></div><p className="hs-stat-label">Avg Waiting Time (min)</p></div>
+        <div className="hs-stat-card"><div className="hs-stat-card-top"><p className="hs-stat-value">{consultationRows.length}</p></div><p className="hs-stat-label">Consultations</p></div>
+      </div>
+      <div className="do-home-split">
+        <div className="do-panel">
+          <div className="do-panel-header"><h2 className="do-panel-title">Visit Trend</h2></div>
+          <div className="do-panel-body" style={{ padding: "16px 20px" }}>
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={dailyVisitsTrend}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="day" /><YAxis /><Tooltip /><Line type="monotone" dataKey="visits" stroke="#2563eb" strokeWidth={2} /></LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        <div className="do-panel">
+          <div className="do-panel-header"><h2 className="do-panel-title">Station Mix</h2></div>
+          <div className="do-panel-body" style={{ padding: "16px 20px" }}>
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart><Pie data={reportsDonutData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78}>{reportsDonutData.map((x) => <Cell key={x.name} fill={x.color} />)}</Pie><Legend /><Tooltip /></PieChart>
+            </ResponsiveContainer>
           </div>
         </div>
       </div>
-
-      <section className="hs-reports-kpi-row" aria-label="Key metrics">
-        <article className="hs-reports-kpi">
-          <div className="hs-reports-kpi-top">
-            <div className="hs-reports-kpi-icon hs-reports-kpi-icon--teal">
-              <Activity size={22} strokeWidth={1.75} aria-hidden />
-            </div>
-            <span className="hs-reports-kpi-badge hs-reports-kpi-badge--green">Live</span>
-          </div>
-          <p className="hs-reports-kpi-value">{reportsKpi.studentsServed.toLocaleString()}</p>
-          <p className="hs-reports-kpi-label">Students Served</p>
-          <p className="hs-reports-kpi-hint">Medical records on file</p>
-        </article>
-        <article className="hs-reports-kpi">
-          <div className="hs-reports-kpi-top">
-            <div className="hs-reports-kpi-icon hs-reports-kpi-icon--blue">
-              <Users size={22} strokeWidth={1.75} aria-hidden />
-            </div>
-            <span className="hs-reports-kpi-badge hs-reports-kpi-badge--blue">Live</span>
-          </div>
-          <p className="hs-reports-kpi-value">{reportsKpi.totalConsultations.toLocaleString()}</p>
-          <p className="hs-reports-kpi-label">Total Consultations</p>
-          <p className="hs-reports-kpi-hint">All visits logged</p>
-        </article>
-        <article className="hs-reports-kpi">
-          <div className="hs-reports-kpi-top">
-            <div className="hs-reports-kpi-icon hs-reports-kpi-icon--orange">
-              <AlertTriangle size={22} strokeWidth={1.75} aria-hidden />
-            </div>
-            <span className="hs-reports-kpi-badge hs-reports-kpi-badge--orange">Live</span>
-          </div>
-          <p className="hs-reports-kpi-value hs-reports-kpi-value--alert">{reportsKpi.urgentCases}</p>
-          <p className="hs-reports-kpi-label">Urgent Cases</p>
-          <p className="hs-reports-kpi-hint">Referrals marked urgent</p>
-        </article>
-      </section>
-
-      <div className="hs-reports-charts-grid">
-        <div className="hs-chart-panel hs-panel-elevated hs-reports-chart-panel">
-          <h3>Monthly Consultations Trend</h3>
-          <p className="hs-chart-caption">Consultations breakdown by type (Last 7 months)</p>
-          <div className="hs-reports-chart-inner">
-            {reportsMonthlyTrend.length ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={reportsMonthlyTrend} margin={{ top: 4, right: 12, left: 4, bottom: 4 }} barGap={4}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 12, fill: "#64748b" }} axisLine={{ stroke: "#e2e8f0" }} tickLine={false} />
-                  <YAxis
-                    tick={{ fontSize: 12, fill: "#64748b" }}
-                    axisLine={false}
-                    tickLine={false}
-                    domain={[0, 340]}
-                    tickCount={8}
-                  />
-                  <Tooltip
-                    contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13 }}
-                    labelStyle={{ fontWeight: 600, color: "#0f172a" }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
-                  <Bar dataKey="total" name="Total Consultations" fill="#14b8a6" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                  <Bar dataKey="treatments" name="Treatments" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                  <Bar dataKey="checkups" name="Checkups" fill="#a855f7" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="hs-chart-caption" style={{ margin: 0, padding: "48px 16px", textAlign: "center" }}>
-                Not enough history to chart yet. Trend analytics can be connected to your database aggregates later.
-              </p>
-            )}
+      <div className="do-home-split" style={{ marginTop: 16 }}>
+        <div className="do-panel">
+          <div className="do-panel-header"><h2 className="do-panel-title">Peak Hours</h2></div>
+          <div className="do-panel-body" style={{ padding: "16px 20px" }}>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={peakHoursSeries}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="hour" /><YAxis /><Tooltip /><Bar dataKey="total" fill="#3b82f6" radius={[6, 6, 0, 0]} /></BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
-        <div className="hs-chart-panel hs-panel-elevated hs-reports-chart-panel">
-          <h3>Common Health Issues</h3>
-          <p className="hs-chart-caption">Distribution of reported health concerns</p>
-          <div className="hs-reports-donut-inner">
-            {reportsDonutData.length ? (
-              <ResponsiveContainer width="100%" height={280}>
-                <PieChart>
-                  <Pie
-                    data={reportsDonutData}
-                    cx="42%"
-                    cy="50%"
-                    innerRadius={62}
-                    outerRadius={88}
-                    paddingAngle={2}
-                    dataKey="value"
-                    nameKey="name"
-                  >
-                    {reportsDonutData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} stroke="#fff" strokeWidth={1} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value, name) => [`${value}%`, name]} />
-                  <Legend
-                    layout="vertical"
-                    verticalAlign="middle"
-                    align="right"
-                    wrapperStyle={{ fontSize: 12, paddingLeft: 8, maxWidth: 200 }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="hs-chart-caption" style={{ margin: 0, padding: "48px 16px", textAlign: "center" }}>
-                No coded diagnosis aggregates yet. Issue distribution can be derived from visit reasons when available.
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <section className="hs-reports-concerns hs-panel-elevated" aria-label="Top health concerns">
-        <header className="hs-reports-concerns-head">
-          <div>
-            <h3 className="hs-reports-concerns-title">Top Health Concerns</h3>
-            <p className="hs-reports-concerns-sub">Most reported health issues with trends</p>
-          </div>
-        </header>
-        <ul className="hs-reports-concern-list">
-          {filteredReportConcerns.length ? (
-            filteredReportConcerns.map((row) => (
-              <li key={row.concern} className="hs-reports-concern-item">
-                <div className="hs-reports-concern-main">
-                  <span className="hs-reports-concern-name">{row.concern}</span>
-                  {row.priority === "medium" ? (
-                    <span className="hs-pill hs-reports-priority--medium">medium</span>
-                  ) : row.priority === "low" ? (
-                    <span className="hs-pill hs-reports-priority--low">low</span>
-                  ) : (
-                    <span className="hs-pill hs-reports-priority--high">high</span>
-                  )}
+        <div className="do-panel">
+          <div className="do-panel-header"><h2 className="do-panel-title">Top Complaints</h2></div>
+          <div className="do-panel-body" style={{ padding: "12px 20px" }}>
+            {topComplaints.map((c) => (
+              <div key={c.label} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>{c.label}</span><strong>{c.count}</strong></div>
+                <div style={{ height: 8, background: "#e2e8f0", borderRadius: 999, marginTop: 4 }}>
+                  <div style={{ height: "100%", width: `${Math.max(12, c.count * 10)}%`, background: "#2563eb", borderRadius: 999 }} />
                 </div>
-                <span
-                  className={`hs-reports-trend${row.trendUp ? " hs-reports-trend--warn" : " hs-reports-trend--favorable"}`}
-                >
-                  {row.trend}
-                </span>
-                <p className="hs-reports-concern-meta">{row.cases.toLocaleString()} cases this month</p>
-              </li>
-            ))
-          ) : (
-            <li className="hs-reports-concern-empty">No concerns in this time range.</li>
-          )}
-        </ul>
-      </section>
-
-      <section className="hs-reports-breakdown" aria-label="Monthly health services breakdown">
-        <h3 className="hs-reports-breakdown-heading">Monthly Health Services Breakdown</h3>
-        <div className="hs-reports-breakdown-grid">
-          {reportsServiceBreakdown.map((b) => (
-            <article key={b.label} className={`hs-breakdown-card ${b.accent}`}>
-              <p className="hs-breakdown-label">{b.label}</p>
-              <p className="hs-breakdown-value">{b.value.toLocaleString()}</p>
-              <p className="hs-breakdown-pct">{b.pct} of combined activity</p>
-            </article>
-          ))}
+              </div>
+            ))}
+            {!topComplaints.length ? <p className="hs-stat-meta">No complaint data yet.</p> : null}
+          </div>
         </div>
-      </section>
+      </div>
     </>
   );
 
-  const hsoTabPrimaryAction = useMemo(() => {
+  const hsoTabPrimaryAction = (() => {
+    if (isNurseUser) return null;
+    if (isPhysicianUser) {
+      if (activeNav === "appointments") return { label: "Issue Certificate", onClick: () => {}, Icon: Plus };
+      return null;
+    }
+    if (isDentistUser) {
+      if (activeNav === "dentalFollowups") return { label: "Schedule Follow-up", onClick: () => {}, Icon: Plus };
+      return null;
+    }
     switch (activeNav) {
       case "dashboard":
-        return { label: "New Consultation", onClick: openNewConsultationModal, Icon: Plus };
+        return { label: "New Appointment", onClick: openNewAppointmentModal, Icon: Plus };
+      case "userManagement":
+        return null;
+      case "staffScheduling":
+        return { label: "New Appointment", onClick: openNewAppointmentModal, Icon: CalendarDays };
+      case "checkin":
+        return null;
+      case "queue":
+        return null;
+      case "consultation":
+        return userDesignation === "admin" || userDesignation === "physician" || userDesignation === "dentist"
+          ? { label: "New Consultation Note", onClick: openNewConsultationModal, Icon: Stethoscope }
+          : null;
       case "visits":
         return { label: "New Consultation", onClick: openNewConsultationModal, Icon: Stethoscope };
       case "records":
         return { label: "New Record", onClick: openNewRecordModal, Icon: Activity };
       case "appointments":
-        return { label: "New Appointment", onClick: openNewAppointmentModal, Icon: CalendarDays };
+        return userDesignation === "admin" || userDesignation === "nurse"
+          ? { label: "New Appointment", onClick: openNewAppointmentModal, Icon: CalendarDays }
+          : null;
       case "referrals":
-        return { label: "Create Referral", onClick: openNewReferralModal, Icon: UserPlus };
+        return userDesignation === "admin"
+          ? { label: "Create Referral", onClick: openNewReferralModal, Icon: UserPlus }
+          : null;
       case "docrequests":
-        return canInterOfficeDocRequest
+        return canInterOfficeDocRequest && userDesignation === "admin"
           ? { label: "New Request", onClick: openNewDocModal, Icon: FileText }
           : null;
+      case "reports":
+        return null;
+      case "settings":
+        return null;
+      case "queueDisplay":
+        return null;
       default:
         return null;
     }
-  }, [activeNav, canInterOfficeDocRequest]);
+  })();
 
   const TabPrimaryIcon = hsoTabPrimaryAction?.Icon;
 
   const body = (() => {
     switch (activeNav) {
+      case "userManagement":
+        return renderUserManagement();
+      case "staffScheduling":
+        return renderStaffScheduling();
+      case "checkin":
+        return renderCheckin();
+      case "queue":
+        return renderQueue();
+      case "consultation":
+        return renderConsultation();
       case "visits":
         return renderVisits();
       case "records":
@@ -1985,6 +4279,18 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         return renderDocRequests();
       case "reports":
         return renderReports();
+      case "settings":
+        return renderSettings();
+      case "queueDisplay":
+        return renderQueueDisplay();
+      case "dentalQueue":
+        return renderDentistQueue();
+      case "dentalRecords":
+        return renderDentistPatientRecords();
+      case "dentalChart":
+        return renderDentistChartWorkspace();
+      case "dentalFollowups":
+        return renderDentistFollowups();
       default:
         return renderDashboard();
     }
@@ -2050,6 +4356,31 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               ) : null}
             </div>
           </section>
+          {isNurseUser && activeNav === "queue" ? (
+            <section className="cases-panel hs-panel-elevated" style={{ marginBottom: 16 }}>
+              <div className="cases-panel-header">
+                <div className="cases-panel-title cases-panel-title--strong">Station Control Header</div>
+              </div>
+              <div className="cc-modal-body" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <button type="button" className="hs-btn-success" onClick={() => setNurseStationOnline(true)}>
+                  <CheckCircle size={14} strokeWidth={1.8} /> Start
+                </button>
+                <button
+                  type="button"
+                  className="hs-btn-secondary"
+                  onClick={() => {
+                    setNurseStationOnline(false);
+                    setActiveNurseSessionId(null);
+                  }}
+                >
+                  <X size={14} strokeWidth={1.8} /> Close
+                </button>
+                <span className="hs-stat-meta">
+                  Nurse Station 1 - {nurseStationOnline ? "Active (Online)" : "Inactive (Offline)"}
+                </span>
+              </div>
+            </section>
+          ) : null}
           {hsoLoading ? (
             <p className="hs-stat-meta" style={{ marginBottom: 12 }}>
               Loading Health Services data from Supabase…
@@ -2086,6 +4417,99 @@ function HealthServices({ embedReportsOnly = false } = {}) {
             <button type="button" className="sidebar-logout-btn sidebar-logout-btn--primary" onClick={confirmLogout}>
               Yes, Logout
             </button>
+          </div>
+        </div>
+      </CCModal>
+
+      <CCModal
+        modalClassName="hs-cc-modal"
+        open={physicianCertModalOpen}
+        title="Issue Medical Certificate"
+        onClose={() => setPhysicianCertModalOpen(false)}
+        centered
+        wide
+      >
+        <div className="cc-modal-body">
+          <p className="hs-modal-lead">
+            For {workflowRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS)?.student || "selected patient"}
+          </p>
+          <div className="hs-modal-field">
+            <label>Reason</label>
+            <input
+              placeholder="e.g. Acute viral pharyngitis"
+              value={physicianConsultForm.certReason}
+              onChange={(e) => setPhysicianConsultForm((f) => ({ ...f, certReason: e.target.value }))}
+            />
+          </div>
+          <div className="hs-modal-grid">
+            <div className="hs-modal-field">
+              <label>Rest from</label>
+              <input
+                type="date"
+                value={physicianConsultForm.certFrom}
+                onChange={(e) => setPhysicianConsultForm((f) => ({ ...f, certFrom: e.target.value }))}
+              />
+            </div>
+            <div className="hs-modal-field">
+              <label>Until</label>
+              <input
+                type="date"
+                value={physicianConsultForm.certUntil}
+                onChange={(e) => setPhysicianConsultForm((f) => ({ ...f, certUntil: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="hs-modal-field">
+            <label>Recommendation</label>
+            <textarea
+              placeholder="Recommended rest and follow-up..."
+              value={physicianConsultForm.certRecommendation}
+              onChange={(e) => setPhysicianConsultForm((f) => ({ ...f, certRecommendation: e.target.value }))}
+            />
+          </div>
+          <div className="hs-modal-footer">
+            <button type="button" className="hs-btn-primary" onClick={() => setPhysicianCertModalOpen(false)}>
+              Issue &amp; Print
+            </button>
+          </div>
+        </div>
+      </CCModal>
+
+      <CCModal
+        modalClassName="hs-cc-modal"
+        open={addVisitorOpen}
+        title="Add Visitor"
+        onClose={() => setAddVisitorOpen(false)}
+        centered
+      >
+        <div className="cc-modal-body">
+          <p className="hs-modal-lead">Register non-institutional guest</p>
+          <div className="hs-modal-grid">
+            <div className="hs-modal-field">
+              <label>Name</label>
+              <input
+                value={newVisitorForm.name}
+                onChange={(e) => setNewVisitorForm((prev) => ({ ...prev, name: sanitizePersonNameInput(e.target.value) }))}
+              />
+            </div>
+            <div className="hs-modal-field">
+              <label>Contact Number</label>
+              <input
+                value={newVisitorForm.contactNumber}
+                onChange={(e) => setNewVisitorForm((prev) => ({ ...prev, contactNumber: sanitizeDigitsOnlyInput(e.target.value) }))}
+              />
+            </div>
+            <div className="hs-modal-field" style={{ gridColumn: "1 / -1" }}>
+              <label>Purpose of Visit</label>
+              <textarea
+                value={newVisitorForm.purpose}
+                onChange={(e) => setNewVisitorForm((prev) => ({ ...prev, purpose: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="hs-modal-footer">
+            <button type="button" className="cc-btn-secondary" onClick={() => setAddVisitorOpen(false)}>Cancel</button>
+            <button type="button" className="cc-btn-primary" onClick={handleAddVisitor}>Add Visitor</button>
           </div>
         </div>
       </CCModal>
@@ -2253,13 +4677,38 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                 onChange={(e) => setNewApptForm((f) => ({ ...f, time: e.target.value }))}
               />
             </div>
+            <div className="hs-modal-field">
+              <label>Designation</label>
+              <select
+                value={newApptForm.designation}
+                onChange={(e) => setNewApptForm((f) => ({ ...f, designation: e.target.value }))}
+              >
+                <option value="physician">Physician</option>
+                <option value="dentist">Dentist</option>
+              </select>
+            </div>
+            <div className="hs-modal-field">
+              <label>Consultation Form</label>
+              <select
+                value={newApptForm.consultationType}
+                onChange={(e) =>
+                  setNewApptForm((f) => ({ ...f, consultationType: e.target.value, purpose: e.target.value }))
+                }
+              >
+                {consultationTypeOptions().map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="hs-modal-field">
-            <label>Purpose of Visit</label>
+            <label>Additional Comments</label>
             <textarea
               rows={2}
-              value={newApptForm.purpose}
-              onChange={(e) => setNewApptForm((f) => ({ ...f, purpose: e.target.value }))}
+              value={newApptForm.additionalComments}
+              onChange={(e) => setNewApptForm((f) => ({ ...f, additionalComments: e.target.value }))}
             />
           </div>
         </div>
@@ -2669,7 +5118,27 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                 </div>
                 <div className="hs-detail-item">
                   <dt>Status</dt>
-                  <dd>{selectedAppointment.status}</dd>
+                  <dd>{statusLabel(selectedAppointment.workflowStatus || selectedAppointment.status)}</dd>
+                </div>
+                <div className="hs-detail-item">
+                  <dt>Designation</dt>
+                  <dd style={{ textTransform: "capitalize" }}>{selectedAppointment.designation || "physician"}</dd>
+                </div>
+                <div className="hs-detail-item">
+                  <dt>Check-in Code</dt>
+                  <dd>{selectedAppointment.checkinCode || "—"}</dd>
+                </div>
+                <div className="hs-detail-item">
+                  <dt>Code Validity</dt>
+                  <dd>
+                    {selectedAppointment.checkinValidFrom
+                      ? new Date(selectedAppointment.checkinValidFrom).toLocaleString()
+                      : "—"}
+                    {" - "}
+                    {selectedAppointment.checkinValidUntil
+                      ? new Date(selectedAppointment.checkinValidUntil).toLocaleString()
+                      : "—"}
+                  </dd>
                 </div>
               </dl>
               <p className="hs-modal-section-title">Purpose</p>

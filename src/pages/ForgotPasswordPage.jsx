@@ -13,6 +13,7 @@ import {
   verifyResetCode,
 } from "../utils/authStore";
 import { showToast } from "../utils/toast";
+import { devLog, devWarn } from "../utils/devLog";
 
 /** Hosted Supabase recovery emails currently use an 8-digit numeric {{ .Token }}. */
 const RECOVERY_OTP_LENGTH = 8;
@@ -79,7 +80,7 @@ const ForgotPasswordPage = () => {
 
     if (isSupabaseConfigured() && supabase) {
       setSendingCode(true);
-      console.log("[AUTH] → Checking if email exists for password recovery...");
+      devLog("[AUTH] Checking if email exists for password recovery...");
 
       const { data: registered, error: rpcError } = await supabase.rpc(
         "check_recovery_email_registered",
@@ -95,20 +96,20 @@ const ForgotPasswordPage = () => {
 
       if (rpcError && !missingRpc) {
         setSendingCode(false);
-        console.error("[AUTH] ✗ RPC check failed:", rpcError);
+        devWarn("[AUTH] RPC check failed:", rpcError);
         setFieldErrors({ email: formatAuthError(rpcError) });
         return;
       }
 
-      if (missingRpc && import.meta.env.DEV) {
-        console.warn(
+      if (missingRpc) {
+        devWarn(
           "[CampusCare] check_recovery_email_registered is missing; running password reset without email-exists check. Apply supabase/migrations/20260408000000_password_recovery_email_check.sql to enable it.",
         );
       }
 
       if (!missingRpc && registered === false) {
         setSendingCode(false);
-        console.warn("[AUTH] ✗ No account exists for this email");
+        devWarn("[AUTH] No account exists for this email");
         setFieldErrors({ email: "No account exists for this email address." });
         return;
       }
@@ -117,19 +118,19 @@ const ForgotPasswordPage = () => {
       const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
       const redirectTo = `${origin}${base}/forgot-password`;
 
-      console.log("[AUTH] → Sending password reset email to:", trimmed);
+      devLog("[AUTH] Sending password reset email to:", trimmed);
       const { error: resetErr } = await supabase.auth.resetPasswordForEmail(trimmed, {
         redirectTo,
       });
       setSendingCode(false);
 
       if (resetErr) {
-        console.error("[AUTH] ✗ Password reset email failed:", resetErr);
+        devWarn("[AUTH] Password reset email failed:", resetErr);
         setFieldErrors({ email: formatAuthError(resetErr) });
         return;
       }
 
-      console.log("[AUTH] ✓ Password reset email sent");
+      devLog("[AUTH] Password reset email sent");
       setCodeDigits(Array.from({ length: RECOVERY_OTP_LENGTH }, () => ""));
       setStep("code");
       showToast("If an account exists for this email, check your inbox for the verification code.", { variant: "info" });
