@@ -33,3 +33,12 @@ export function clearCampusCareSession() {
   window.localStorage.removeItem(SESSION_KEY);
   window.sessionStorage.removeItem(SESSION_KEY);
 }
+
+/** True when the active session was stored with “remember me” (localStorage). */
+export function campusCareSessionUsesPersistentStorage() {
+  try {
+    return window.localStorage.getItem(SESSION_KEY) != null;
+  } catch {
+    return false;
+  }
+}

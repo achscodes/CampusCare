@@ -33,7 +33,8 @@ export function registerUser(newUser) {
     throw err;
   }
   const role = String(newUser.role || "").trim();
-  const accountStatus = role === "Super Admin" ? "approved" : "pending";
+  const accountStatus =
+    role === "Admin" || role === "Super Admin" ? "approved" : "pending";
   const user = { ...newUser, id: `u-${Date.now()}`, accountStatus };
   setUsers([...users, user]);
   return user;

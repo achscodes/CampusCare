@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
-import { isSuperAdminSession } from "./superAdmin";
+import { isWelfareAdminSession } from "./welfareAdmin";
 import { clearCampusCareSession, writeCampusCareSession } from "./campusCareSession";
 import { devLog, devWarn } from "./devLog";
 import { isHsoAdminSession, normalizeHsoDesignation } from "./hsoAccess";
@@ -78,7 +78,7 @@ export async function syncCampusCareSessionFromSupabaseUser(authUser, opts = {})
 
     devLog("[AUTH] Session synced. Office:", office, "Role:", role, "Status:", accountStatus);
 
-    const isApprovalExempt = isSuperAdminSession(session) || isHsoAdminSession(session);
+    const isApprovalExempt = isWelfareAdminSession(session) || isHsoAdminSession(session);
     if (!isApprovalExempt && (accountStatus === "pending" || accountStatus === "rejected")) {
       devWarn("[AUTH] Account not approved. Status:", accountStatus);
       return { ok: false, accountStatus };

@@ -4,6 +4,7 @@ import {
   Activity,
   AlertCircle,
   AlertTriangle,
+  BarChart3,
   CalendarDays,
   ChevronRight,
   Clock,
@@ -24,6 +25,7 @@ import {
   Sparkles,
   Stethoscope,
   Thermometer,
+  Timer,
   Upload,
   UserPlus,
   Users,
@@ -45,7 +47,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { jsPDF } from "jspdf";
 import { showToast } from "../../utils/toast";
+import { buildStationAnnouncement } from "../../utils/hsoQueueAnnounceText";
+import { primeSpeechSynthesis, speakQueueAnnouncement } from "../../utils/hsoQueueSpeech";
 import Sidebar from "../../components/Sidebar/Sidebar";
 import OfficeHeader from "../../components/OfficeHeader/OfficeHeader";
 import StaffNotificationBell from "../../components/common/StaffNotificationBell";
@@ -59,6 +64,16 @@ import {
   loadHsoFromSupabase,
   loadHsoStaffFromSupabase,
   mapAppointmentRow,
+  mapConsultationRow,
+  mapMedicalRecordRow,
+  fetchAppointmentByCheckinCode,
+  enrichAppointmentWithStudentName,
+  enrichAppointmentsWithStudentNames,
+  enrichHealthRecordsWithStudentNames,
+  enrichConsultationsWithStudentNames,
+  fetchStudentRosterForChart,
+  fetchMedicalRecordRowForStudent,
+  fetchStudentRowForReferral,
   mapReferralRow,
 } from "../../services/hsoSupabase";
 import {
@@ -66,6 +81,10 @@ import {
   interOfficeRowToHsoDocumentRequest,
 } from "../../services/interOfficeDocumentRequests";
 import { appendEvidenceToInterOfficeRequest } from "../../services/interOfficeDocumentEvidence";
+import {
+  uploadPhysicianChartDocument,
+  deletePhysicianChartDocument,
+} from "../../services/physicianChartDocuments";
 import { logoutCampusCare } from "../../utils/campusCareAuth";
 import { PROFILE_SETTINGS_PATH_HEALTH } from "../../utils/profileSettingsRoutes";
 import { readCampusCareSession } from "../../utils/campusCareSession";
@@ -73,16 +92,19 @@ import { canCreateDocumentRequest, labelForOfficeKey } from "../../constants/doc
 import { NU_PROGRAM_OPTIONS } from "../../data/nuPrograms";
 import "../DODashboard/DO.css";
 import "./HealthServices.css";
-import { sanitizeDigitsOnlyInput, sanitizePersonNameInput } from "../../utils/signupFieldValidation";
+import { sanitizeCheckinCodeInput, sanitizeDigitsOnlyInput, sanitizePersonNameInput } from "../../utils/signupFieldValidation";
 import { hsoDesignationLabel, normalizeHsoDesignation } from "../../utils/hsoAccess";
-import { HEALTH_NAV_ITEMS, HS_NOTIFICATIONS } from "./hsoNavConfig";
+import { HS_NOTIFICATIONS } from "./hsoNavConfig";
+import { buildHealthNavItems, getHealthAllowedNavSet } from "./hsoSidebarNav";
 import DentistOdontogram from "./DentistOdontogram";
 import {
   HSO_WORKFLOW_STATUS,
   computeCheckinWindow,
   consultationTypeOptions,
   designationToService,
-  generateCheckinCode,
+  checkinLookupVariants,
+  formatCheckinCodeFromNumber,
+  normalizeCheckinCode,
   normalizeWorkflowStatus,
   nowInWindow,
   statusLabel,
@@ -99,6 +121,151 @@ import {
   isReferralPendingPartnerReview,
   normalizeReferralStatus,
 } from "../../utils/interOfficeWorkflow";
+
+/** Next ticket uses max(queue_number) from today only so old appointments do not inflate the counter. */
+function maxQueueNumberForToday(appointmentsList, nurseVisitors) {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  let max = 0;
+  for (const a of appointmentsList) {
+    const qn = Number(a.queueNumber || 0);
+    if (!qn) continue;
+    const at = a.checkedInAt ? new Date(a.checkedInAt) : null;
+    if (at && !Number.isNaN(at.getTime()) && at >= start && at < end) max = Math.max(max, qn);
+  }
+  for (const v of nurseVisitors) {
+    const qn = Number(v.queueNumber || 0);
+    if (!qn) continue;
+    const at = v.arrivedAt ? new Date(v.arrivedAt) : null;
+    if (at && !Number.isNaN(at.getTime()) && at >= start && at < end) max = Math.max(max, qn);
+  }
+  return max;
+}
+
+function appointmentStudentLabel(a) {
+  const s = String(a?.student ?? "").trim();
+  if (s) return s;
+  const sid = String(a?.studentId ?? "").trim();
+  if (sid) return `Student ID ${sid}`;
+  return "";
+}
+
+function formatRosterBirthdate(v) {
+  if (v == null || v === "") return "—";
+  const d = v instanceof Date ? v : new Date(v);
+  if (!Number.isNaN(d.getTime())) return d.toLocaleDateString("en-US");
+  return String(v);
+}
+
+function workflowAppointmentReason(a) {
+  const t = String(a.consultationType || a.purpose || a.service || "").trim();
+  return t || "—";
+}
+
+/** Map DB / JSON vitals to display fields (camelCase or snake_case). */
+function normalizeNurseVitalsDisplay(vitals) {
+  if (!vitals || typeof vitals !== "object") return null;
+  const v = vitals;
+  return {
+    temperature: v.temperature ?? v.temp_c ?? v.temp ?? "",
+    bloodPressure: v.bloodPressure ?? v.blood_pressure ?? "",
+    pulse: v.pulse ?? v.heart_rate ?? v.heartRate ?? "",
+    respiratoryRate: v.respiratoryRate ?? v.respiratory_rate ?? v.resp_rate ?? "",
+    weightKg: v.weightKg ?? v.weight_kg ?? "",
+    heightCm: v.heightCm ?? v.height_cm ?? "",
+    spo2: v.spo2 ?? v.o2 ?? v.oxygen_saturation ?? v.oxygenSaturation ?? "",
+  };
+}
+
+const EMPTY_PHYSICIAN_MEDICAL_HISTORY = {
+  previousIllness: "",
+  allergy: "",
+  asthma: "",
+  tb: "",
+  hpn: "",
+  gynecologicalObstetrical: "",
+  smoker: "",
+  alcoholicDrinker: "",
+  diabetesMellitus: "",
+  heartAilment: "",
+  kidneyDisease: "",
+};
+
+const EMPTY_PHYSICIAN_PHYSICAL_EXAM = {
+  skin: "",
+  eyesOd: "",
+  eyesOs: "",
+  earsAd: "",
+  earsAs: "",
+  nose: "",
+  throat: "",
+  heart: "",
+  lungs: "",
+  abdomen: "",
+  extremities: "",
+  deformities: "",
+  otherPertinentFindings: "",
+};
+
+const PHYSICIAN_MEDICAL_HISTORY_FIELDS = [
+  { key: "previousIllness", label: "History of Previous Illness/Surgical Operation" },
+  { key: "allergy", label: "Allergy" },
+  { key: "asthma", label: "Asthma" },
+  { key: "tb", label: "TB" },
+  { key: "hpn", label: "HPN (Hypertension)" },
+  { key: "gynecologicalObstetrical", label: "Gynecological/Obstetrical" },
+  { key: "smoker", label: "Smoker" },
+  { key: "alcoholicDrinker", label: "Alcoholic Drinker" },
+  { key: "diabetesMellitus", label: "Diabetes Mellitus" },
+  { key: "heartAilment", label: "Heart Ailment" },
+  { key: "kidneyDisease", label: "Kidney Disease" },
+];
+
+const PHYSICIAN_PHYSICAL_EXAM_FIELDS = [
+  { key: "skin", label: "Skin" },
+  { key: "eyesOd", label: "Eyes — O.D. (right)" },
+  { key: "eyesOs", label: "Eyes — O.S. (left)" },
+  { key: "earsAd", label: "Ears — A.D. (right)" },
+  { key: "earsAs", label: "Ears — A.S. (left)" },
+  { key: "nose", label: "Nose" },
+  { key: "throat", label: "Throat" },
+  { key: "heart", label: "Heart" },
+  { key: "lungs", label: "Lungs" },
+  { key: "abdomen", label: "Abdomen" },
+  { key: "extremities", label: "Extremities" },
+  { key: "deformities", label: "Deformities" },
+  { key: "otherPertinentFindings", label: "Other Pertinent Findings" },
+];
+
+function medicalHistoryDraftFromRecord(rec) {
+  const json = rec?.physicianMedicalHistoryJson;
+  if (json && typeof json === "object") {
+    return { ...EMPTY_PHYSICIAN_MEDICAL_HISTORY, ...json };
+  }
+  const legacy = String(rec?.physicianMedicalHistory || "").trim();
+  if (legacy) return { ...EMPTY_PHYSICIAN_MEDICAL_HISTORY, previousIllness: legacy };
+  return { ...EMPTY_PHYSICIAN_MEDICAL_HISTORY };
+}
+
+function physicalExamDraftFromRecord(rec) {
+  const json = rec?.physicianPhysicalExaminationJson;
+  if (json && typeof json === "object") {
+    return { ...EMPTY_PHYSICIAN_PHYSICAL_EXAM, ...json };
+  }
+  const legacy = String(rec?.physicianPhysicalExamination || "").trim();
+  if (legacy) return { ...EMPTY_PHYSICIAN_PHYSICAL_EXAM, otherPertinentFindings: legacy };
+  return { ...EMPTY_PHYSICIAN_PHYSICAL_EXAM };
+}
+
+function patientRecordDocUrlIsPdf(url) {
+  return /\.pdf(\?|$)/i.test(String(url || ""));
+}
+
+function patientRecordDocUrlIsImage(url) {
+  return /\.(jpe?g|png|gif|webp)(\?|$)/i.test(String(url || ""));
+}
 
 const PAGE_META = {
   dashboard: {
@@ -138,8 +305,9 @@ const PAGE_META = {
     subtitle: "Medical appointments and schedules",
   },
   nurseStation: {
-    title: "Nurse Station",
-    subtitle: "Inter-office referrals and document requests for coordinating student care between departments",
+    title: "Inter-Office Coordination",
+    subtitle:
+      "Document requests and student referrals between welfare departments — transfer information so offices can coordinate student support.",
   },
   referrals: {
     title: "Referrals",
@@ -152,10 +320,6 @@ const PAGE_META = {
   reports: {
     title: "Reports & Analytics",
     subtitle: "Health services statistics, metrics, and insights",
-  },
-  settings: {
-    title: "Settings",
-    subtitle: "Configure queue policies, check-in windows, and operational defaults",
   },
   queueDisplay: {
     title: "Queue Display",
@@ -177,15 +341,6 @@ const PAGE_META = {
     title: "Follow-up Appointments",
     subtitle: "Recall visits, post-procedure reviews and check-backs.",
   },
-};
-
-// --- Role-specific navigation assignment ---
-const HEALTH_NAV_BY_DESIGNATION = {
-  // Admin scope intentionally limited to screens present in provided UI reference.
-  admin: ["dashboard", "userManagement", "staffScheduling", "queue", "reports", "settings"],
-  nurse: ["dashboard", "appointments", "checkin", "queue", "records", "nurseStation", "settings"],
-  physician: ["dashboard", "visits", "records", "appointments", "queueDisplay"],
-  dentist: ["dashboard", "dentalQueue", "dentalRecords", "dentalChart", "dentalFollowups"],
 };
 
 const REPORTS_CONCERNS_ROWS = [];
@@ -221,6 +376,164 @@ function consultStatusToLabel(status) {
   if (s === "scheduled") return "Scheduled";
   if (!status) return "Pending";
   return String(status).replace(/^./, (c) => c.toUpperCase());
+}
+
+function prescriptionRowListPreview(text) {
+  const t = String(text || "").trim().replace(/\s+/g, " ");
+  if (!t) return "—";
+  return t.length > 100 ? `${t.slice(0, 97)}…` : t;
+}
+
+/** Compare student IDs case-insensitively (trim whitespace). */
+function normalizeStudentIdMatch(id) {
+  return String(id ?? "").trim().toLowerCase();
+}
+
+/** Latest prescription among saved chart notes and consultation visits (newest timestamp wins). */
+function latestPrescriptionSnapshot(studentId, consultationRows, recRow) {
+  const k = normalizeStudentIdMatch(studentId);
+  if (!k) return { text: "", at: 0, detail: "", source: "" };
+  let best = { text: "", at: 0, detail: "", source: "" };
+  const mrRx = String(recRow?.physicianPrescriptionNotes ?? "").trim();
+  const mrAt = Number(recRow?.updatedAt) || 0;
+  if (mrRx) {
+    best = { text: mrRx, at: mrAt, detail: "Medical record (saved chart)", source: "record" };
+  }
+  for (const c of consultationRows) {
+    if (normalizeStudentIdMatch(c.studentId) !== k) continue;
+    const txt = String(c.prescription || c.prescriptionDetail || c.treatment || "").trim();
+    if (!txt) continue;
+    const t = new Date(c.consultationCreatedAt || 0).getTime();
+    if (!Number.isFinite(t)) continue;
+    const detail = `${c.date || "—"} · ${c.service || c.reason || "Consultation"}`;
+    if (t >= best.at) {
+      best = { text: txt, at: t, detail, source: "consultation" };
+    }
+  }
+  return best;
+}
+
+const PHYSICIAN_ANALYTICS_SCHOOLS = ["SECA", "SASE", "SBMA"];
+
+const PHYSICIAN_ANALYTICS_SCHOOL_COLORS = {
+  SECA: "#2563eb",
+  SASE: "#10b981",
+  SBMA: "#f59e0b",
+};
+
+const HSO_ANALYTICS_MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const HSO_ANALYTICS_PIE_COLORS = [
+  "#2563eb",
+  "#10b981",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#64748b",
+  "#84cc16",
+];
+
+/** Peak month: count Health Services visits by calendar month (consultation recorded date). */
+function peakMonthSeriesForYearFromConsultations(consultsFilteredForPeriod, year) {
+  const counts = Array(12).fill(0);
+  consultsFilteredForPeriod.forEach((c) => {
+    const raw = c?.consultationCreatedAt;
+    if (!raw) return;
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime()) || d.getFullYear() !== year) return;
+    counts[d.getMonth()] += 1;
+  });
+  return HSO_ANALYTICS_MONTH_SHORT.map((month, i) => ({ month, total: counts[i] }));
+}
+
+function hsoAnalyticsPeriodRange(period) {
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  let start;
+  if (period === "today") {
+    start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  } else if (period === "month") {
+    start = new Date(end.getFullYear(), end.getMonth(), 1);
+  } else {
+    start = new Date(end.getFullYear(), 0, 1);
+  }
+  return { start, end };
+}
+
+function appointmentDateInPhysicianAnalyticsRange(a, start, end) {
+  if (!a?.dateSort) return false;
+  const d = new Date(`${a.dateSort}T12:00:00`);
+  return !Number.isNaN(d.getTime()) && d >= start && d <= end;
+}
+
+function consultationDateInPhysicianAnalyticsRange(c, start, end) {
+  const raw = c?.consultationCreatedAt;
+  if (!raw) return false;
+  const d = new Date(raw);
+  return !Number.isNaN(d.getTime()) && d >= start && d <= end;
+}
+
+function schoolBucketFromProgram(program) {
+  const p = String(program || "").toUpperCase();
+  for (const s of PHYSICIAN_ANALYTICS_SCHOOLS) {
+    if (p.includes(s)) return s;
+  }
+  return null;
+}
+
+function physicianPeakHourSeriesFromAppointments(appts) {
+  const labels = ["8a", "9a", "10a", "11a", "12p", "1p", "2p", "3p", "4p", "5p"];
+  const slots = new Map(labels.map((l) => [l, 0]));
+  const toLabel = (time) => {
+    const raw = String(time || "").trim();
+    if (!raw) return null;
+    const m24 = raw.match(/^([01]?\d|2[0-3]):([0-5]\d)/);
+    if (m24) {
+      let h = Number(m24[1]);
+      const mer = h >= 12 ? "p" : "a";
+      h = h % 12 || 12;
+      return `${h}${mer}`;
+    }
+    const m12 = raw.toLowerCase().match(/^([1-9]|1[0-2])(?::([0-5]\d))?\s*([ap])m?$/);
+    if (m12) return `${m12[1]}${m12[3]}`;
+    return null;
+  };
+  appts.forEach((a) => {
+    const lbl = toLabel(a.time);
+    if (!lbl || !slots.has(lbl)) return;
+    slots.set(lbl, (slots.get(lbl) || 0) + 1);
+  });
+  return labels.map((hour) => ({ hour, total: slots.get(hour) || 0 }));
+}
+
+function hsoAnalyticsPeriodLabel(period) {
+  if (period === "today") return "Today";
+  if (period === "month") return "This month";
+  return "This year";
+}
+
+/** Identifies rows created from Save chart (prescription snapshot); separate from consultation_service label. */
+const CHART_SAVE_CHIEF_COMPLAINT = "Physician chart (saved)";
+
+/** Timeline / cards: physician name with Dr. prefix, no "Seen by". */
+function formatPhysicianTimelineDoctor(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s || s === "—") return "";
+  if (/^dr\.?\s/i.test(s)) {
+    const rest = s.replace(/^dr\.?\s*/i, "").trim();
+    return rest ? `Dr. ${rest}` : "Dr.";
+  }
+  return `Dr. ${s}`;
+}
+
+/** Clear message when PostgREST reports missing columns on health_consultations (migration not applied). */
+function formatHealthConsultationsDbError(err, shortFallback) {
+  const raw = String(err?.message ?? err ?? "").trim();
+  if (/student_name|schema cache|PGRST206/i.test(raw)) {
+    return `${shortFallback} Apply supabase/migrations/20260516150000_ensure_health_consultations_columns.sql in the Supabase SQL Editor, then reload the API schema (Project Settings → API).`;
+  }
+  return raw || shortFallback;
 }
 
 function parseIsoDateOnly(iso) {
@@ -325,10 +638,32 @@ const INITIAL_NEW_REFERRAL = {
   studentName: "",
   studentId: "",
   email: "",
-  phone: "",
+  program: "",
   receivingOffice: "Discipline Office (DO)",
   reason: "",
 };
+
+const REFERRAL_STUDENT_ID_YEARS = new Set([2022, 2023, 2024, 2025, 2026, 2027]);
+
+/** Formats nurse input as YYYY-####### (year then hyphen then 6–7 digit unique id). */
+function formatReferralStudentIdInput(raw) {
+  const digits = String(raw ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 11);
+  if (!digits.length) return "";
+  const y = digits.slice(0, 4);
+  const uid = digits.slice(4, 11);
+  if (digits.length <= 4) return y;
+  return `${y}-${uid}`;
+}
+
+function isCompleteReferralStudentId(id) {
+  const s = String(id ?? "").trim();
+  const m = s.match(/^(\d{4})-(\d{6,7})$/);
+  if (!m) return false;
+  const yr = Number(m[1]);
+  return REFERRAL_STUDENT_ID_YEARS.has(yr);
+}
 
 const HS_REFERRAL_OFFICES = ["Discipline Office (DO)", "SDAO — Student Development"];
 
@@ -358,6 +693,8 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [newConsultOpen, setNewConsultOpen] = useState(false);
   const [consultationRows, setConsultationRows] = useState(() => []);
+  const consultationRowsRef = useRef(consultationRows);
+  consultationRowsRef.current = consultationRows;
   const [newConsultForm, setNewConsultForm] = useState(() => ({ ...INITIAL_NEW_CONSULT }));
   const [consultSaving, setConsultSaving] = useState(false);
   const [consultDetail, setConsultDetail] = useState(null);
@@ -387,10 +724,13 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const [docRequestsRows, setDocRequestsRows] = useState(() => []);
   const [selectedDocRequest, setSelectedDocRequest] = useState(null);
   const [reportsTimeFilter, setReportsTimeFilter] = useState("week");
+  const [hsoAnalyticsPeriod, setHsoAnalyticsPeriod] = useState("today");
+  const [studentProgramsByStudentId, setStudentProgramsByStudentId] = useState(() => new Map());
   const [hsoLoading, setHsoLoading] = useState(false);
   const [hsoLoadError, setHsoLoadError] = useState(null);
   const [newApptForm, setNewApptForm] = useState(() => ({ ...INITIAL_NEW_APPT }));
   const [newReferralForm, setNewReferralForm] = useState(() => ({ ...INITIAL_NEW_REFERRAL }));
+  const [referralStudentLookup, setReferralStudentLookup] = useState(() => ({ status: "idle", message: "" }));
   const [apptSaving, setApptSaving] = useState(false);
   const [referralSaving, setReferralSaving] = useState(false);
   const [docSaving, setDocSaving] = useState(false);
@@ -399,6 +739,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const [nurseQueueCounter, setNurseQueueCounter] = useState(0);
   const [checkinPreview, setCheckinPreview] = useState(null);
   const [nurseStationOnline, setNurseStationOnline] = useState(false);
+  const [physicianStationOnline, setPhysicianStationOnline] = useState(false);
+  const [dentistStationOnline, setDentistStationOnline] = useState(false);
+  const [physicianRecordsStudentId, setPhysicianRecordsStudentId] = useState(null);
   const [activeNurseSessionId, setActiveNurseSessionId] = useState(null);
   const [nurseTriageForm, setNurseTriageForm] = useState(() => ({ ...INITIAL_NURSE_TRIAGE }));
   const [transferTarget, setTransferTarget] = useState("physician");
@@ -410,6 +753,26 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const [visitorArchive, setVisitorArchive] = useState(() => []);
   const [physicianPanelTab, setPhysicianPanelTab] = useState("vitals");
   const [physicianCertModalOpen, setPhysicianCertModalOpen] = useState(false);
+  const [physicianChartOpen, setPhysicianChartOpen] = useState(false);
+  const [physicianChartStudentId, setPhysicianChartStudentId] = useState(null);
+  const [physicianChartRoster, setPhysicianChartRoster] = useState(null);
+  const [physicianChartDraft, setPhysicianChartDraft] = useState({
+    medicalHistory: { ...EMPTY_PHYSICIAN_MEDICAL_HISTORY },
+    physicalExam: { ...EMPTY_PHYSICIAN_PHYSICAL_EXAM },
+    prescriptionNotes: "",
+    documentsNotes: "",
+  });
+  const [physicianChartSaving, setPhysicianChartSaving] = useState(false);
+  const [physicianChartLoading, setPhysicianChartLoading] = useState(false);
+  const [physicianChartAttachments, setPhysicianChartAttachments] = useState([]);
+  /** Snapshot from fetch when chart opens — drives “latest” Rx vs visits before parent state merges */
+  const [physicianChartRecordSnapshot, setPhysicianChartRecordSnapshot] = useState(null);
+  const [physicianChartDocUploading, setPhysicianChartDocUploading] = useState(false);
+  const physicianChartFileInputRef = useRef(null);
+  const [certExpandedStudentId, setCertExpandedStudentId] = useState(null);
+  const [physicianRecordsSubTab, setPhysicianRecordsSubTab] = useState("timeline");
+  const [physicianRecordDocPreview, setPhysicianRecordDocPreview] = useState(null);
+  const [physicianRecordsRxExpandedId, setPhysicianRecordsRxExpandedId] = useState(null);
   const [dentalRecordsSelectedId, setDentalRecordsSelectedId] = useState(null);
   const [dentalRecordsSearch, setDentalRecordsSearch] = useState("");
   const [dentalPatientTab, setDentalPatientTab] = useState("procedures");
@@ -433,6 +796,19 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     certRecommendation: "",
   });
   const recordFiltersSnapshot = useRef(null);
+
+  const queueStationStatusBadge = (online) => (
+    <div
+      className={`hs-queue-station-status ${online ? "hs-queue-station-status--online" : "hs-queue-station-status--offline"}`}
+      role="status"
+      aria-live="polite"
+    >
+      <span className="hs-queue-station-status__dot-wrap" aria-hidden>
+        <span className="hs-queue-station-status__dot" />
+      </span>
+      <span className="hs-queue-station-status__label">{online ? "Online" : "Offline"}</span>
+    </div>
+  );
 
   const session = useMemo(() => {
     return readCampusCareSession();
@@ -459,48 +835,11 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const isNurseUser = userDesignation === "nurse";
   const isPhysicianUser = userDesignation === "physician";
   const isDentistUser = userDesignation === "dentist";
-  const allowedNavSet = useMemo(
-    () => new Set(HEALTH_NAV_BY_DESIGNATION[userDesignation] || HEALTH_NAV_BY_DESIGNATION.admin),
-    [userDesignation],
+  const allowedNavSet = useMemo(() => getHealthAllowedNavSet(userDesignation), [userDesignation]);
+  const healthNavItems = useMemo(
+    () => buildHealthNavItems({ designation: userDesignation, canInterOfficeDocRequest }),
+    [userDesignation, canInterOfficeDocRequest],
   );
-  const healthNavItems = useMemo(() => {
-    const filtered = HEALTH_NAV_ITEMS.filter(
-      (i) => allowedNavSet.has(i.id) && (canInterOfficeDocRequest || i.id !== "docrequests"),
-    );
-    if (userDesignation === "nurse") {
-      const nurseLabelMap = {
-        dashboard: "Dashboard",
-        checkin: "Patient Check-In",
-        queue: "Nurse Queue",
-        appointments: "Triage Management",
-        nurseStation: "Nurse Station",
-        records: "Patient Records",
-        settings: "Settings",
-      };
-      return filtered.map((item) => ({ ...item, label: nurseLabelMap[item.id] || item.label }));
-    }
-    if (userDesignation === "physician") {
-      const physicianLabelMap = {
-        dashboard: "Dashboard",
-        visits: "Physician Queue",
-        records: "Patient Record",
-        appointments: "Medical Certificate",
-        queueDisplay: "Prescription History",
-      };
-      return filtered.map((item) => ({ ...item, label: physicianLabelMap[item.id] || item.label }));
-    }
-    if (userDesignation === "dentist") {
-      const dentistLabelMap = {
-        dashboard: "Dashboard",
-        dentalQueue: "Dental Queue",
-        dentalRecords: "Patients Records",
-        dentalChart: "Dental Chart",
-        dentalFollowups: "Follow-ups",
-      };
-      return filtered.map((item) => ({ ...item, label: dentistLabelMap[item.id] || item.label }));
-    }
-    return filtered;
-  }, [allowedNavSet, canInterOfficeDocRequest, userDesignation]);
 
   const userName = session?.name || "Priscilla C. Pelayo";
   const userRole = `${hsoDesignationLabel(userDesignation)} · ${session?.role || "Staff"}`;
@@ -510,10 +849,13 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     dashboard: { title: "Dashboard", subtitle: "Nurse station overview and patient management" },
     checkin: { title: "Patient Check-In", subtitle: "Nurse station overview and patient management" },
     queue: { title: "Queue Management", subtitle: "Live ticketing across all stations." },
-    appointments: { title: "Vital Signs", subtitle: "Capture and review patient vitals before consultation." },
-    nurseStation: { title: "Nurse Station", subtitle: "Inter-office referrals and document requests for coordinated care." },
+    nurseStation: {
+      title: "Inter-Office Coordination",
+      subtitle:
+        "Document requests between departments and student referrals to other welfare offices — share student context so processes stay coordinated.",
+    },
     records: { title: "Patient Records", subtitle: "Read-only view for nurses - diagnoses are restricted to physicians." },
-    settings: { title: "Settings", subtitle: "Configure queue and station preferences." },
+    reports: { title: "Reports & Analytics", subtitle: "Clinic visits, programs, schools, and wait times." },
   };
   // --- Physician side page metadata ---
   const physicianMetaByNav = {
@@ -522,7 +864,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     records: { title: "Patient Records", subtitle: "Full clinical history with prescriptions and vitals." },
     consultation: { title: "Consultation", subtitle: "Review vitals, consult patients, manage prescriptions." },
     appointments: { title: "Medical Certificates", subtitle: "Issue and track medical certifications." },
-    queueDisplay: { title: "Prescription History", subtitle: "All prescriptions issued from your workspace." },
+    reports: { title: "Reports & Analytics", subtitle: "Clinic visits, programs, schools, and wait times for your filters." },
   };
   // --- Dentist side page metadata ---
   const dentistMetaByNav = {
@@ -531,6 +873,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     dentalRecords: { title: "Patient Records", subtitle: "Dental history, charts and follow-ups." },
     dentalChart: { title: "Dental Dashboard", subtitle: "Charting, procedures and follow-ups." },
     dentalFollowups: { title: "Follow-up Appointments", subtitle: "Recall visits, post-procedure reviews and check-backs." },
+    reports: { title: "Reports & Analytics", subtitle: "Clinic visits, programs, schools, and wait times." },
   };
   const meta = isNurseUser
     ? (nurseMetaByNav[activeNav] || nurseMetaByNav.dashboard)
@@ -579,9 +922,35 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         setHsoLoadError(res.error?.message || "Could not load Health Services data from Supabase.");
         return;
       }
-      setConsultationRows(res.consultations);
-      setHealthRecordsRows(res.records);
-      setAppointmentsList(res.appointments);
+      let consultations = res.consultations;
+      let records = res.records;
+      let appointments = res.appointments;
+      try {
+        [consultations, records, appointments] = await Promise.all([
+          enrichConsultationsWithStudentNames(supabase, consultations),
+          enrichHealthRecordsWithStudentNames(supabase, records),
+          enrichAppointmentsWithStudentNames(supabase, appointments),
+        ]);
+      } catch (enrichErr) {
+        console.warn("[HealthServices] roster name enrich failed", enrichErr);
+      }
+      if (cancelled) return;
+      setConsultationRows(consultations);
+      setHealthRecordsRows(records);
+      setAppointmentsList(appointments);
+      try {
+        const { data: studs, error: studErr } = await supabase.from("students").select("student_id, program");
+        if (!studErr && studs?.length) {
+          const m = new Map();
+          studs.forEach((s) => {
+            const id = normalizeStudentIdMatch(s.student_id);
+            if (id) m.set(id, String(s.program ?? "").trim());
+          });
+          setStudentProgramsByStudentId(m);
+        }
+      } catch (e) {
+        console.warn("[HealthServices] students program fetch failed", e);
+      }
       setReferralsList(res.referrals);
       setDocRequestsRows(res.documents);
       setDisciplineIncomingReferrals(res.disciplineReferralsIncoming || []);
@@ -600,6 +969,63 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     await logoutCampusCare();
     navigate("/");
   };
+
+  useEffect(() => {
+    if (!physicianChartOpen || !physicianChartStudentId || !isSupabaseConfigured() || !supabase) return;
+    let cancelled = false;
+    (async () => {
+      setPhysicianChartLoading(true);
+      try {
+        const sid = physicianChartStudentId;
+        const [roster, rec] = await Promise.all([
+          fetchStudentRosterForChart(supabase, sid),
+          fetchMedicalRecordRowForStudent(supabase, sid),
+        ]);
+        if (cancelled) return;
+        setPhysicianChartRoster(roster);
+        setPhysicianChartRecordSnapshot(rec || null);
+        const consultSnap = latestPrescriptionSnapshot(sid, consultationRowsRef.current || [], rec);
+        const rxInitial =
+          consultSnap.text ||
+          String(rec?.physicianPrescriptionNotes ?? "").trim();
+        setPhysicianChartDraft({
+          medicalHistory: medicalHistoryDraftFromRecord(rec),
+          physicalExam: physicalExamDraftFromRecord(rec),
+          prescriptionNotes: rxInitial,
+          documentsNotes: String(rec?.physicianDocumentsNotes ?? "").trim(),
+        });
+        setPhysicianChartAttachments(
+          Array.isArray(rec?.physicianDocumentsAttachments) ? rec.physicianDocumentsAttachments : [],
+        );
+      } catch (e) {
+        console.warn(e);
+        if (!cancelled) setPhysicianChartRoster(null);
+      } finally {
+        if (!cancelled) setPhysicianChartLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [physicianChartOpen, physicianChartStudentId]);
+
+  const openPhysicianChart = useCallback((studentId) => {
+    const sid = String(studentId ?? "").trim();
+    if (!sid) {
+      showToast("Select a patient with a student ID first.", { variant: "warning" });
+      return;
+    }
+    setPhysicianChartStudentId(sid);
+    setPhysicianChartOpen(true);
+  }, []);
+
+  const closePhysicianChart = useCallback(() => {
+    setPhysicianChartOpen(false);
+    setPhysicianChartStudentId(null);
+    setPhysicianChartRoster(null);
+    setPhysicianChartAttachments([]);
+    setPhysicianChartRecordSnapshot(null);
+  }, []);
 
   const openNewConsultationModal = () => {
     setNewConsultForm({ ...INITIAL_NEW_CONSULT });
@@ -843,6 +1269,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
 
   const openNewReferralModal = () => {
     setNewReferralForm({ ...INITIAL_NEW_REFERRAL });
+    setReferralStudentLookup({ status: "idle", message: "" });
     setNewReferralOpen(true);
   };
 
@@ -870,8 +1297,13 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       showToast(`Please complete all fields: ${miss.join(", ")}.`, { variant: "warning" });
       return;
     }
-    const checkinCode = generateCheckinCode();
     const { validFrom, validUntil } = computeCheckinWindow(newApptForm.date, newApptForm.time);
+    const maxChSeq = appointmentsList.reduce((max, a) => {
+      const n = normalizeCheckinCode(a.checkinCode || "");
+      const m = n.match(/^CH-(\d+)$/);
+      return m ? Math.max(max, parseInt(m[1], 10)) : max;
+    }, 0);
+    const mockCheckinCode = formatCheckinCodeFromNumber(maxChSeq + 1);
     const payload = {
       student_name: newApptForm.studentName.trim(),
       student_id: newApptForm.studentId.trim(),
@@ -883,7 +1315,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       consultation_type: newApptForm.consultationType.trim(),
       additional_comments: newApptForm.additionalComments.trim() || null,
       designation: newApptForm.designation,
-      checkin_code: checkinCode,
       checkin_valid_from: validFrom?.toISOString() || null,
       checkin_valid_until: validUntil?.toISOString() || null,
       workflow_status: HSO_WORKFLOW_STATUS.BOOKED,
@@ -917,7 +1348,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
             service: payload.service,
             status: "pending",
             workflowStatus: HSO_WORKFLOW_STATUS.BOOKED,
-            checkinCode,
+            checkinCode: mockCheckinCode,
             checkinValidFrom: payload.checkin_valid_from,
             checkinValidUntil: payload.checkin_valid_until,
             designation: payload.designation,
@@ -943,32 +1374,124 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     }
   };
 
+  const mergeAppointmentIntoList = useCallback((mapped) => {
+    setAppointmentsList((prev) => {
+      const i = prev.findIndex((a) => String(a.id) === String(mapped.id));
+      if (i === -1) return [mapped, ...prev];
+      const next = [...prev];
+      next[i] = { ...next[i], ...mapped };
+      return next;
+    });
+  }, []);
+
+  const resolveAppointmentForCheckin = useCallback(
+    async (codeNormalized) => {
+      if (isSupabaseConfigured() && supabase) {
+        const row = await fetchAppointmentByCheckinCode(supabase, codeNormalized);
+        if (row) {
+          let mapped = mapAppointmentRow(row);
+          mapped = await enrichAppointmentWithStudentName(supabase, mapped);
+          mergeAppointmentIntoList(mapped);
+          return mapped;
+        }
+        // Do not fall back to React state: after a DB reset/truncate, lists can still show ghost rows.
+        return null;
+      }
+      return appointmentsList.find((a) => normalizeCheckinCode(a.checkinCode) === codeNormalized) || null;
+    },
+    [appointmentsList, mergeAppointmentIntoList],
+  );
+
   const persistAppointmentWorkflow = async (appointmentId, patch) => {
     const rowId = String(appointmentId);
+
+    const mergePatchIntoList = () => {
+      setAppointmentsList((prev) =>
+        prev.map((a) => {
+          if (String(a.id) !== rowId) return a;
+          const merged = { ...a };
+          if (patch.workflow_status != null) merged.workflowStatus = patch.workflow_status;
+          if (patch.status != null) merged.status = String(patch.status).toLowerCase();
+          if (patch.checked_in_at !== undefined) merged.checkedInAt = patch.checked_in_at;
+          if (patch.queue_number !== undefined) merged.queueNumber = patch.queue_number;
+          if (patch.provider_queue !== undefined) merged.providerQueue = patch.provider_queue;
+          if (patch.nurse_vitals !== undefined) merged.nurseVitals = patch.nurse_vitals;
+          if (patch.nurse_assessment_completed_at !== undefined) {
+            merged.nurseCompletedAt = patch.nurse_assessment_completed_at;
+          }
+          if (patch.consultation_started_at !== undefined) {
+            merged.consultationStartedAt = patch.consultation_started_at;
+          }
+          if (patch.consultation_completed_at !== undefined) {
+            merged.consultationCompletedAt = patch.consultation_completed_at;
+          }
+          return merged;
+        }),
+      );
+    };
+
     try {
       if (isSupabaseConfigured() && supabase) {
         const { error } = await supabase.from("health_appointments").update(patch).eq("id", rowId);
         if (error) throw error;
       }
-      setAppointmentsList((prev) =>
-        prev.map((a) => (String(a.id) === rowId ? { ...a, ...patch, workflowStatus: patch.workflow_status ?? a.workflowStatus } : a)),
-      );
+      mergePatchIntoList();
       return true;
     } catch (err) {
+      const msg = String(err?.message || "");
+      const dupQueue =
+        msg.includes("health_queue_tickets") ||
+        msg.includes("ticket_code_key") ||
+        (msg.toLowerCase().includes("duplicate key") &&
+          (msg.includes("ticket_code") || msg.includes("health_queue")));
+
+      if (dupQueue && isSupabaseConfigured() && supabase) {
+        try {
+          const { error: rpcErr } = await supabase.rpc("clear_health_queue_ticket_for_appointment", {
+            p_appt: rowId,
+          });
+          if (rpcErr) {
+            console.warn("[persistAppointmentWorkflow] clear_health_queue_ticket_for_appointment:", rpcErr.message || rpcErr);
+          }
+
+          const { data: appt } = await supabase
+            .from("health_appointments")
+            .select("check_in_code, checkin_code")
+            .eq("id", rowId)
+            .maybeSingle();
+          const normalized = normalizeCheckinCode(appt?.check_in_code ?? appt?.checkin_code ?? "");
+          const variants = normalized ? checkinLookupVariants(normalized) : [];
+          if (variants.length) {
+            await supabase.from("health_queue_tickets").delete().in("ticket_code", variants);
+          }
+
+          const retryErr = (await supabase.from("health_appointments").update(patch).eq("id", rowId)).error;
+          if (!retryErr) {
+            mergePatchIntoList();
+            return true;
+          }
+        } catch {
+          /* fall through */
+        }
+        const detail = msg.length > 140 ? `${msg.slice(0, 137)}…` : msg;
+        showToast(
+          `Still blocked after cleanup (${detail}). Apply migration 20260523120000 in Supabase (RPC clear_health_queue_ticket_for_appointment), hard-refresh this page after clearing tables, or remove the stuck CH- row in health_queue_tickets.`,
+          { variant: "error" },
+        );
+        return false;
+      }
       showToast(err?.message || "Could not update queue workflow.", { variant: "error" });
       return false;
-    } finally {
-      // no-op
     }
   };
 
-  const verifyCheckinCode = () => {
-    const code = checkinCodeInput.trim();
+  const verifyCheckinCode = async () => {
+    const code = normalizeCheckinCode(checkinCodeInput);
     if (!code) {
       showToast("Enter check-in code.", { variant: "warning" });
       return;
     }
-    const target = appointmentsList.find((a) => a.checkinCode === code);
+    const target = await resolveAppointmentForCheckin(code);
     if (!target) {
       setCheckinPreview(null);
       showToast("Invalid check-in code.", { variant: "warning" });
@@ -978,19 +1501,88 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   };
 
   const handleCheckinByCode = async () => {
-    const target = checkinPreview;
-    if (!target) {
-      showToast("Verify appointment code first.", { variant: "warning" });
+    const code = normalizeCheckinCode(checkinCodeInput);
+    if (!code) {
+      showToast("Enter a valid check-in code or verify first.", { variant: "warning" });
       return;
     }
-    if (!nowInWindow(target.checkinValidFrom, target.checkinValidUntil)) {
-      await persistAppointmentWorkflow(target.id, { workflow_status: HSO_WORKFLOW_STATUS.EXPIRED_CODE });
+    const target =
+      checkinPreview && normalizeCheckinCode(checkinPreview.checkinCode) === code
+        ? checkinPreview
+        : await resolveAppointmentForCheckin(code);
+    if (!target) {
+      showToast("Enter a valid check-in code or verify first.", { variant: "warning" });
+      return;
+    }
+
+    const latest =
+      (isSupabaseConfigured() && supabase ? await resolveAppointmentForCheckin(code) : null) ||
+      appointmentsList.find((a) => String(a.id) === String(target.id)) ||
+      target;
+
+    const st = normalizeWorkflowStatus(latest.workflowStatus || latest.status);
+    const alreadyInVisitFlow = [
+      HSO_WORKFLOW_STATUS.CHECKED_IN,
+      HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE,
+      HSO_WORKFLOW_STATUS.NURSE_IN_PROGRESS,
+      HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER,
+      HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS,
+      HSO_WORKFLOW_STATUS.COMPLETED,
+      HSO_WORKFLOW_STATUS.CANCELLED,
+      HSO_WORKFLOW_STATUS.NO_SHOW,
+    ].includes(st);
+
+    if (alreadyInVisitFlow) {
+      showToast(
+        "This check-in code was already used for this visit. Use Nurse Queue to continue. For another visit, book a new appointment (new CH- code)—same student, new code is OK.",
+        { variant: "warning" },
+      );
+      return;
+    }
+
+    if (isSupabaseConfigured() && supabase) {
+      const variants = checkinLookupVariants(code);
+      if (variants.length) {
+        const { data: ticketRows, error: ticketErr } = await supabase
+          .from("health_queue_tickets")
+          .select("*")
+          .in("ticket_code", variants)
+          .limit(2);
+        if (!ticketErr && ticketRows?.length) {
+          const ticket = ticketRows[0];
+          const ticketApptId =
+            ticket.health_appointment_id ?? ticket.appointment_id ?? ticket.health_appointments_id ?? null;
+          if (ticketApptId && String(ticketApptId) === String(latest.id)) {
+            showToast(
+              "This check-in code already has a queue ticket. Continue in Nurse Queue—do not check in again.",
+              { variant: "warning" },
+            );
+            return;
+          }
+          if (ticketApptId) {
+            showToast(
+              "This ticket code is already linked to another visit. Use a new appointment and check-in code, or ask an administrator to review health_queue_tickets.",
+              { variant: "error" },
+            );
+            return;
+          }
+          showToast(
+            "A queue row already exists for this ticket code. If check-in is stuck, ask an admin to run the latest migrations (upsert on health_queue_tickets) or remove the orphan row.",
+            { variant: "warning" },
+          );
+          return;
+        }
+      }
+    }
+
+    if (!nowInWindow(latest.checkinValidFrom, latest.checkinValidUntil)) {
+      await persistAppointmentWorkflow(latest.id, { workflow_status: HSO_WORKFLOW_STATUS.EXPIRED_CODE });
       showToast("Check-in code expired or not active yet.", { variant: "warning" });
       return;
     }
-    const nextQueue = nurseQueueCounter + 1;
+    const nextQueue = maxQueueNumberForToday(appointmentsList, nurseVisitors) + 1;
     setNurseQueueCounter(nextQueue);
-    const ok = await persistAppointmentWorkflow(target.id, {
+    const ok = await persistAppointmentWorkflow(latest.id, {
       workflow_status: HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE,
       checked_in_at: new Date().toISOString(),
       queue_number: nextQueue,
@@ -1015,7 +1607,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       showToast("Please complete visitor details.", { variant: "warning" });
       return;
     }
-    const queueNumber = nurseQueueCounter + 1;
+    const queueNumber = maxQueueNumberForToday(appointmentsList, nurseVisitors) + 1;
     setNurseQueueCounter(queueNumber);
     setNurseVisitors((prev) => [
       ...prev,
@@ -1038,15 +1630,27 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       showToast("Start the station first.", { variant: "warning" });
       return;
     }
+    primeSpeechSynthesis();
+
     const nextRow = nurseWaitlistRows.find((r) => r.status === HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE);
     if (!nextRow) {
-      showToast("No pending students in queue.", { variant: "warning" });
+      const busy = nurseWaitlistRows.some((r) => r.status === HSO_WORKFLOW_STATUS.NURSE_IN_PROGRESS);
+      showToast(
+        busy
+          ? "No other patients are waiting. Complete the current patient first, then press Next to call the next ticket."
+          : "No pending students in queue.",
+        { variant: "warning" },
+      );
       return;
     }
     setActiveNurseSessionId(nextRow.id);
     setNurseTriageForm({ ...INITIAL_NURSE_TRIAGE });
+    const announceLine = buildStationAnnouncement("nurse", nextRow.queueNumber);
+    if (announceLine) void speakQueueAnnouncement(announceLine, { repeats: 3 });
+
+    let advancedOk = true;
     if (nextRow.source === "student") {
-      await persistAppointmentWorkflow(nextRow.appointmentId, {
+      advancedOk = await persistAppointmentWorkflow(nextRow.appointmentId, {
         workflow_status: HSO_WORKFLOW_STATUS.NURSE_IN_PROGRESS,
         consultation_started_at: new Date().toISOString(),
       });
@@ -1059,17 +1663,34 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         ),
       );
     }
+    if (!advancedOk) {
+      showToast("Could not update queue. Check connection or resolve queue ticket conflicts.", { variant: "error" });
+    }
   };
 
   const handleNurseComplete = async () => {
-    if (!activeNurseSession) return;
-    if (activeNurseSession.source === "student") {
-      await persistAppointmentWorkflow(activeNurseSession.appointmentId, {
-        workflow_status: HSO_WORKFLOW_STATUS.COMPLETED,
-        consultation_completed_at: new Date().toISOString(),
-        nurse_vitals: nurseTriageForm,
-        status: "completed",
+    if (!activeNurseSession) {
+      showToast("No active patient session. Press Next to call a patient, or refresh if the screen is out of sync.", {
+        variant: "warning",
       });
+      return;
+    }
+    let activityAction = "Completed triage";
+    if (activeNurseSession.source === "student") {
+      const apptRow = appointmentsList.find((a) => String(a.id) === String(activeNurseSession.appointmentId));
+      const rawDes = String(apptRow?.designation || "physician").toLowerCase();
+      const providerTarget = rawDes === "dentist" ? "dentist" : "physician";
+      activityAction = `Vitals done → ${providerTarget} queue`;
+      const ok = await persistAppointmentWorkflow(activeNurseSession.appointmentId, {
+        workflow_status: HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER,
+        provider_queue: providerTarget,
+        nurse_vitals: nurseTriageForm,
+        nurse_assessment_completed_at: new Date().toISOString(),
+      });
+      if (!ok) {
+        showToast("Could not save triage. Fix any queue error shown earlier, then try again.", { variant: "error" });
+        return;
+      }
     } else {
       setNurseVisitors((prev) => prev.filter((v) => String(v.id) !== String(activeNurseSession.appointmentId)));
       setVisitorArchive((prev) => [
@@ -1085,7 +1706,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       id: `n-complete-${Date.now()}`,
       queueNumber: activeNurseSession.queueNumber,
       name: activeNurseSession.name,
-      action: "Completed triage",
+      action: activityAction,
       at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     });
     setActiveNurseSessionId(null);
@@ -1123,52 +1744,336 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     setNurseTriageForm({ ...INITIAL_NURSE_TRIAGE });
   };
 
-  const startProviderConsultation = async (appt) => {
-    await persistAppointmentWorkflow(appt.id, {
+  const handleNurseQueueStationStart = () => {
+    setNurseStationOnline(true);
+    showToast("Nurse Queue is now Online", { variant: "success" });
+  };
+
+  const handleNurseQueueStationClose = () => {
+    setNurseStationOnline(false);
+    setActiveNurseSessionId(null);
+    showToast("Nurse Queue is now Offline", { variant: "info" });
+  };
+
+  const startProviderConsultation = useCallback(async (appt) => {
+    if (!appt?.id) return;
+    primeSpeechSynthesis();
+    const pq = String(appt.providerQueue ?? appt.designation ?? "").toLowerCase();
+    const stationKey = pq === "dentist" ? "dentist" : "physician";
+    const providerLine = buildStationAnnouncement(stationKey, appt.queueNumber);
+    if (providerLine) void speakQueueAnnouncement(providerLine, { repeats: 3 });
+
+    const ok = await persistAppointmentWorkflow(appt.id, {
       workflow_status: HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS,
       consultation_started_at: new Date().toISOString(),
     });
-  };
-
-  const completeProviderConsultation = async (appt) => {
-    const ok = await persistAppointmentWorkflow(appt.id, {
-      workflow_status: HSO_WORKFLOW_STATUS.COMPLETED,
-      consultation_completed_at: new Date().toISOString(),
-      status: "completed",
-    });
-    if (ok) {
-      const row = {
-        id: `from-appt-${appt.id}-${Date.now()}`,
-        student: appt.student,
-        studentId: appt.studentId,
-        type: "Scheduled",
-        followup: false,
-        reason: appt.consultationType || appt.purpose || "Consultation",
-        date: appt.date || formatVisitDateLabel(new Date()),
-        time: appt.time || "—",
-        doctor: userName,
-        status: "completed",
-        bloodPressure: appt.nurseVitals?.bloodPressure || "",
-        temperature: appt.nurseVitals?.temperature || "",
-        heartRate: appt.nurseVitals?.pulse || "",
-        diagnosis: "",
-        treatment: "",
-      };
-      setConsultationRows((prev) => [row, ...prev]);
-      showToast("Consultation completed and logged.", { variant: "success" });
+    if (!ok) {
+      showToast("Could not start consultation in the database.", { variant: "error" });
     }
-  };
+  }, []);
+
+  /** After a visit is completed, keep Open Chart prescription text aligned with that visit. */
+  const syncChartPrescriptionToMedicalRecord = useCallback(
+    async ({ studentId, studentLabel, recordId, prescriptionText }) => {
+      const sid = String(studentId || "").trim();
+      const rxText = String(prescriptionText ?? "").trim();
+      const displayName = String(studentLabel || "").trim() || `Student ID ${sid}`;
+      if (!sid) return;
+      if (!isSupabaseConfigured() || !supabase) {
+        setHealthRecordsRows((prev) => {
+          const i = prev.findIndex((r) => normalizeStudentIdMatch(r.studentId) === normalizeStudentIdMatch(sid));
+          if (i < 0) return prev;
+          const next = [...prev];
+          next[i] = { ...next[i], physicianPrescriptionNotes: rxText };
+          return next;
+        });
+        return;
+      }
+      const rid = recordId && /^[0-9a-f-]{36}$/i.test(String(recordId)) ? String(recordId) : null;
+      try {
+        if (rid) {
+          const { data, error } = await supabase
+            .from("medical_records")
+            .update({ physician_prescription_notes: rxText || null })
+            .eq("id", rid)
+            .select("*")
+            .single();
+          if (error) throw error;
+          if (data) {
+            const mapped = mapMedicalRecordRow(data);
+            setHealthRecordsRows((prev) => {
+              const i = prev.findIndex((r) => String(r.id) === rid);
+              if (i < 0) return [mapped, ...prev];
+              const next = [...prev];
+              next[i] = mapped;
+              return next;
+            });
+          }
+        } else {
+          const rd = new Date().toISOString().slice(0, 10);
+          const insertPayload = {
+            student_id: sid,
+            student_name: displayName,
+            program: "—",
+            blood_type: "—",
+            allergies: "None",
+            last_checkup: rd,
+            email: "—",
+            phone: "—",
+            emergency_contact: "—",
+            chronic_conditions: "None",
+            medications: "None",
+            weight_kg: "—",
+            height_cm: "—",
+            blood_pressure: "—",
+            notes: "",
+            badges: ["cleared"],
+            physician_prescription_notes: rxText || null,
+          };
+          const { data, error } = await supabase.from("medical_records").insert(insertPayload).select("*").single();
+          if (error) throw error;
+          if (data) {
+            const mapped = mapMedicalRecordRow(data);
+            setHealthRecordsRows((prev) => {
+              const i = prev.findIndex((r) => normalizeStudentIdMatch(r.studentId) === normalizeStudentIdMatch(sid));
+              if (i < 0) return [mapped, ...prev];
+              const next = [...prev];
+              next[i] = mapped;
+              return next;
+            });
+          }
+        }
+      } catch (e) {
+        console.error(e);
+        showToast(e?.message || "Consultation saved but chart prescription could not be updated.", {
+          variant: "warning",
+        });
+      }
+    },
+    [supabase],
+  );
+
+  /**
+   * When the physician saves the chart with prescription text, mirror that into `health_consultations`
+   * so Patient Records → Prescription shows a dated row (not only the medical_record field).
+   * Replaces the previous "Chart save" row for this student so repeated saves update one list entry.
+   */
+  const logPrescriptionConsultationFromChartSave = useCallback(
+    async ({ studentId, studentLabel, medicalRecordId, prescriptionText, serviceLabel }) => {
+      const rx = String(prescriptionText || "").trim();
+      const sid = String(studentId || "").trim();
+      if (!rx || !sid) return;
+      const name = String(studentLabel || "").trim() || `Student ID ${sid}`;
+      const recordId =
+        medicalRecordId && /^[0-9a-f-]{36}$/i.test(String(medicalRecordId)) ? String(medicalRecordId) : null;
+      const service = String(serviceLabel || "").trim() || "General Check-up";
+
+      const isPriorChartSaveRow = (r) =>
+        normalizeStudentIdMatch(r.studentId) === normalizeStudentIdMatch(sid) &&
+        String(r.reason || "").trim() === CHART_SAVE_CHIEF_COMPLAINT;
+
+      const removePriorChartSaveRows = (rows) => rows.filter((r) => !isPriorChartSaveRow(r));
+
+      if (!isSupabaseConfigured() || !supabase) {
+        const now = new Date();
+        const localRow = {
+          id: `local-chart-${sid}-${Date.now()}`,
+          student_name: name,
+          student_id: sid,
+          visit_type: "scheduled",
+          visit_date: now.toISOString().slice(0, 10),
+          visit_time: now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }),
+          chief_complaint: CHART_SAVE_CHIEF_COMPLAINT,
+          consultation_service: service,
+          treatment: rx,
+          prescription_detail: rx,
+          status: "completed",
+          attended_by: userName,
+          created_at: now.toISOString(),
+          medical_record_id: recordId,
+        };
+        setConsultationRows((prev) => [mapConsultationRow(localRow), ...removePriorChartSaveRows(prev)]);
+        return;
+      }
+
+      const now = new Date();
+      try {
+        await supabase
+          .from("health_consultations")
+          .delete()
+          .eq("student_id", sid)
+          .eq("chief_complaint", CHART_SAVE_CHIEF_COMPLAINT);
+        const payload = {
+          student_name: name,
+          student_id: sid,
+          visit_type: "scheduled",
+          visit_date: now.toISOString().slice(0, 10),
+          visit_time: now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }),
+          chief_complaint: CHART_SAVE_CHIEF_COMPLAINT,
+          consultation_service: service,
+          blood_pressure: null,
+          temperature_c: null,
+          heart_rate_bpm: null,
+          diagnosis: null,
+          treatment: rx,
+          prescription_detail: rx,
+          status: "completed",
+          attended_by: userName,
+          medical_record_id: recordId,
+        };
+        const { data, error } = await supabase.from("health_consultations").insert(payload).select("*").single();
+        if (error) throw error;
+        if (data) {
+          setConsultationRows((prev) => [mapConsultationRow(data), ...removePriorChartSaveRows(prev)]);
+        }
+      } catch (e) {
+        console.error(e);
+        showToast(
+          formatHealthConsultationsDbError(
+            e,
+            "Chart was saved; prescription timeline row could not be written.",
+          ),
+          { variant: "warning" },
+        );
+      }
+    },
+    [supabase, userName],
+  );
+
+  const completeProviderConsultation = useCallback(
+    async (appt) => {
+      if (!appt?.id) return;
+      const ok = await persistAppointmentWorkflow(appt.id, {
+        workflow_status: HSO_WORKFLOW_STATUS.COMPLETED,
+        consultation_completed_at: new Date().toISOString(),
+        status: "completed",
+      });
+      if (!ok) return;
+
+      const sidNorm = normalizeStudentIdMatch(appt.studentId);
+      const rec = healthRecordsRows.find((r) => normalizeStudentIdMatch(r.studentId) === sidNorm);
+      const now = new Date();
+      const serviceLabel = String(appt.consultationType || appt.purpose || appt.service || "Consultation").trim();
+      const rx = String(physicianConsultForm.prescription || "").trim();
+      const dx = String(physicianConsultForm.diagnosis || "").trim();
+      const recordId = rec?.id && /^[0-9a-f-]{36}$/i.test(String(rec.id)) ? rec.id : null;
+      const studentDisplay = String(appt.studentLabel || appt.student || "").trim() || `Student ID ${appt.studentId}`;
+      const studentIdForDb = String(appt.studentId ?? "").trim();
+
+      let consultationLogged = false;
+      if (isSupabaseConfigured() && supabase) {
+        try {
+          const payload = {
+            student_name: studentDisplay,
+            student_id: studentIdForDb,
+            visit_type: "scheduled",
+            visit_date: now.toISOString().slice(0, 10),
+            visit_time:
+              appt.time?.trim() ||
+              now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }),
+            chief_complaint: serviceLabel,
+            consultation_service: serviceLabel,
+            blood_pressure: appt.nurseVitals?.bloodPressure || null,
+            temperature_c: appt.nurseVitals?.temperature || null,
+            heart_rate_bpm: appt.nurseVitals?.pulse || null,
+            diagnosis: dx || null,
+            treatment: rx || null,
+            prescription_detail: rx || null,
+            status: "completed",
+            attended_by: userName,
+            medical_record_id: recordId,
+          };
+          const { data, error } = await supabase.from("health_consultations").insert(payload).select("*").single();
+          if (error) throw error;
+          setConsultationRows((prev) => [mapConsultationRow(data), ...prev]);
+          await syncChartPrescriptionToMedicalRecord({
+            studentId: studentIdForDb,
+            studentLabel: studentDisplay,
+            recordId,
+            prescriptionText: rx,
+          });
+          consultationLogged = true;
+        } catch (e) {
+          console.error(e);
+          showToast(
+            formatHealthConsultationsDbError(
+              e,
+              "Visit marked complete, but the consultation log failed to save.",
+            ),
+            { variant: "warning" },
+          );
+        }
+      } else {
+        const fallbackRow = {
+          id: `local-${appt.id}-${Date.now()}`,
+          student_name: appt.student || appt.studentLabel,
+          student_id: studentIdForDb,
+          visit_type: "scheduled",
+          visit_date: now.toISOString().slice(0, 10),
+          visit_time: appt.time,
+          chief_complaint: serviceLabel,
+          consultation_service: serviceLabel,
+          blood_pressure: appt.nurseVitals?.bloodPressure,
+          temperature_c: appt.nurseVitals?.temperature,
+          heart_rate_bpm: appt.nurseVitals?.pulse,
+          diagnosis: dx,
+          treatment: rx,
+          prescription_detail: rx,
+          status: "completed",
+          attended_by: userName,
+          created_at: now.toISOString(),
+          medical_record_id: recordId,
+        };
+        setConsultationRows((prev) => [mapConsultationRow(fallbackRow), ...prev]);
+        await syncChartPrescriptionToMedicalRecord({
+          studentId: studentIdForDb,
+          studentLabel: studentDisplay,
+          recordId,
+          prescriptionText: rx,
+        });
+        consultationLogged = true;
+      }
+      if (consultationLogged) {
+        showToast("Consultation completed, logged, and chart prescription updated.", { variant: "success" });
+        if (
+          physicianChartOpen &&
+          normalizeStudentIdMatch(physicianChartStudentId) === sidNorm
+        ) {
+          setPhysicianChartDraft((d) => ({ ...d, prescriptionNotes: rx }));
+        }
+      }
+    },
+    [
+      healthRecordsRows,
+      physicianConsultForm,
+      userName,
+      supabase,
+      syncChartPrescriptionToMedicalRecord,
+      physicianChartOpen,
+      physicianChartStudentId,
+    ],
+  );
 
   const saveNewReferral = async () => {
-    const miss = [];
-    if (!newReferralForm.studentName.trim()) miss.push("Student name");
-    if (!newReferralForm.studentId.trim()) miss.push("Student ID");
-    if (!newReferralForm.email.trim()) miss.push("Email");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newReferralForm.email.trim())) {
-      showToast("Enter a valid email address.", { variant: "warning" });
+    const sid = String(newReferralForm.studentId || "").trim();
+    if (!isCompleteReferralStudentId(sid)) {
+      showToast(
+        "No record found for this student ID.",
+        { variant: "warning" },
+      );
       return;
     }
-    if (!newReferralForm.phone.trim()) miss.push("Contact number");
+    if (referralStudentLookup.status !== "found") {
+      showToast("Wait until student details load from the roster, or fix the Student ID.", { variant: "warning" });
+      return;
+    }
+    const miss = [];
+    if (!newReferralForm.studentName.trim()) miss.push("Student name");
+    const emailTrim = newReferralForm.email.trim();
+    if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+      showToast("School email from roster looks invalid.", { variant: "warning" });
+      return;
+    }
     if (!newReferralForm.receivingOffice.trim()) miss.push("Receiving office");
     else if (!HS_REFERRAL_OFFICES.includes(newReferralForm.receivingOffice)) {
       showToast("Receiving office must be DO or SDAO.", { variant: "warning" });
@@ -1186,9 +2091,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       reference_id: refId,
       student_name: newReferralForm.studentName.trim(),
       student_id: newReferralForm.studentId.trim(),
-      program: null,
+      program: newReferralForm.program.trim() || null,
       student_email: newReferralForm.email.trim() || null,
-      student_phone: newReferralForm.phone.trim() || null,
+      student_phone: null,
       receiving_office: newReferralForm.receivingOffice,
       referring_office: "Health Services Office",
       reason: newReferralForm.reason.trim(),
@@ -1214,9 +2119,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
             referenceId: refId,
             student: payload.student_name,
             studentId: payload.student_id,
-            program: "—",
+            program: payload.program || "—",
             email: payload.student_email || "—",
-            phone: payload.student_phone || "—",
+            phone: "—",
             office: payload.receiving_office,
             reason: payload.reason,
             observations: "—",
@@ -1234,6 +2139,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       }
       setNewReferralOpen(false);
       setNewReferralForm({ ...INITIAL_NEW_REFERRAL });
+      setReferralStudentLookup({ status: "idle", message: "" });
     } catch (err) {
       console.error(err);
       showToast(err?.message || "Could not send referral.", { variant: "error" });
@@ -1241,6 +2147,60 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       setReferralSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (!newReferralOpen) {
+      setReferralStudentLookup({ status: "idle", message: "" });
+      return;
+    }
+    const id = String(newReferralForm.studentId || "").trim();
+    if (isCompleteReferralStudentId(id)) return;
+    setNewReferralForm((f) => ({ ...f, studentName: "", email: "", program: "" }));
+    setReferralStudentLookup({ status: "idle", message: "" });
+  }, [newReferralOpen, newReferralForm.studentId]);
+
+  useEffect(() => {
+    if (!newReferralOpen || !isSupabaseConfigured() || !supabase) return;
+    const id = String(newReferralForm.studentId || "").trim();
+    if (!isCompleteReferralStudentId(id)) return;
+
+    let cancelled = false;
+    setReferralStudentLookup({ status: "loading", message: "" });
+
+    const t = setTimeout(async () => {
+      try {
+        const row = await fetchStudentRowForReferral(supabase, id);
+        if (cancelled) return;
+        if (!row) {
+          setNewReferralForm((f) => ({ ...f, studentName: "", email: "", program: "" }));
+          setReferralStudentLookup({
+            status: "not_found",
+            message: "No student found with this ID in the roster.",
+          });
+          return;
+        }
+        setNewReferralForm((f) => ({
+          ...f,
+          studentName: row.studentName || "",
+          email: row.schoolEmail || "",
+          program: row.program || "",
+        }));
+        setReferralStudentLookup({ status: "found", message: "" });
+      } catch (e) {
+        if (!cancelled) {
+          setReferralStudentLookup({
+            status: "error",
+            message: e?.message || "Could not load student.",
+          });
+        }
+      }
+    }, 420);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [newReferralOpen, newReferralForm.studentId, supabase]);
 
   const handleHsoNewDocumentRequestSubmit = async (payload) => {
     if (!canInterOfficeDocRequest) return;
@@ -1422,29 +2382,549 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     [consultationRows],
   );
 
-  const physicianPrescriptionRows = useMemo(
-    () =>
-      consultationRows
-        .filter((row) => String(row.prescription || "").trim())
-        .map((row, index) => ({
-          id: row.id || `rx-${index}`,
-          patient: row.student || row.patient || "—",
-          drug: row.prescription,
-          instructions: row.notes || "—",
-          date: row.date || "—",
-          status: row.status || "active",
-        })),
-    [consultationRows],
-  );
+  const certificatesByStudent = useMemo(() => {
+    const groups = new Map();
+    for (const row of consultationRows) {
+      if (!String(row.certificateReason || row.certReason || "").trim()) continue;
+      const sid = String(row.studentId || "").trim();
+      if (!sid) continue;
+      const name = String(row.student || "").trim() || `Student ID ${sid}`;
+      if (!groups.has(sid)) groups.set(sid, { studentId: sid, studentName: name, entries: [] });
+      groups.get(sid).entries.push(row);
+    }
+    for (const g of groups.values()) {
+      g.entries.sort((a, b) => {
+        const ta = new Date(a.consultationCreatedAt || 0).getTime();
+        const tb = new Date(b.consultationCreatedAt || 0).getTime();
+        return tb - ta;
+      });
+    }
+    return [...groups.values()].sort((a, b) => a.studentName.localeCompare(b.studentName));
+  }, [consultationRows]);
+
+  /** Nurse Patient Records: one row per student; visits from all health_consultations (physician + dentist) plus medical_records dates */
+  const nursePatientRecordsRoster = useMemo(() => {
+    const m = new Map();
+
+    for (const r of healthRecordsRows) {
+      const k = normalizeStudentIdMatch(r.studentId);
+      if (!k) continue;
+      const name = String(r.student || "").trim();
+      const prog = String(r.program || "").trim();
+      const ld = recordRowLastDate(r);
+      const ms = ld && !Number.isNaN(ld.getTime()) ? ld.getTime() : 0;
+      const prev = m.get(k);
+      if (!prev) {
+        m.set(k, { studentId: k, studentName: name || "", program: prog, lastVisitMs: ms });
+      } else {
+        if (name) prev.studentName = name;
+        if (prog) prev.program = prog;
+        if (ms > prev.lastVisitMs) prev.lastVisitMs = ms;
+      }
+    }
+
+    for (const c of consultationRows) {
+      const k = normalizeStudentIdMatch(c.studentId);
+      if (!k) continue;
+      const name = String(c.student || "").trim();
+      const cms = new Date(c.consultationCreatedAt || 0).getTime();
+      const valid = Number.isFinite(cms) ? cms : 0;
+      const prev = m.get(k);
+      if (!prev) {
+        m.set(k, { studentId: k, studentName: name || "", program: "", lastVisitMs: valid });
+      } else {
+        if (name) prev.studentName = name;
+        if (valid > prev.lastVisitMs) prev.lastVisitMs = valid;
+      }
+    }
+
+    const rows = [...m.values()].map((row) => {
+      const progFromStudent = studentProgramsByStudentId.get(normalizeStudentIdMatch(row.studentId));
+      const program =
+        (progFromStudent && String(progFromStudent).trim()) || String(row.program || "").trim() || "—";
+      const lastVisit =
+        row.lastVisitMs > 0
+          ? new Date(row.lastVisitMs).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })
+          : "—";
+      return {
+        studentId: row.studentId,
+        studentName: row.studentName.trim() || `Student ID ${row.studentId}`,
+        program,
+        lastVisit,
+        lastVisitMs: row.lastVisitMs,
+      };
+    });
+
+    rows.sort((a, b) => {
+      if (b.lastVisitMs !== a.lastVisitMs) return b.lastVisitMs - a.lastVisitMs;
+      return a.studentName.localeCompare(b.studentName);
+    });
+    return rows;
+  }, [healthRecordsRows, consultationRows, studentProgramsByStudentId]);
+
+  const nursePatientRecordsFiltered = useMemo(() => {
+    const q = String(recordsQuery || "").trim().toLowerCase();
+    if (!q) return nursePatientRecordsRoster;
+    return nursePatientRecordsRoster.filter(
+      (row) =>
+        row.studentId.toLowerCase().includes(q) ||
+        row.studentName.toLowerCase().includes(q) ||
+        String(row.program || "").toLowerCase().includes(q),
+    );
+  }, [nursePatientRecordsRoster, recordsQuery]);
 
   const workflowRows = useMemo(
     () =>
-      appointmentsList.map((a) => ({
-        ...a,
-        workflowStatus: normalizeWorkflowStatus(a.workflowStatus || a.status),
-      })),
+      appointmentsList.map((a) => {
+        const studentLabel = appointmentStudentLabel(a) || "Patient";
+        return {
+          ...a,
+          workflowStatus: normalizeWorkflowStatus(a.workflowStatus || a.status),
+          reason: workflowAppointmentReason(a),
+          studentLabel,
+        };
+      }),
     [appointmentsList],
   );
+
+  const physicianChartVitalsDisplay = useMemo(() => {
+    const sid = String(physicianChartStudentId || "").trim();
+    const dash = (x) => (x != null && String(x).trim() !== "" ? String(x).trim() : "—");
+    if (!sid) {
+      return {
+        bloodPressure: "—",
+        pulse: "—",
+        temperature: "—",
+        heightCm: "—",
+        weightKg: "—",
+        spo2: "—",
+      };
+    }
+    const candidates = appointmentsList.filter(
+      (a) =>
+        String(a.studentId) === sid &&
+        a.nurseVitals &&
+        typeof a.nurseVitals === "object" &&
+        Object.values(a.nurseVitals).some((val) => String(val ?? "").trim() !== ""),
+    );
+    let v = null;
+    if (candidates.length) {
+      const sorted = [...candidates].sort((a, b) => {
+        const ta = new Date(a.nurseCompletedAt || a.checkedInAt || 0).getTime();
+        const tb = new Date(b.nurseCompletedAt || b.checkedInAt || 0).getTime();
+        return tb - ta;
+      });
+      v = normalizeNurseVitalsDisplay(sorted[0].nurseVitals);
+    }
+    const rec = healthRecordsRows.find((r) => String(r.studentId) === sid);
+    return {
+      bloodPressure: dash(v?.bloodPressure),
+      pulse: dash(v?.pulse),
+      temperature: dash(v?.temperature),
+      heightCm: dash(v?.heightCm || rec?.heightCm),
+      weightKg: dash(v?.weightKg || rec?.weightKg),
+      spo2: dash(v?.spo2),
+    };
+  }, [appointmentsList, healthRecordsRows, physicianChartStudentId]);
+
+  const clinicalLatestPrescriptionSnapshot = useMemo(() => {
+    const sid = physicianChartStudentId;
+    if (!sid) return { text: "", at: 0, detail: "", source: "" };
+    const rec =
+      physicianChartRecordSnapshot ||
+      healthRecordsRows.find((r) => normalizeStudentIdMatch(r.studentId) === normalizeStudentIdMatch(sid)) ||
+      null;
+    return latestPrescriptionSnapshot(sid, consultationRows, rec);
+  }, [physicianChartStudentId, physicianChartRecordSnapshot, healthRecordsRows, consultationRows]);
+
+  const clinicalLatestRxTimestampLabel = useMemo(() => {
+    const at = clinicalLatestPrescriptionSnapshot.at;
+    if (!at) return "";
+    return new Date(at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  }, [clinicalLatestPrescriptionSnapshot.at]);
+
+  const clinicalChartDocumentsSorted = useMemo(() => {
+    const list = Array.isArray(physicianChartAttachments) ? [...physicianChartAttachments] : [];
+    return list.sort((a, b) => {
+      const ta = new Date(a.uploadedAt || 0).getTime();
+      const tb = new Date(b.uploadedAt || 0).getTime();
+      return tb - ta;
+    });
+  }, [physicianChartAttachments]);
+
+  const savePhysicianChart = useCallback(async () => {
+    const sid = String(physicianChartStudentId ?? "").trim();
+    if (!sid) return;
+    if (!supabase || !isSupabaseConfigured()) {
+      showToast("Supabase is not configured.", { variant: "error" });
+      return;
+    }
+    const roster = physicianChartRoster;
+    const appt = appointmentsList.find((a) => String(a.studentId) === sid);
+    const wf = workflowRows.find((w) => String(w.studentId) === sid);
+    const displayName =
+      String(wf?.studentLabel || appt?.student || roster?.fullName || "").trim() || `Student ID ${sid}`;
+    const patch = {
+      physician_medical_history_json: physicianChartDraft.medicalHistory,
+      physician_physical_examination_json: physicianChartDraft.physicalExam,
+      physician_prescription_notes: physicianChartDraft.prescriptionNotes,
+      physician_documents_notes: physicianChartDraft.documentsNotes,
+      physician_documents_attachments: physicianChartAttachments,
+    };
+    const rxNotes = String(physicianChartDraft.prescriptionNotes || "").trim();
+    setPhysicianChartSaving(true);
+    try {
+      let savedMedicalRecordId = null;
+      const existing = healthRecordsRows.find((r) => normalizeStudentIdMatch(r.studentId) === normalizeStudentIdMatch(sid));
+      if (existing?.id) {
+        const { data, error } = await supabase
+          .from("medical_records")
+          .update(patch)
+          .eq("id", existing.id)
+          .select("*")
+          .single();
+        if (error) throw error;
+        const mapped = mapMedicalRecordRow(data);
+        savedMedicalRecordId = mapped?.id || existing.id;
+        setHealthRecordsRows((prev) => {
+          const i = prev.findIndex((r) => String(r.id) === String(existing.id));
+          if (i < 0) return [mapped, ...prev];
+          const next = [...prev];
+          next[i] = mapped;
+          return next;
+        });
+      } else {
+        const insertPayload = {
+          student_id: sid,
+          student_name: displayName,
+          program: "—",
+          blood_type: "—",
+          allergies: "None",
+          last_checkup: new Date().toISOString().slice(0, 10),
+          email: "—",
+          phone: roster?.contactNo || "—",
+          emergency_contact: "—",
+          chronic_conditions: "None",
+          medications: "None",
+          weight_kg: "—",
+          height_cm: "—",
+          blood_pressure: "—",
+          notes: "",
+          badges: ["cleared"],
+          ...patch,
+        };
+        const { data, error } = await supabase.from("medical_records").insert(insertPayload).select("*").single();
+        if (error) throw error;
+        const mapped = mapMedicalRecordRow(data);
+        savedMedicalRecordId = mapped?.id || null;
+        setHealthRecordsRows((prev) => [mapped, ...prev]);
+      }
+      if (rxNotes) {
+        const wfRow = workflowRows.find((w) => normalizeStudentIdMatch(w.studentId) === normalizeStudentIdMatch(sid));
+        const apptRow = appointmentsList.find(
+          (a) => normalizeStudentIdMatch(a.studentId) === normalizeStudentIdMatch(sid),
+        );
+        const chartServiceLabel =
+          String(
+            wfRow?.consultationType ||
+              wfRow?.purpose ||
+              wfRow?.service ||
+              apptRow?.consultationType ||
+              apptRow?.purpose ||
+              apptRow?.service ||
+              "General Check-up",
+          ).trim() || "General Check-up";
+        await logPrescriptionConsultationFromChartSave({
+          studentId: sid,
+          studentLabel: displayName,
+          medicalRecordId: savedMedicalRecordId,
+          prescriptionText: rxNotes,
+          serviceLabel: chartServiceLabel,
+        });
+      }
+      // Working copy: prescription text lives in health_consultations + Patient Records; clear MR draft field.
+      if (savedMedicalRecordId && rxNotes) {
+        try {
+          const { data: clearedRec, error: clearErr } = await supabase
+            .from("medical_records")
+            .update({ physician_prescription_notes: null })
+            .eq("id", savedMedicalRecordId)
+            .select("*")
+            .single();
+          if (!clearErr && clearedRec) {
+            const mappedClr = mapMedicalRecordRow(clearedRec);
+            setHealthRecordsRows((prev) => {
+              const i = prev.findIndex((r) => String(r.id) === String(savedMedicalRecordId));
+              if (i < 0) return [mappedClr, ...prev];
+              const next = [...prev];
+              next[i] = mappedClr;
+              return next;
+            });
+          }
+        } catch (clearEx) {
+          console.warn(clearEx);
+        }
+      }
+      setPhysicianChartDraft((d) => ({
+        ...d,
+        prescriptionNotes: "",
+        documentsNotes: "",
+      }));
+      setPhysicianChartAttachments([]);
+      showToast("Chart saved.", { variant: "success" });
+    } catch (err) {
+      console.error(err);
+      showToast(err?.message || "Could not save chart.", { variant: "error" });
+    } finally {
+      setPhysicianChartSaving(false);
+    }
+  }, [
+    appointmentsList,
+    healthRecordsRows,
+    physicianChartAttachments,
+    physicianChartDraft,
+    physicianChartRoster,
+    physicianChartStudentId,
+    supabase,
+    workflowRows,
+    logPrescriptionConsultationFromChartSave,
+    appointmentsList,
+    workflowRows,
+  ]);
+
+  const handlePhysicianChartDocumentUpload = useCallback(
+    async (e) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      if (!supabase || !isSupabaseConfigured()) {
+        showToast("Supabase is not configured.", { variant: "error" });
+        return;
+      }
+      const sid = String(physicianChartStudentId ?? "").trim();
+      if (!sid) return;
+      setPhysicianChartDocUploading(true);
+      try {
+        const meta = await uploadPhysicianChartDocument(supabase, sid, file);
+        const next = [...physicianChartAttachments, meta];
+        setPhysicianChartAttachments(next);
+        const existing = healthRecordsRows.find((r) => String(r.studentId) === sid);
+        if (existing?.id) {
+          const { data, error } = await supabase
+            .from("medical_records")
+            .update({ physician_documents_attachments: next })
+            .eq("id", existing.id)
+            .select("*")
+            .single();
+          if (error) throw error;
+          const mapped = mapMedicalRecordRow(data);
+          setHealthRecordsRows((prev) => {
+            const i = prev.findIndex((r) => String(r.id) === String(existing.id));
+            if (i < 0) return [mapped, ...prev];
+            const copy = [...prev];
+            copy[i] = mapped;
+            return copy;
+          });
+        }
+        showToast("File attached.", { variant: "success" });
+      } catch (err) {
+        console.error(err);
+        showToast(err?.message || "Could not upload file.", { variant: "error" });
+      } finally {
+        setPhysicianChartDocUploading(false);
+      }
+    },
+    [physicianChartAttachments, physicianChartStudentId, healthRecordsRows, supabase],
+  );
+
+  const handleRemovePhysicianChartDocument = useCallback(
+    async (storagePath) => {
+      if (!supabase || !isSupabaseConfigured()) return;
+      const sid = String(physicianChartStudentId ?? "").trim();
+      const next = physicianChartAttachments.filter((a) => a.path !== storagePath);
+      try {
+        await deletePhysicianChartDocument(supabase, storagePath);
+        setPhysicianChartAttachments(next);
+        const existing = healthRecordsRows.find((r) => String(r.studentId) === sid);
+        if (existing?.id) {
+          const { data, error } = await supabase
+            .from("medical_records")
+            .update({ physician_documents_attachments: next })
+            .eq("id", existing.id)
+            .select("*")
+            .single();
+          if (error) throw error;
+          const mapped = mapMedicalRecordRow(data);
+          setHealthRecordsRows((prev) => {
+            const i = prev.findIndex((r) => String(r.id) === String(existing.id));
+            if (i < 0) return [mapped, ...prev];
+            const copy = [...prev];
+            copy[i] = mapped;
+            return copy;
+          });
+        }
+        showToast("Attachment removed.", { variant: "success" });
+      } catch (err) {
+        console.error(err);
+        showToast(err?.message || "Could not remove file.", { variant: "error" });
+      }
+    },
+    [physicianChartAttachments, physicianChartStudentId, healthRecordsRows, supabase],
+  );
+
+  const issuePhysicianCertificate = useCallback(async () => {
+    const active = workflowRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS);
+    if (!active?.studentId) {
+      showToast("Start a consultation with a patient first.", { variant: "warning" });
+      return;
+    }
+    const reason = String(physicianConsultForm.certReason || "").trim();
+    if (!reason) {
+      showToast("Enter a certificate reason.", { variant: "warning" });
+      return;
+    }
+    if (!supabase || !isSupabaseConfigured()) {
+      showToast("Supabase is not configured.", { variant: "error" });
+      return;
+    }
+    const sid = String(active.studentId);
+    const name = String(active.studentLabel || active.student || "").trim() || `Student ID ${sid}`;
+    const from = String(physicianConsultForm.certFrom || "").trim();
+    const until = String(physicianConsultForm.certUntil || "").trim();
+    const period = from && until ? `${from} – ${until}` : from || until || "—";
+    const now = new Date();
+    const attend = String(session?.name || "").trim() || "Physician";
+    const payload = {
+      student_name: name,
+      student_id: sid,
+      visit_type: "scheduled",
+      visit_time: now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }),
+      visit_date: now.toISOString().slice(0, 10),
+      consultation_service: "Medical Certificate Request",
+      chief_complaint: reason,
+      certificate_reason: reason,
+      certificate_period: period,
+      certificate_status: "issued",
+      diagnosis: String(physicianConsultForm.certRecommendation || "").trim() || null,
+      treatment: null,
+      status: "completed",
+      attended_by: attend,
+    };
+    try {
+      const { data, error } = await supabase.from("health_consultations").insert(payload).select("*").single();
+      if (error) throw error;
+      setConsultationRows((prev) => [mapConsultationRow(data), ...prev]);
+      setPhysicianCertModalOpen(false);
+      showToast("Medical certificate recorded.", { variant: "success" });
+    } catch (err) {
+      console.error(err);
+      showToast(
+        formatHealthConsultationsDbError(err, "Could not issue certificate."),
+        { variant: "error" },
+      );
+    }
+  }, [physicianConsultForm, session?.name, supabase, workflowRows]);
+
+  const physicianSidebarRecords = useMemo(() => {
+    const rows = [];
+    const seen = new Set();
+    const add = (id, student, studentId, allergies) => {
+      const sid = String(studentId || "").trim();
+      if (!sid || seen.has(sid)) return;
+      seen.add(sid);
+      rows.push({
+        id,
+        student: student || `Student ID ${sid}`,
+        studentId: sid,
+        allergies: allergies || "—",
+      });
+    };
+    for (const r of healthRecordsRows) {
+      add(r.id, r.student, r.studentId, r.allergies);
+    }
+    for (const w of workflowRows) {
+      add(`wf-${w.id}`, w.studentLabel, w.studentId, "—");
+    }
+    for (const c of consultationRows) {
+      add(`cc-${c.id}`, c.student, c.studentId, "—");
+    }
+    return rows;
+  }, [healthRecordsRows, workflowRows, consultationRows]);
+
+  const selectedPhysicianSidebarPatient = useMemo(() => {
+    const list = physicianSidebarRecords;
+    if (!list.length) return null;
+    if (physicianRecordsStudentId) {
+      const hit = list.find(
+        (r) => normalizeStudentIdMatch(r.studentId) === normalizeStudentIdMatch(physicianRecordsStudentId),
+      );
+      if (hit) return hit;
+    }
+    return list[0];
+  }, [physicianSidebarRecords, physicianRecordsStudentId]);
+
+  useEffect(() => {
+    if (!physicianSidebarRecords.length) {
+      if (physicianRecordsStudentId !== null) setPhysicianRecordsStudentId(null);
+      return;
+    }
+    const valid = physicianRecordsStudentId
+      && physicianSidebarRecords.some(
+        (r) => normalizeStudentIdMatch(r.studentId) === normalizeStudentIdMatch(physicianRecordsStudentId),
+      );
+    if (!valid) setPhysicianRecordsStudentId(physicianSidebarRecords[0].studentId);
+  }, [physicianSidebarRecords, physicianRecordsStudentId]);
+
+  useEffect(() => {
+    setPhysicianRecordDocPreview(null);
+    setPhysicianRecordsRxExpandedId(null);
+  }, [physicianRecordsSubTab, selectedPhysicianSidebarPatient?.studentId]);
+
+  const physicianRecordTimelineRows = useMemo(() => {
+    const sel = selectedPhysicianSidebarPatient;
+    if (!sel?.studentId) return [];
+    const sid = normalizeStudentIdMatch(sel.studentId);
+    return consultationRows
+      .filter((row) => normalizeStudentIdMatch(row.studentId) === sid)
+      .sort((a, b) => {
+        const ta = new Date(a.consultationCreatedAt || 0).getTime();
+        const tb = new Date(b.consultationCreatedAt || 0).getTime();
+        return tb - ta;
+      });
+  }, [consultationRows, selectedPhysicianSidebarPatient]);
+
+  const selectedPhysicianCertificateDocs = useMemo(() => {
+    const sel = selectedPhysicianSidebarPatient;
+    if (!sel?.studentId) return [];
+    const sid = normalizeStudentIdMatch(sel.studentId);
+    return consultationRows.filter(
+      (row) =>
+        normalizeStudentIdMatch(row.studentId) === sid && String(row.certificateReason || row.certReason || "").trim(),
+    );
+  }, [consultationRows, selectedPhysicianSidebarPatient]);
+
+  const selectedPhysicianHealthRecord = useMemo(() => {
+    const sel = selectedPhysicianSidebarPatient;
+    if (!sel?.studentId) return null;
+    return (
+      healthRecordsRows.find((r) => normalizeStudentIdMatch(r.studentId) === normalizeStudentIdMatch(sel.studentId)) ||
+      null
+    );
+  }, [healthRecordsRows, selectedPhysicianSidebarPatient]);
+
+  /** All logged consultations for the selected patient (prescription tab = one row per visit, dated). */
+  const selectedPhysicianPrescriptionHistoryRows = useMemo(() => {
+    const sel = selectedPhysicianSidebarPatient;
+    if (!sel?.studentId) return [];
+    const sid = normalizeStudentIdMatch(sel.studentId);
+    const rows = consultationRows.filter((row) => normalizeStudentIdMatch(row.studentId) === sid);
+    return [...rows].sort((a, b) => {
+      const ta = new Date(a.consultationCreatedAt || 0).getTime();
+      const tb = new Date(b.consultationCreatedAt || 0).getTime();
+      if (tb !== ta) return tb - ta;
+      return String(b.id).localeCompare(String(a.id));
+    });
+  }, [consultationRows, selectedPhysicianSidebarPatient]);
 
   const queueStats = useMemo(() => {
     const stat = (s) => workflowRows.filter((r) => r.workflowStatus === s).length;
@@ -1522,6 +3002,157 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         .sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)),
     [workflowRows],
   );
+
+  const physicianQueueActionRows = useMemo(
+    () =>
+      workflowRows.filter(
+        (r) =>
+          [HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER, HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS].includes(r.workflowStatus) &&
+          (r.providerQueue || r.designation || "").toLowerCase() === "physician",
+      ),
+    [workflowRows],
+  );
+
+  const physicianProviderQueueRows = useMemo(
+    () => [...physicianQueueActionRows].sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)),
+    [physicianQueueActionRows],
+  );
+
+  const handlePhysicianQueueStart = useCallback(async () => {
+    setPhysicianStationOnline(true);
+    showToast("Physician Queue is now Online", { variant: "success" });
+    const q = physicianQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER);
+    if (!q) return;
+    await startProviderConsultation(q);
+    showToast("Consultation started.", { variant: "success" });
+  }, [physicianQueueActionRows, startProviderConsultation]);
+
+  const handlePhysicianQueueCompleteOnly = useCallback(async () => {
+    const active = physicianQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS);
+    if (!active) {
+      showToast("Start the consultation first.", { variant: "warning" });
+      return;
+    }
+    await completeProviderConsultation(active);
+  }, [physicianQueueActionRows, completeProviderConsultation]);
+
+  const handlePhysicianQueueNext = useCallback(async () => {
+    const active = physicianQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS);
+    if (active) {
+      await completeProviderConsultation(active);
+      showToast("Completed. Use Start when you are ready for the next patient.", { variant: "success" });
+      return;
+    }
+    const q = physicianQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER);
+    if (q) {
+      await startProviderConsultation(q);
+      showToast("Consultation started.", { variant: "success" });
+    } else {
+      showToast("No patient in physician queue.", { variant: "info" });
+    }
+  }, [physicianQueueActionRows, completeProviderConsultation, startProviderConsultation]);
+
+  const handlePhysicianQueueTransfer = useCallback(async () => {
+    const target =
+      physicianQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS) ||
+      physicianQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER);
+    if (!target) {
+      showToast("No patient to transfer.", { variant: "warning" });
+      return;
+    }
+    const ok = await persistAppointmentWorkflow(target.id, {
+      provider_queue: "dentist",
+      workflow_status: HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER,
+    });
+    if (ok) showToast("Patient moved to the dental queue.", { variant: "success" });
+  }, [physicianQueueActionRows]);
+
+  const handlePhysicianQueueClose = useCallback(async () => {
+    setPhysicianStationOnline(false);
+    showToast("Physician Queue is now Offline", { variant: "info" });
+    const target =
+      physicianQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS) ||
+      physicianQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER);
+    if (!target) return;
+    const ok = await persistAppointmentWorkflow(target.id, {
+      workflow_status: HSO_WORKFLOW_STATUS.CANCELLED,
+      status: "cancelled",
+    });
+    if (ok) showToast("Removed from queue.", { variant: "success" });
+  }, [physicianQueueActionRows]);
+
+  const dentistQueueActionRows = useMemo(
+    () =>
+      workflowRows.filter(
+        (r) =>
+          [HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER, HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS].includes(r.workflowStatus) &&
+          (r.providerQueue || r.designation || "").toLowerCase() === "dentist",
+      ),
+    [workflowRows],
+  );
+
+  const handleDentistQueueStart = useCallback(async () => {
+    setDentistStationOnline(true);
+    showToast("Dentist Queue is now Online", { variant: "success" });
+    const q = dentistQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER);
+    if (!q) return;
+    await startProviderConsultation(q);
+    showToast("Consultation started.", { variant: "success" });
+  }, [dentistQueueActionRows, startProviderConsultation]);
+
+  const handleDentistQueueCompleteOnly = useCallback(async () => {
+    const active = dentistQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS);
+    if (!active) {
+      showToast("Start the consultation first.", { variant: "warning" });
+      return;
+    }
+    await completeProviderConsultation(active);
+  }, [dentistQueueActionRows, completeProviderConsultation]);
+
+  const handleDentistQueueNext = useCallback(async () => {
+    const active = dentistQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS);
+    if (active) {
+      await completeProviderConsultation(active);
+      showToast("Completed. Use Start when you are ready for the next patient.", { variant: "success" });
+      return;
+    }
+    const q = dentistQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER);
+    if (q) {
+      await startProviderConsultation(q);
+      showToast("Consultation started.", { variant: "success" });
+    } else {
+      showToast("No patient in dentist queue.", { variant: "info" });
+    }
+  }, [dentistQueueActionRows, completeProviderConsultation, startProviderConsultation]);
+
+  const handleDentistQueueTransfer = useCallback(async () => {
+    const target =
+      dentistQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS) ||
+      dentistQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER);
+    if (!target) {
+      showToast("No patient to transfer.", { variant: "warning" });
+      return;
+    }
+    const ok = await persistAppointmentWorkflow(target.id, {
+      provider_queue: "physician",
+      workflow_status: HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER,
+    });
+    if (ok) showToast("Patient moved to the physician queue.", { variant: "success" });
+  }, [dentistQueueActionRows]);
+
+  const handleDentistQueueClose = useCallback(async () => {
+    setDentistStationOnline(false);
+    showToast("Dentist Queue is now Offline", { variant: "info" });
+    const target =
+      dentistQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS) ||
+      dentistQueueActionRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER);
+    if (!target) return;
+    const ok = await persistAppointmentWorkflow(target.id, {
+      workflow_status: HSO_WORKFLOW_STATUS.CANCELLED,
+      status: "cancelled",
+    });
+    if (ok) showToast("Removed from queue.", { variant: "success" });
+  }, [dentistQueueActionRows]);
 
   const dentistQueueRows = useMemo(
     () =>
@@ -1615,10 +3246,29 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     return [...appointmentRows, ...visitorRows].sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0));
   }, [workflowRows, nurseVisitors]);
 
-  const activeNurseSession = useMemo(
-    () => nurseWaitlistRows.find((r) => String(r.id) === String(activeNurseSessionId)) || null,
-    [nurseWaitlistRows, activeNurseSessionId],
+  /** Waiting for nurse triage only — excludes current NURSE_IN_PROGRESS so lists match “Next” behavior */
+  const nurseWaitlistPendingRows = useMemo(
+    () => nurseWaitlistRows.filter((r) => r.status === HSO_WORKFLOW_STATUS.QUEUED_FOR_NURSE),
+    [nurseWaitlistRows],
   );
+
+  const activeNurseSession = useMemo(() => {
+    const match =
+      activeNurseSessionId != null && activeNurseSessionId !== ""
+        ? nurseWaitlistRows.find((r) => String(r.id) === String(activeNurseSessionId))
+        : null;
+    if (match) return match;
+    /* Refresh / another tab: workflow shows nurse_in_progress but local session id was never set or cleared */
+    const inProgress = nurseWaitlistRows.filter((r) => r.status === HSO_WORKFLOW_STATUS.NURSE_IN_PROGRESS);
+    if (inProgress.length === 1) return inProgress[0];
+    return null;
+  }, [nurseWaitlistRows, activeNurseSessionId]);
+
+  useEffect(() => {
+    if (activeNurseSessionId) return;
+    const only = nurseWaitlistRows.filter((r) => r.status === HSO_WORKFLOW_STATUS.NURSE_IN_PROGRESS);
+    if (only.length === 1) setActiveNurseSessionId(only[0].id);
+  }, [nurseWaitlistRows, activeNurseSessionId]);
 
   const nurseDashboardStats = useMemo(() => {
     const checkedIn = workflowRows.filter((r) =>
@@ -1647,12 +3297,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   }, [workflowRows, nurseVisitors]);
 
   useEffect(() => {
-    const maxAppointmentQueue = appointmentsList.reduce(
-      (max, row) => Math.max(max, Number(row.queueNumber || 0)),
-      0,
-    );
-    const maxVisitorQueue = nurseVisitors.reduce((max, row) => Math.max(max, Number(row.queueNumber || 0)), 0);
-    const nextBaseline = Math.max(maxAppointmentQueue, maxVisitorQueue);
+    const nextBaseline = maxQueueNumberForToday(appointmentsList, nurseVisitors);
     setNurseQueueCounter((prev) => (prev < nextBaseline ? nextBaseline : prev));
   }, [appointmentsList, nurseVisitors]);
 
@@ -1750,14 +3395,153 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       .slice(0, 6);
   }, [appointmentsList]);
 
+  const hsoAnalyticsData = useMemo(() => {
+    const { start, end } = hsoAnalyticsPeriodRange(hsoAnalyticsPeriod);
+    const appts = appointmentsList.filter((a) => appointmentDateInPhysicianAnalyticsRange(a, start, end));
+    const consults = consultationRows.filter((c) => consultationDateInPhysicianAnalyticsRange(c, start, end));
+
+    const recordByStudent = new Map(
+      healthRecordsRows.map((r) => [normalizeStudentIdMatch(r.studentId), r]),
+    );
+
+    const programForSid = (sid) => {
+      const k = normalizeStudentIdMatch(sid);
+      const fromStudent = studentProgramsByStudentId.get(k);
+      if (fromStudent) return fromStudent;
+      return String(recordByStudent.get(k)?.program || "").trim();
+    };
+
+    const schoolCounts = { SECA: 0, SASE: 0, SBMA: 0 };
+    const programVisitTally = new Map();
+
+    let certCount = 0;
+    for (const c of consults) {
+      const prog = programForSid(c.studentId);
+      const bucket = schoolBucketFromProgram(prog);
+      if (bucket) schoolCounts[bucket] += 1;
+
+      const pk = prog || "Unknown";
+      programVisitTally.set(pk, (programVisitTally.get(pk) || 0) + 1);
+
+      const cert = String(c.certReason || c.certificateReason || "").trim();
+      const svc = String(c.service || "").toLowerCase();
+      if (cert || svc.includes("certificate")) certCount += 1;
+    }
+
+    const totalQueues = appts.filter((a) => Number(a.queueNumber) > 0 || a.checkedInAt).length;
+
+    let waitSum = 0;
+    let waitN = 0;
+    appts.forEach((a) => {
+      if (!a.checkedInAt || !a.consultationStartedAt) return;
+      const w = (new Date(a.consultationStartedAt).getTime() - new Date(a.checkedInAt).getTime()) / 60000;
+      if (w >= 0 && w < 720) {
+        waitSum += w;
+        waitN += 1;
+      }
+    });
+    const avgWaitMin = waitN ? Math.round(waitSum / waitN) : 0;
+
+    const reportYear = end.getFullYear();
+    const peakMonthSeries = peakMonthSeriesForYearFromConsultations(consults, reportYear);
+
+    const schoolPieData = PHYSICIAN_ANALYTICS_SCHOOLS.map((name) => ({
+      name,
+      value: schoolCounts[name],
+    }));
+
+    const programPieData = [...programVisitTally.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([name, value]) => ({
+        name: name.length > 32 ? `${name.slice(0, 29)}…` : name,
+        value,
+      }));
+
+    return {
+      start,
+      end,
+      totalQueues,
+      certCount,
+      avgWaitMin,
+      schoolCounts,
+      schoolPieData,
+      programPieData,
+      peakMonthSeries,
+    };
+  }, [hsoAnalyticsPeriod, appointmentsList, consultationRows, healthRecordsRows, studentProgramsByStudentId]);
+
+  const exportHsoAnalyticsCsv = useCallback(() => {
+    const d = hsoAnalyticsData;
+    const lines = [
+      ["Reports & Analytics", hsoAnalyticsPeriodLabel(hsoAnalyticsPeriod)],
+      ["Metric", "Value"],
+      ["Total queues", String(d.totalQueues)],
+      ["Medical certificates issued", String(d.certCount)],
+      ["Average waiting time (min)", String(d.avgWaitMin)],
+      [],
+      ["Month", "HSO visits (consultations in period)"],
+      ...d.peakMonthSeries.map((r) => [r.month, String(r.total)]),
+      [],
+      ["School", "Consultations"],
+      ...PHYSICIAN_ANALYTICS_SCHOOLS.map((s) => [s, String(d.schoolCounts[s])]),
+      [],
+      ["Program (students.program)", "Consultations"],
+      ...d.programPieData.map((p) => [p.name, String(p.value)]),
+    ];
+    const csv = lines.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `hs-reports-${hsoAnalyticsPeriod}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("CSV downloaded.", { variant: "success" });
+  }, [hsoAnalyticsData, hsoAnalyticsPeriod]);
+
+  const exportHsoAnalyticsPdf = useCallback(() => {
+    const d = hsoAnalyticsData;
+    const doc = new jsPDF();
+    let y = 16;
+    doc.setFontSize(16);
+    doc.text("Reports & Analytics", 14, y);
+    y += 8;
+    doc.setFontSize(10);
+    doc.text(`Period: ${hsoAnalyticsPeriodLabel(hsoAnalyticsPeriod)}`, 14, y);
+    y += 10;
+    const rows = [
+      ["Total queues", String(d.totalQueues)],
+      ["Medical certificates issued", String(d.certCount)],
+      ["Avg. waiting time (minutes)", String(d.avgWaitMin)],
+    ];
+    rows.forEach(([k, v]) => {
+      doc.text(`${k}: ${v}`, 14, y);
+      y += 6;
+      if (y > 270) {
+        doc.addPage();
+        y = 16;
+      }
+    });
+    doc.save(`hs-reports-${hsoAnalyticsPeriod}-${new Date().toISOString().slice(0, 10)}.pdf`);
+    showToast("PDF downloaded.", { variant: "success" });
+  }, [hsoAnalyticsData, hsoAnalyticsPeriod]);
+
 
   // --- Nurse / Physician / Dentist / Admin Dashboard Views ---
   const renderDashboard = () => {
     if (isNurseUser) {
-      const dashboardQueueRows = nurseWaitlistRows.slice(0, 5);
-      const servingQueueNum = nurseNowServing?.queueNumber
-        ? String(nurseNowServing.queueNumber).padStart(4, "0")
-        : "0001";
+      const dashboardQueueRows = nurseWaitlistPendingRows.slice(0, 5);
+      const nurseServingQueueRaw = nurseNowServing?.queueNumber;
+      const hasNurseServingTicket =
+        nurseNowServing != null &&
+        nurseServingQueueRaw !== undefined &&
+        nurseServingQueueRaw !== null &&
+        nurseServingQueueRaw !== "" &&
+        Number(nurseServingQueueRaw) > 0;
+      const servingQueueNum = hasNurseServingTicket
+        ? String(Number(nurseServingQueueRaw)).padStart(4, "0")
+        : "0000";
       return (
         <div className="hs-nurse-shell">
           <div className="hs-nurse-kpi-row">
@@ -1788,18 +3572,26 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                 <p className="hs-list-sub hs-list-sub--tight">Patients waiting for vital signs assessment</p>
               </div>
               <div className="cc-modal-body">
-                {dashboardQueueRows.map((row) => (
-                  <div key={row.id} className="hs-nurse-ticket hs-nurse-ticket--dashboard">
-                    <div className="hs-nurse-ticket-no">
-                      <span>TICKET</span>
-                      <strong>{String(row.queueNumber || 0).padStart(4, "0")}</strong>
+                {dashboardQueueRows.length ? (
+                  dashboardQueueRows.map((row) => (
+                    <div key={row.id} className="hs-nurse-ticket hs-nurse-ticket--dashboard">
+                      <div className="hs-nurse-ticket-no">
+                        <span>TICKET</span>
+                        <strong>{String(row.queueNumber || 0).padStart(4, "0")}</strong>
+                      </div>
+                      <div>
+                        <strong>{row.name}</strong>
+                        <p>{String(row.reason || "Physician").includes("Dental") ? "Dentist" : "Physician"}</p>
+                      </div>
                     </div>
-                    <div>
-                      <strong>{row.name}</strong>
-                      <p>{String(row.reason || "Physician").includes("Dental") ? "Dentist" : "Physician"}</p>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <EmptyStateMessage
+                    icon={Users}
+                    title="No patients in queue."
+                    description="Check in patients using Patient Check-In; they will appear here when waiting for vital signs."
+                  />
+                )}
               </div>
             </div>
             <div className="hs-nurse-mid-col">
@@ -1814,27 +3606,54 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                       <p>{nurseNowServing?.student || nurseNowServing?.name || "No patient in service"}</p>
                       <span>Physician</span>
                     </div>
-                    <span className="hs-pill hs-pill-ongoing">In Progress</span>
+                    {hasNurseServingTicket ? (
+                      <span className="hs-pill hs-pill-ongoing">In Progress</span>
+                    ) : (
+                      <span className="hs-pill hs-pill-waiting">Idle</span>
+                    )}
                   </div>
                 </div>
               </div>
               <div className="cases-panel hs-panel-elevated hs-nurse-card hs-nurse-form">
                 <div className="cases-panel-header">
                   <div className="cases-panel-title cases-panel-title--strong">Patient Check-In</div>
-                  <p className="hs-list-sub hs-list-sub--tight">Enter patient check-in code</p>
                 </div>
                 <div className="cc-modal-body">
                   <div className="hs-modal-field">
-                    <label>Check-In Code</label>
+                    <label htmlFor="hs-patient-checkin-code">Check-In Code</label>
                     <input
-                      placeholder="Enter code"
+                      id="hs-patient-checkin-code"
+                      placeholder="e.g. CH-0001"
+                      autoComplete="off"
+                      spellCheck={false}
+                      inputMode="numeric"
+                      title="Check-in code format: CH- followed by digits (e.g. CH-0001)"
                       value={checkinCodeInput}
-                      onChange={(e) => setCheckinCodeInput(sanitizeDigitsOnlyInput(e.target.value))}
+                      onChange={(e) => setCheckinCodeInput(sanitizeCheckinCodeInput(e.target.value))}
                     />
                   </div>
                   <button type="button" className="hs-btn-primary hs-nurse-full-btn" onClick={verifyCheckinCode} style={{ marginTop: 10 }}>
-                    Check In Patient
+                    Look up appointment
                   </button>
+                  {checkinPreview ? (
+                    <div className="do-panel hs-checkin-fetched" style={{ marginTop: 14 }}>
+                      <div className="do-panel-header">
+                        <h2 className="do-panel-title">Appointment details</h2>
+                      </div>
+                      <div className="do-panel-body" style={{ padding: "12px 16px" }}>
+                        <p className="cell-text"><strong>Student:</strong> {checkinPreview.student}</p>
+                        <p className="cell-text"><strong>Student ID:</strong> {checkinPreview.studentId || "—"}</p>
+                        <p className="cell-text"><strong>Designation:</strong> {hsoDesignationLabel(checkinPreview.designation)}</p>
+                        <p className="cell-text"><strong>Service:</strong> {checkinPreview.service || "—"}</p>
+                        <p className="cell-text"><strong>Date:</strong> {checkinPreview.date || "—"}</p>
+                        <p className="cell-text"><strong>Time:</strong> {checkinPreview.time || "—"}</p>
+                        <p className="cell-text"><strong>Check-in code:</strong> {checkinPreview.checkinCode || "—"}</p>
+                        <button type="button" className="hs-btn-success hs-nurse-full-btn" onClick={handleCheckinByCode} style={{ marginTop: 12 }}>
+                          Confirm check-in and assign queue
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -1847,10 +3666,10 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   </p>
                 </div>
                 <div className="cc-modal-body">
-                  <div className="hs-modal-field"><label>Temperature (°C)</label><input value={nurseTriageForm.temperature || "36.5"} onChange={(e) => setNurseTriageForm((f) => ({ ...f, temperature: e.target.value }))} /></div>
-                  <div className="hs-modal-field"><label>Blood Pressure</label><input value={nurseTriageForm.bloodPressure || "120/80"} onChange={(e) => setNurseTriageForm((f) => ({ ...f, bloodPressure: e.target.value }))} /></div>
-                  <div className="hs-modal-field"><label>Pulse</label><input value={nurseTriageForm.pulse || "72 bpm"} onChange={(e) => setNurseTriageForm((f) => ({ ...f, pulse: e.target.value }))} /></div>
-                  <div className="hs-modal-field"><label>Resp. Rate</label><input value={nurseTriageForm.respiratoryRate || "16 rpm"} onChange={(e) => setNurseTriageForm((f) => ({ ...f, respiratoryRate: e.target.value }))} /></div>
+                  <div className="hs-modal-field"><label>Temperature (°C)</label><input placeholder="e.g. 36.5" value={nurseTriageForm.temperature} onChange={(e) => setNurseTriageForm((f) => ({ ...f, temperature: e.target.value }))} /></div>
+                  <div className="hs-modal-field"><label>Blood Pressure</label><input placeholder="e.g. 120/80" value={nurseTriageForm.bloodPressure} onChange={(e) => setNurseTriageForm((f) => ({ ...f, bloodPressure: e.target.value }))} /></div>
+                  <div className="hs-modal-field"><label>Pulse</label><input placeholder="e.g. 72 bpm" value={nurseTriageForm.pulse} onChange={(e) => setNurseTriageForm((f) => ({ ...f, pulse: e.target.value }))} /></div>
+                  <div className="hs-modal-field"><label>Resp. Rate</label><input placeholder="e.g. 16 rpm" value={nurseTriageForm.respiratoryRate} onChange={(e) => setNurseTriageForm((f) => ({ ...f, respiratoryRate: e.target.value }))} /></div>
                   <div className="hs-modal-field"><label>Notes</label><textarea placeholder="Observations, concerns, allergies..." value={nurseTriageForm.remarks} onChange={(e) => setNurseTriageForm((f) => ({ ...f, remarks: e.target.value }))} /></div>
                   <div className="hs-nurse-vitals-actions">
                     <button type="button" className="hs-btn-success" onClick={handleNurseComplete}>Complete</button>
@@ -1858,7 +3677,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   </div>
                 </div>
               </div>
-              <div className="cases-panel hs-panel-elevated hs-nurse-card">
+              <div className="cases-panel hs-panel-elevated hs-nurse-card hs-nurse-card--compact">
                 <div className="cases-panel-header">
                   <div className="cases-panel-title cases-panel-title--strong">Route Patient</div>
                 </div>
@@ -1888,10 +3707,16 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         .filter((row) =>
           active?.studentId
             ? String(row.studentId || "").toLowerCase() === String(active.studentId || "").toLowerCase()
-            : String(row.student || "").toLowerCase() === String(active?.student || "").toLowerCase(),
+            : String(row.student || "").toLowerCase() === String(active?.studentLabel || active?.student || "").toLowerCase(),
         )
-        .slice(0, 6);
+        .sort((a, b) => {
+          const ta = new Date(a.consultationCreatedAt || 0).getTime();
+          const tb = new Date(b.consultationCreatedAt || 0).getTime();
+          return tb - ta;
+        })
+        .slice(0, 12);
       const activeRow = active || physicianQueueRows[0] || null;
+      const activeVitals = normalizeNurseVitalsDisplay(activeRow?.nurseVitals);
       return (
         <div className="hs-phys-shell">
           <div className="hs-phys-kpi-row">
@@ -1907,8 +3732,8 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   <div className={`hs-phys-queue-item ${activeRow?.id === r.id ? "hs-phys-queue-item--active" : ""}`} key={r.id}>
                     <div className="hs-phys-queue-no">{`Q${String(r.queueNumber || 0).padStart(2, "0")}`}</div>
                     <div className="hs-phys-queue-main">
-                      <strong>{r.student}</strong>
-                      <p>{r.reason || "—"}</p>
+                      <strong>{r.studentLabel}</strong>
+                      <p>{r.reason}</p>
                     </div>
                     <div className="hs-phys-queue-right">
                       <p>{`${Math.max(12, (r.queueNumber || 1) * 3)}m`}</p>
@@ -1932,9 +3757,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                     <span className="hs-phys-active-q">{`Q${String(activeRow.queueNumber).padStart(2, "0")}`}</span>
                   ) : null}
                   <div>
-                    <div className="cases-panel-title cases-panel-title--strong">{activeRow?.student || "No active patient selected."}</div>
+                    <div className="cases-panel-title cases-panel-title--strong">{activeRow?.studentLabel || "No active patient selected."}</div>
                     {activeRow ? (
-                      <p className="hs-stat-meta">{`${activeRow?.studentId || "—"} · ${activeRow?.reason || "—"}`}</p>
+                      <p className="hs-stat-meta">{`${activeRow?.studentId || "—"} · ${activeRow?.reason}`}</p>
                     ) : (
                       <p className="hs-stat-meta">Select a student from the queue to begin consultation.</p>
                     )}
@@ -1945,11 +3770,34 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                     <button
                       type="button"
                       className="hs-btn-secondary"
+                      onClick={() => openPhysicianChart(activeRow.studentId)}
+                    >
+                      Open Chart
+                    </button>
+                    <button
+                      type="button"
+                      className="hs-btn-secondary"
                       onClick={() => setPhysicianCertModalOpen(true)}
                     >
                       Medical Certificate
                     </button>
-                    <button type="button" className="hs-btn-primary">Complete</button>
+                    <button
+                      type="button"
+                      className="hs-btn-primary"
+                      onClick={() => {
+                        if (!activeRow) return;
+                        if (activeRow.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS) {
+                          completeProviderConsultation(activeRow);
+                        } else if (activeRow.workflowStatus === HSO_WORKFLOW_STATUS.QUEUED_FOR_PROVIDER) {
+                          startProviderConsultation(activeRow);
+                          showToast("Consultation started.", { variant: "success" });
+                        } else {
+                          showToast("No active consultation to complete.", { variant: "warning" });
+                        }
+                      }}
+                    >
+                      {activeRow?.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS ? "Complete" : "Start visit"}
+                    </button>
                   </div>
                 ) : null}
               </div>
@@ -1980,10 +3828,10 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                     {physicianPanelTab === "vitals" ? (
                       <div className="hs-phys-vitals-form">
                         <div className="hs-phys-vitals-grid">
-                          <div><span>Temp</span><strong>{activeRow?.nurseVitals?.temperature || "—"}</strong></div>
-                          <div><span>BP</span><strong>{activeRow?.nurseVitals?.bloodPressure || "—"}</strong></div>
-                          <div><span>Pulse</span><strong>{activeRow?.nurseVitals?.pulse || "—"}</strong></div>
-                          <div><span>Resp</span><strong>{activeRow?.nurseVitals?.respiratoryRate || "—"}</strong></div>
+                          <div><span>Temp</span><strong>{activeVitals?.temperature || "—"}</strong></div>
+                          <div><span>BP</span><strong>{activeVitals?.bloodPressure || "—"}</strong></div>
+                          <div><span>Pulse</span><strong>{activeVitals?.pulse || "—"}</strong></div>
+                          <div><span>Resp</span><strong>{activeVitals?.respiratoryRate || "—"}</strong></div>
                         </div>
                         <p className="hs-stat-meta" style={{ marginTop: 10 }}>Recorded by triage nurse.</p>
                       </div>
@@ -1992,8 +3840,20 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                       <div>
                         {historyRows.map((h) => (
                           <div className="hs-nurse-ticket" key={h.id}>
-                            <p style={{ margin: 0, color: "#64748b" }}>{h.date}</p>
-                            <strong>{h.reason} · Rx {h.treatment || "No prescription recorded"}</strong>
+                            <p style={{ margin: 0, fontWeight: 700, color: "#0f172a" }}>
+                              {h.date}
+                              <span className="hs-stat-meta" style={{ fontWeight: 500, marginLeft: 8 }}>
+                                {h.time}
+                              </span>
+                            </p>
+                            <p style={{ margin: "6px 0 0" }}>
+                              <strong>Service:</strong> {h.service || h.reason}
+                            </p>
+                            {h.treatment || h.prescription ? (
+                              <p className="hs-stat-meta" style={{ marginTop: 4 }}>
+                                Prescription: {h.treatment || h.prescription}
+                              </p>
+                            ) : null}
                           </div>
                         ))}
                         {!historyRows.length ? (
@@ -2324,13 +4184,21 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         <div className="cases-panel hs-panel-elevated">
           <div className="cases-panel-header">
             <div className="cases-panel-title cases-panel-title--strong">Student Check-In & Validation</div>
-            <p className="hs-list-sub hs-list-sub--tight">Enter appointment code, verify profile, then confirm queueing.</p>
           </div>
           <div className="cc-modal-body">
             <div className="hs-modal-grid">
               <div className="hs-modal-field">
-                <label>Appointment Code</label>
-                <input value={checkinCodeInput} onChange={(e) => setCheckinCodeInput(sanitizeDigitsOnlyInput(e.target.value))} />
+                <label htmlFor="hs-nurse-checkin-code">Check-In Code</label>
+                <input
+                  id="hs-nurse-checkin-code"
+                  placeholder="e.g. CH-0001"
+                  autoComplete="off"
+                  spellCheck={false}
+                  inputMode="numeric"
+                  title="Check-in code format: CH- followed by digits (e.g. CH-0001)"
+                  value={checkinCodeInput}
+                  onChange={(e) => setCheckinCodeInput(sanitizeCheckinCodeInput(e.target.value))}
+                />
               </div>
             </div>
             <div className="hs-modal-footer" style={{ justifyContent: "flex-start" }}>
@@ -2339,16 +4207,21 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               </button>
             </div>
             {checkinPreview ? (
-              <div className="do-panel" style={{ marginTop: 14 }}>
+              <div className="do-panel hs-checkin-fetched" style={{ marginTop: 14 }}>
                 <div className="do-panel-header">
-                  <h2 className="do-panel-title">Verification Profile</h2>
+                  <h2 className="do-panel-title">Appointment details</h2>
                 </div>
                 <div className="do-panel-body" style={{ padding: "12px 16px" }}>
-                  <p className="cell-text"><strong>Photo & Name:</strong> [No photo] {checkinPreview.student}</p>
-                  <p className="cell-text"><strong>Appointment Time:</strong> {checkinPreview.time || "—"}</p>
+                  <p className="cell-text"><strong>Student:</strong> {checkinPreview.student}</p>
+                  <p className="cell-text"><strong>Student ID:</strong> {checkinPreview.studentId || "—"}</p>
+                  <p className="cell-text"><strong>Designation:</strong> {hsoDesignationLabel(checkinPreview.designation)}</p>
+                  <p className="cell-text"><strong>Service:</strong> {checkinPreview.service || "—"}</p>
+                  <p className="cell-text"><strong>Date:</strong> {checkinPreview.date || "—"}</p>
+                  <p className="cell-text"><strong>Time:</strong> {checkinPreview.time || "—"}</p>
                   <p className="cell-text"><strong>Reason:</strong> {checkinPreview.consultationType || checkinPreview.purpose || "—"}</p>
+                  <p className="cell-text"><strong>Check-in code:</strong> {checkinPreview.checkinCode || "—"}</p>
                   <button type="button" className="hs-btn-primary" onClick={handleCheckinByCode}>
-                    Confirm & Assign Queue Number
+                    Confirm and assign queue number
                   </button>
                 </div>
               </div>
@@ -2373,13 +4246,24 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       <div className="cases-panel hs-panel-elevated">
         <div className="cases-panel-header">
           <div className="cases-panel-title cases-panel-title--strong">Check-in Validation</div>
-          <p className="hs-list-sub hs-list-sub--tight">Enter student check-in code to queue for nurse assessment.</p>
+          <p className="hs-list-sub hs-list-sub--tight">
+            Format <strong>CH-####</strong> — matches <strong>health_appointments.check_in_code</strong>.
+          </p>
         </div>
         <div className="cc-modal-body">
           <div className="hs-modal-grid">
             <div className="hs-modal-field">
-              <label>Check-in code</label>
-              <input value={checkinCodeInput} onChange={(e) => setCheckinCodeInput(sanitizeDigitsOnlyInput(e.target.value))} />
+              <label htmlFor="hs-admin-checkin-code">Check-in code</label>
+              <input
+                id="hs-admin-checkin-code"
+                placeholder="CH-0001"
+                autoComplete="off"
+                spellCheck={false}
+                inputMode="numeric"
+                title="Check-in code format: CH- followed by digits (e.g. CH-0001)"
+                value={checkinCodeInput}
+                onChange={(e) => setCheckinCodeInput(sanitizeCheckinCodeInput(e.target.value))}
+              />
             </div>
           </div>
           <div className="hs-modal-footer" style={{ justifyContent: "flex-start" }}>
@@ -2399,13 +4283,19 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       <>
         <div className="hs-nurse-queue-layout">
           <div className="cases-panel hs-panel-elevated hs-nurse-card">
-            <div className="cases-panel-header">
+            <div className="cases-panel-header hs-queue-serving-header">
+              <div className="hs-queue-serving-header__status">{queueStationStatusBadge(nurseStationOnline)}</div>
               <p className="hs-nurse-serving-label">NOW SERVING</p>
               <h2 className="hs-nurse-serving-title">QUEUING NUMBER</h2>
             </div>
             <div className="cc-modal-body">
               <div className="hs-nurse-serving-box">
-                {String((activeNurseSession?.queueNumber || nurseNowServing?.queueNumber || 1)).padStart(4, "0")}
+                {(() => {
+                  const raw = activeNurseSession?.queueNumber ?? nurseNowServing?.queueNumber;
+                  if (raw === undefined || raw === null || raw === "") return "0000";
+                  const n = Number(raw);
+                  return Number.isFinite(n) && n > 0 ? String(n).padStart(4, "0") : "0000";
+                })()}
               </div>
               <div className="hs-nurse-quick-title">QUICK ACTIONS</div>
               <div className="hs-nurse-quick-grid">
@@ -2418,10 +4308,10 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                 <button type="button" className="hs-btn-secondary" onClick={handleNurseTransfer} disabled={!activeNurseSession}>
                   <Route size={13} /> Transfer
                 </button>
-                <button type="button" className="hs-btn-secondary" onClick={() => setNurseStationOnline(true)}>
+                <button type="button" className="hs-btn-secondary" onClick={handleNurseQueueStationStart}>
                   <Activity size={13} /> Start
                 </button>
-                <button type="button" className="hs-btn-secondary" onClick={() => { setNurseStationOnline(false); setActiveNurseSessionId(null); }}>
+                <button type="button" className="hs-btn-secondary" onClick={handleNurseQueueStationClose}>
                   <X size={13} /> Close
                 </button>
                 <button type="button" className="hs-btn-secondary" onClick={() => setAddVisitorOpen(true)}>
@@ -2433,21 +4323,29 @@ function HealthServices({ embedReportsOnly = false } = {}) {
           <div className="cases-panel hs-panel-elevated hs-nurse-card">
             <div className="cases-panel-header">
               <div className="cases-panel-title cases-panel-title--strong">Up Next</div>
-              <p className="hs-stat-meta">{`${nurseWaitlistRows.length} in line`}</p>
+              <p className="hs-stat-meta">{`${nurseWaitlistPendingRows.length} in line`}</p>
             </div>
             <div className="cc-modal-body">
-              {nurseWaitlistRows.slice(0, 5).map((r) => (
-                <div key={r.id} className="hs-nurse-ticket hs-nurse-ticket--upnext">
-                  <div className="hs-nurse-ticket-no">
-                    <span>TICKET</span>
-                    <strong>{String(r.queueNumber || 0).padStart(4, "0")}</strong>
+              {nurseWaitlistPendingRows.length ? (
+                nurseWaitlistPendingRows.slice(0, 5).map((r) => (
+                  <div key={r.id} className="hs-nurse-ticket hs-nurse-ticket--upnext">
+                    <div className="hs-nurse-ticket-no">
+                      <span>TICKET</span>
+                      <strong>{String(r.queueNumber || 0).padStart(4, "0")}</strong>
+                    </div>
+                    <div>
+                      <strong>{r.name}</strong>
+                      <p>{String(r.reason || "Physician").includes("Dental") ? "Dentist" : "Physician"}</p>
+                    </div>
                   </div>
-                  <div>
-                    <strong>{r.name}</strong>
-                    <p>{String(r.reason || "Physician").includes("Dental") ? "Dentist" : "Physician"}</p>
-                  </div>
-                </div>
-              ))}
+                ))
+              ) : (
+                <EmptyStateMessage
+                  icon={Users}
+                  title="Queue is empty."
+                  description="No patients are waiting. The next check-in will appear here."
+                />
+              )}
             </div>
           </div>
         </div>
@@ -2479,16 +4377,19 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               <p className="do-panel-sub">Station queue</p>
             </div>
             <div className="do-panel-body" style={{ padding: "0 16px 16px" }}>
-              {col.rows.map((r) => (
-                <div key={r.id} className="hs-consult-row" style={{ gridTemplateColumns: "1fr auto", marginBottom: 8 }}>
-                  <div>
-                    <p className="hs-consult-name">{r.queueNumber ? String(r.queueNumber).padStart(4, "0") : "—"}</p>
-                    <p className="hs-consult-meta">{r.student}</p>
+              {col.rows.length ? (
+                col.rows.map((r) => (
+                  <div key={r.id} className="hs-consult-row" style={{ gridTemplateColumns: "1fr auto", marginBottom: 8 }}>
+                    <div>
+                      <p className="hs-consult-name">{r.queueNumber ? String(r.queueNumber).padStart(4, "0") : "—"}</p>
+                      <p className="hs-consult-meta">{r.student}</p>
+                    </div>
+                    <span className={pillClass(statusLabel(r.workflowStatus))}>{statusLabel(r.workflowStatus)}</span>
                   </div>
-                  <span className={pillClass(statusLabel(r.workflowStatus))}>{statusLabel(r.workflowStatus)}</span>
-                </div>
-              ))}
-              {col.rows.length === 0 ? <p className="hs-stat-meta">No waiting patients.</p> : null}
+                ))
+              ) : (
+                <EmptyStateMessage compact icon={Users} title="No patients in queue." description="Waiting students will list here." />
+              )}
             </div>
           </div>
         ))}
@@ -2502,21 +4403,21 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     isPhysicianUser ? (
       <div className="hs-phys-shell">
         <div className="hs-phys-kpi-row">
-          <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{providerQueueRows.length}</p><p className="hs-stat-label">In Queue</p></div>
+          <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{physicianProviderQueueRows.length}</p><p className="hs-stat-label">In Queue</p></div>
           <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{consultationRows.length}</p><p className="hs-stat-label">Consultations Today</p></div>
-          <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">3</p><p className="hs-stat-label">Certificates Issued</p></div>
+          <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{certificatesList.length}</p><p className="hs-stat-label">Certificates Issued</p></div>
         </div>
         <div className="hs-phys-main-grid">
           <div className="cases-panel hs-panel-elevated hs-phys-card">
             <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">Physician Queue</div></div>
             <div className="cc-modal-body">
-              {providerQueueRows.slice(0, 5).map((r) => (
+              {physicianProviderQueueRows.slice(0, 5).map((r) => (
                 <div className="hs-nurse-ticket hs-nurse-ticket--upnext" key={r.id}>
                   <div className="hs-nurse-ticket-no"><span>TICKET</span><strong>{String(r.queueNumber || 0).padStart(3, "0")}</strong></div>
                   <div><strong>{r.student}</strong><p>{r.reason || "Consultation"}</p></div>
                 </div>
               ))}
-              {!providerQueueRows.length ? (
+              {!physicianProviderQueueRows.length ? (
                 <EmptyStateMessage
                   icon={Users}
                   title="No waiting patients at the moment."
@@ -2527,10 +4428,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
           </div>
           <div className="cases-panel hs-panel-elevated hs-phys-card">
             <div className="cases-panel-header">
-              <div className="cases-panel-title cases-panel-title--strong">{providerQueueRows[0]?.student || "No active patient"}</div>
-              {providerQueueRows[0] ? <button type="button" className="hs-btn-primary">Complete</button> : null}
+              <div className="cases-panel-title cases-panel-title--strong">{physicianProviderQueueRows[0]?.student || "No active patient"}</div>
             </div>
-            {!providerQueueRows[0] ? (
+            {!physicianProviderQueueRows[0] ? (
               <div className="cc-modal-body">
                 <EmptyStateMessage
                   icon={Stethoscope}
@@ -2539,11 +4439,40 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                 />
               </div>
             ) : (
-              <div className="cc-modal-body hs-phys-vitals-grid">
-                <div><span>Temp</span><strong>{providerQueueRows[0]?.nurseVitals?.temperature || "—"}</strong></div>
-                <div><span>BP</span><strong>{providerQueueRows[0]?.nurseVitals?.bloodPressure || "—"}</strong></div>
-                <div><span>Pulse</span><strong>{providerQueueRows[0]?.nurseVitals?.pulse || "—"}</strong></div>
-                <div><span>Resp</span><strong>{providerQueueRows[0]?.nurseVitals?.respiratoryRate || "—"}</strong></div>
+              <div className="cc-modal-body">
+                <div className="hs-phys-vitals-grid" style={{ marginBottom: 14 }}>
+                  <div><span>Temp</span><strong>{physicianProviderQueueRows[0]?.nurseVitals?.temperature || "—"}</strong></div>
+                  <div><span>BP</span><strong>{physicianProviderQueueRows[0]?.nurseVitals?.bloodPressure || "—"}</strong></div>
+                  <div><span>Pulse</span><strong>{physicianProviderQueueRows[0]?.nurseVitals?.pulse || "—"}</strong></div>
+                  <div><span>Resp</span><strong>{physicianProviderQueueRows[0]?.nurseVitals?.respiratoryRate || "—"}</strong></div>
+                </div>
+                <div className="hs-nurse-quick-title">QUICK ACTIONS</div>
+                <div className="hs-nurse-quick-grid">
+                  {physicianProviderQueueRows[0]?.studentId ? (
+                    <button
+                      type="button"
+                      className="hs-btn-secondary"
+                      onClick={() => openPhysicianChart(physicianProviderQueueRows[0].studentId)}
+                    >
+                      <FileText size={13} /> Open Chart
+                    </button>
+                  ) : null}
+                  <button type="button" className="hs-btn-secondary" onClick={handlePhysicianQueueCompleteOnly}>
+                    <CheckCircle size={13} /> Complete
+                  </button>
+                  <button type="button" className="hs-btn-secondary" onClick={handlePhysicianQueueNext}>
+                    <Send size={13} /> Next
+                  </button>
+                  <button type="button" className="hs-btn-secondary" onClick={handlePhysicianQueueTransfer}>
+                    <Route size={13} /> Transfer
+                  </button>
+                  <button type="button" className="hs-btn-secondary" onClick={handlePhysicianQueueStart}>
+                    <Activity size={13} /> Start
+                  </button>
+                  <button type="button" className="hs-btn-secondary" onClick={handlePhysicianQueueClose}>
+                    <X size={13} /> Close
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -2580,80 +4509,168 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     )
   );
 
-  // --- Physician Side: Queue Display and Prescription History ---
-  const renderQueueDisplay = () => {
-    if (isPhysicianUser) {
-      const issuedToday = physicianPrescriptionRows.filter((r) => r.date === formatVisitDateLabel(new Date())).length;
-      return (
-        <>
-          <div className="hs-phys-kpi-row">
-            <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{issuedToday}</p><p className="hs-stat-label">Issued Today</p></div>
-            <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">{physicianPrescriptionRows.length}</p><p className="hs-stat-label">Active</p></div>
-            <div className="hs-stat-card hs-phys-kpi"><p className="hs-stat-value">0</p><p className="hs-stat-label">Refill Requests</p></div>
+  const renderHealthServicesAnalytics = () => {
+    const pad = hsoAnalyticsData;
+    const peakTotal = pad.peakMonthSeries.reduce((s, x) => s + x.total, 0);
+    const schoolPieActive = pad.schoolPieData.filter((x) => x.value > 0);
+    return (
+      <>
+        <div className="hs-reports-toolbar hs-reports-toolbar--card hs-phys-analytics-toolbar">
+          <div className="hs-reports-toolbar-row">
+            <div className="hs-phys-analytics-period">
+              <span className="hs-reports-period-label">Filters</span>
+              <div className="hs-phys-analytics-period-btns" role="group" aria-label="Report period">
+                {[
+                  { id: "today", label: "Today" },
+                  { id: "month", label: "Month" },
+                  { id: "year", label: "This Year" },
+                ].map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`hs-phys-analytics-period-btn${hsoAnalyticsPeriod === p.id ? " hs-phys-analytics-period-btn--active" : ""}`}
+                    onClick={() => setHsoAnalyticsPeriod(p.id)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="hs-reports-actions">
+              <button type="button" className="hs-reports-btn-outline" onClick={exportHsoAnalyticsCsv}>
+                <Download size={16} strokeWidth={1.75} aria-hidden /> CSV
+              </button>
+              <button type="button" className="hs-reports-btn-pdf" onClick={exportHsoAnalyticsPdf}>
+                <Printer size={16} strokeWidth={1.75} aria-hidden /> PDF
+              </button>
+            </div>
           </div>
-          <div className="cases-panel hs-panel-elevated hs-phys-card">
-            {physicianPrescriptionRows.length ? (
-              <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">All Prescriptions</div></div>
-            ) : null}
-            <div className="cases-table-wrapper">
-              {physicianPrescriptionRows.length ? (
-                <table className="cases-table">
-                  <thead><tr><th>RX ID</th><th>Patient</th><th>Drug</th><th>Instructions</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
-                  <tbody>
-                    {physicianPrescriptionRows.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.id}</td>
-                        <td>{row.patient}</td>
-                        <td>{row.drug}</td>
-                        <td>{row.instructions}</td>
-                        <td>{row.date}</td>
-                        <td><span className={pillClass(statusLabel(row.status))}>{statusLabel(row.status)}</span></td>
-                        <td>Refill • Print</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        </div>
+
+        <div className="hs-reports-kpi-row hs-reports-kpi-row--hso3">
+          <div className="hs-reports-kpi">
+            <div className="hs-reports-kpi-top">
+              <div className="hs-reports-kpi-icon hs-reports-kpi-icon--blue">
+                <Users size={20} strokeWidth={1.75} aria-hidden />
+              </div>
+            </div>
+            <p className="hs-reports-kpi-value">{pad.totalQueues}</p>
+            <p className="hs-reports-kpi-label">Total queues</p>
+            <p className="hs-reports-kpi-hint">Check-in or queue number in range</p>
+          </div>
+          <div className="hs-reports-kpi">
+            <div className="hs-reports-kpi-top">
+              <div className="hs-reports-kpi-icon hs-reports-kpi-icon--teal">
+                <FileText size={20} strokeWidth={1.75} aria-hidden />
+              </div>
+            </div>
+            <p className="hs-reports-kpi-value">{pad.certCount}</p>
+            <p className="hs-reports-kpi-label">Medical certificates issued</p>
+            <p className="hs-reports-kpi-hint">Consultation rows in range</p>
+          </div>
+          <div className="hs-reports-kpi">
+            <div className="hs-reports-kpi-top">
+              <div className="hs-reports-kpi-icon hs-reports-kpi-icon--orange">
+                <Timer size={20} strokeWidth={1.75} aria-hidden />
+              </div>
+            </div>
+            <p className="hs-reports-kpi-value">{pad.avgWaitMin || "—"}</p>
+            <p className="hs-reports-kpi-label">Average waiting time</p>
+            <p className="hs-reports-kpi-hint">Minutes from check-in to consult start</p>
+          </div>
+        </div>
+
+        <div className="do-panel" style={{ marginBottom: 20 }}>
+          <div className="do-panel-header">
+            <h2 className="do-panel-title">Peak month</h2>
+          </div>
+          <div className="do-panel-body" style={{ padding: "16px 20px 24px" }}>
+            <p className="hs-stat-meta" style={{ marginTop: 0 }}>
+              Students visiting HSO by calendar month for {pad.end.getFullYear()}: each visit is counted in the month of the consultation record ({peakTotal} visit(s) in the selected filter).
+            </p>
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={pad.peakMonthSeries} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Line type="monotone" dataKey="total" stroke="#2563eb" strokeWidth={2} dot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="hs-reports-charts-grid">
+          <div className="hs-reports-chart-panel do-panel">
+            <div className="do-panel-header">
+              <h2 className="do-panel-title">School visits</h2>
+            </div>
+            <div className="do-panel-body" style={{ padding: "16px 20px 24px" }}>
+              {schoolPieActive.length ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={schoolPieActive}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={100}
+                      label
+                    >
+                      {schoolPieActive.map((entry, i) => (
+                        <Cell
+                          key={entry.name}
+                          fill={PHYSICIAN_ANALYTICS_SCHOOL_COLORS[entry.name] || HSO_ANALYTICS_PIE_COLORS[i % HSO_ANALYTICS_PIE_COLORS.length]}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
               ) : (
-                <div className="cc-modal-body">
-                  <EmptyStateMessage
-                    icon={FileText}
-                    title="No prescription history available."
-                    description="Issued prescriptions will appear here once consultations include medication orders."
-                  />
-                </div>
+                <p className="hs-stat-meta">No SECA / SASE / SBMA matches in student program text for this period.</p>
               )}
             </div>
           </div>
-        </>
-      );
-    }
-    const nowServing = providerQueueRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS);
-    return (
-      <div className="cases-panel hs-panel-elevated">
-        <div className="cases-panel-header">
-          <div className="cases-panel-title cases-panel-title--strong">Patient Queue Display</div>
-          <p className="hs-list-sub hs-list-sub--tight">Read-only board intended for TV monitor.</p>
-        </div>
-        <div className="cc-modal-body">
-          <h2 style={{ marginTop: 0, color: "#0f172a" }}>
-            Now Serving: {nowServing?.queueNumber ? String(nowServing.queueNumber).padStart(4, "0") : "----"}
-          </h2>
-          <div className="cases-table-wrapper">
-            <table className="cases-table">
-              <thead><tr><th>Queue #</th><th>Station</th><th>Status</th></tr></thead>
-              <tbody>
-                {providerQueueRows.slice(0, 10).map((r) => (
-                  <tr key={r.id}>
-                    <td className="cell-case-id">{r.queueNumber ? String(r.queueNumber).padStart(4, "0") : "—"}</td>
-                    <td className="cell-text" style={{ textTransform: "capitalize" }}>{r.providerQueue || r.designation || "physician"}</td>
-                    <td><span className={pillClass(statusLabel(r.workflowStatus))}>{statusLabel(r.workflowStatus)}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="hs-reports-chart-panel do-panel">
+            <div className="do-panel-header">
+              <h2 className="do-panel-title">Program visits</h2>
+            </div>
+            <div className="do-panel-body" style={{ padding: "16px 20px 24px" }}>
+              {pad.programPieData.length ? (
+                <>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={pad.programPieData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={100}
+                        label
+                      >
+                        {pad.programPieData.map((entry, i) => (
+                          <Cell key={entry.name} fill={HSO_ANALYTICS_PIE_COLORS[i % HSO_ANALYTICS_PIE_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <p className="hs-stat-meta" style={{ marginTop: 12 }}>
+                    Program from <strong>students.program</strong> (per consultation in range).
+                  </p>
+                </>
+              ) : (
+                <p className="hs-stat-meta">No program data for consultations in this period.</p>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      </>
     );
   };
 
@@ -2761,7 +4778,8 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     return (
       <div className="hs-phys-queue-layout hs-dent-queue-page">
         <div className="cases-panel hs-panel-elevated hs-phys-card">
-          <div className="cases-panel-header hs-dent-queue-serving-head">
+          <div className="cases-panel-header hs-dent-queue-serving-head hs-queue-serving-header">
+            <div className="hs-queue-serving-header__status">{queueStationStatusBadge(dentistStationOnline)}</div>
             <p className="hs-nurse-serving-label">NOW SERVING</p>
             <h2 className="hs-nurse-serving-title">QUEUING NUMBER</h2>
           </div>
@@ -2779,19 +4797,19 @@ function HealthServices({ embedReportsOnly = false } = {}) {
             ) : null}
             <div className="hs-nurse-quick-title">QUICK ACTIONS</div>
             <div className="hs-nurse-quick-grid">
-              <button type="button" className="hs-btn-secondary">
+              <button type="button" className="hs-btn-secondary" onClick={handleDentistQueueCompleteOnly}>
                 <CheckCircle size={13} /> Complete
               </button>
-              <button type="button" className="hs-btn-secondary">
+              <button type="button" className="hs-btn-secondary" onClick={handleDentistQueueNext}>
                 <Send size={13} /> Next
               </button>
-              <button type="button" className="hs-btn-secondary">
+              <button type="button" className="hs-btn-secondary" onClick={handleDentistQueueTransfer}>
                 <Route size={13} /> Transfer
               </button>
-              <button type="button" className="hs-btn-secondary">
+              <button type="button" className="hs-btn-secondary" onClick={handleDentistQueueStart}>
                 <Activity size={13} /> Start
               </button>
-              <button type="button" className="hs-btn-secondary">
+              <button type="button" className="hs-btn-secondary" onClick={handleDentistQueueClose}>
                 <X size={13} /> Close
               </button>
             </div>
@@ -3226,35 +5244,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     );
   };
 
-  // --- Admin Side: HSO Operational Settings ---
-  const renderSettings = () => (
-    <div className="cases-panel hs-panel-elevated">
-      <div className="cases-panel-header">
-        <div className="cases-panel-title cases-panel-title--strong">HSO Operational Settings</div>
-      </div>
-      <div className="cc-modal-body">
-        <div className="hs-modal-grid">
-          <div className="hs-modal-field">
-            <label>Check-in window</label>
-            <input value="1 hour before appointment" readOnly />
-          </div>
-          <div className="hs-modal-field">
-            <label>Queue prefix format</label>
-            <input value="4-digit sequential" readOnly />
-          </div>
-          <div className="hs-modal-field">
-            <label>No-show grace period</label>
-            <input value="15 minutes" readOnly />
-          </div>
-          <div className="hs-modal-field">
-            <label>Monitor refresh</label>
-            <input value="8 seconds" readOnly />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
   // --- Visits View: Physician and Nurse Listing ---
   const renderVisits = () => {
     if (isPhysicianUser) {
@@ -3267,7 +5256,8 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       return (
         <div className="hs-phys-queue-layout">
           <div className="cases-panel hs-panel-elevated hs-phys-card">
-            <div className="cases-panel-header">
+            <div className="cases-panel-header hs-queue-serving-header">
+              <div className="hs-queue-serving-header__status">{queueStationStatusBadge(physicianStationOnline)}</div>
               <p className="hs-nurse-serving-label">NOW SERVING</p>
               <h2 className="hs-nurse-serving-title">QUEUING NUMBER</h2>
             </div>
@@ -3287,11 +5277,30 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               ) : null}
               <div className="hs-nurse-quick-title">QUICK ACTIONS</div>
               <div className="hs-nurse-quick-grid">
-                <button type="button" className="hs-btn-secondary"><CheckCircle size={13} /> Complete</button>
-                <button type="button" className="hs-btn-secondary"><Send size={13} /> Next</button>
-                <button type="button" className="hs-btn-secondary"><Route size={13} /> Transfer</button>
-                <button type="button" className="hs-btn-secondary"><Activity size={13} /> Start</button>
-                <button type="button" className="hs-btn-secondary"><X size={13} /> Close</button>
+                {physicianQueueRows[0]?.studentId ? (
+                  <button
+                    type="button"
+                    className="hs-btn-secondary"
+                    onClick={() => openPhysicianChart(physicianQueueRows[0].studentId)}
+                  >
+                    <FileText size={13} /> Open Chart
+                  </button>
+                ) : null}
+                <button type="button" className="hs-btn-secondary" onClick={handlePhysicianQueueCompleteOnly}>
+                  <CheckCircle size={13} /> Complete
+                </button>
+                <button type="button" className="hs-btn-secondary" onClick={handlePhysicianQueueNext}>
+                  <Send size={13} /> Next
+                </button>
+                <button type="button" className="hs-btn-secondary" onClick={handlePhysicianQueueTransfer}>
+                  <Route size={13} /> Transfer
+                </button>
+                <button type="button" className="hs-btn-secondary" onClick={handlePhysicianQueueStart}>
+                  <Activity size={13} /> Start
+                </button>
+                <button type="button" className="hs-btn-secondary" onClick={handlePhysicianQueueClose}>
+                  <X size={13} /> Close
+                </button>
               </div>
             </div>
           </div>
@@ -3301,7 +5310,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               {physicianQueueRows.map((r) => (
                 <div className="hs-nurse-ticket hs-nurse-ticket--upnext" key={r.id}>
                   <div className="hs-nurse-ticket-no"><span>TICKET</span><strong>{String(r.queueNumber || 0).padStart(4, "0")}</strong></div>
-                  <div><strong>{r.student}</strong><p>{r.providerQueue || "Physician"}</p></div>
+                  <div><strong>{r.studentLabel}</strong><p>{r.providerQueue || r.reason || "Physician"}</p></div>
                 </div>
               ))}
               {!physicianQueueRows.length ? (
@@ -3443,30 +5452,29 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const renderRecords = () => (
     isPhysicianUser ? (
       <div className="hs-phys-records-grid">
-        {(() => {
-          const selectedPatient = healthRecordsRows[0] || null;
-          const patientTimelineRows = consultationRows
-            .filter((row) =>
-              selectedPatient?.studentId
-                ? String(row.studentId || "").toLowerCase() === String(selectedPatient.studentId || "").toLowerCase()
-                : String(row.student || "").toLowerCase() === String(selectedPatient?.student || "").toLowerCase(),
-            )
-            .slice(0, 5);
-          return (
-            <>
         <div className="cases-panel hs-panel-elevated hs-phys-card">
           <div className="cc-modal-body hs-phys-records-left">
-            {healthRecordsRows.length ? (
+            {physicianSidebarRecords.length ? (
               <>
                 <div className="hs-modal-field hs-phys-records-search">
-                  <input className="hs-filter-input" placeholder="Search patient..." />
+                  <input className="hs-filter-input" placeholder="Search patient…" readOnly title="Filter coming soon" />
                 </div>
                 <div className="hs-phys-records-list">
-                  {healthRecordsRows.slice(0, 7).map((r) => (
-                    <div key={r.id} className="hs-nurse-ticket">
+                  {physicianSidebarRecords.slice(0, 24).map((r) => (
+                    <button
+                      type="button"
+                      key={r.id}
+                      className={`hs-nurse-ticket hs-phys-records-pick${
+                        normalizeStudentIdMatch(selectedPhysicianSidebarPatient?.studentId) ===
+                        normalizeStudentIdMatch(r.studentId)
+                          ? " hs-phys-records-pick--active"
+                          : ""
+                      }`}
+                      onClick={() => setPhysicianRecordsStudentId(r.studentId)}
+                    >
                       <strong>{r.student}</strong>
                       <p>{r.studentId} • {r.allergies || "No known allergies"}</p>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </>
@@ -3474,55 +5482,304 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               <EmptyStateMessage
                 compact
                 icon={Users}
-                title="No patient records available."
-                description="Student medical records will appear here after initial visits."
+                title="No patients in roster yet."
+                description="Students appear here from medical records or from today’s appointment queue."
               />
             )}
           </div>
         </div>
         <div className="cases-panel hs-panel-elevated hs-phys-card">
-          {selectedPatient ? (
+          {selectedPhysicianSidebarPatient ? (
             <>
               <div className="cases-panel-header hs-phys-records-header">
                 <div>
-                  <div className="cases-panel-title cases-panel-title--strong">{selectedPatient.student}</div>
-                  <p className="hs-stat-meta">{selectedPatient.studentId} · {selectedPatient.allergies || "No known allergies"}</p>
+                  <div className="cases-panel-title cases-panel-title--strong">{selectedPhysicianSidebarPatient.student}</div>
+                  <p className="hs-stat-meta">{selectedPhysicianSidebarPatient.studentId} · {selectedPhysicianSidebarPatient.allergies || "No known allergies"}</p>
                 </div>
-                <button type="button" className="hs-btn-secondary">Open Chart</button>
+                <button type="button" className="hs-btn-secondary" onClick={() => openPhysicianChart(selectedPhysicianSidebarPatient.studentId)}>
+                  Open Chart
+                </button>
               </div>
-              <div className="cc-modal-body hs-phys-records-right">
-                <div className="hs-phys-tab-row">
+              <div className="cc-modal-body hs-phys-records-right hs-phys-records-detail">
+                <div className="hs-phys-tab-row hs-phys-tab-row--records">
                   {[
                     { id: "timeline", label: "Timeline" },
                     { id: "prescriptions", label: "Prescription" },
                     { id: "documents", label: "Documents" },
-                  ].map((tab, idx) => (
+                  ].map((tab) => (
                     <button
                       key={tab.id}
                       type="button"
-                      className={`hs-phys-tab-btn ${idx === 0 ? "hs-phys-tab-btn--active" : ""}`}
+                      className={`hs-phys-tab-btn${physicianRecordsSubTab === tab.id ? " hs-phys-tab-btn--active" : ""}`}
+                      onClick={() => setPhysicianRecordsSubTab(tab.id)}
                     >
                       {tab.label}
                     </button>
                   ))}
                 </div>
-                {patientTimelineRows.length ? (
+                {physicianRecordsSubTab === "timeline" ? (
+                  physicianRecordTimelineRows.length ? (
+                    <div className="hs-phys-records-list hs-phys-records-list--timeline">
+                      <p className="hs-phys-records-hint">
+                        Consultation history (date, time, and service). Medical history and exam details stay in Open Chart.
+                      </p>
+                      {physicianRecordTimelineRows.map((c) => {
+                        const serviceLabel =
+                          String(c.service || "").trim() && String(c.service).trim() !== "—"
+                            ? c.service
+                            : c.reason;
+                        const drLine = formatPhysicianTimelineDoctor(c.doctor);
+                        const st = String(c.status || "").toLowerCase();
+                        const statusMod =
+                          st === "completed" || st === "complete"
+                            ? "hs-phys-pr-status-pill--success"
+                            : st === "cancelled" || st === "canceled"
+                              ? "hs-phys-pr-status-pill--muted"
+                              : "hs-phys-pr-status-pill--neutral";
+                        return (
+                          <div key={c.id} className="hs-phys-pr-timeline-card">
+                            <div className="hs-phys-pr-timeline-card__row hs-phys-pr-timeline-card__row--top">
+                              <span className="hs-phys-pr-timeline-card__when">
+                                {c.date}
+                                <span className="hs-phys-pr-timeline-card__dot"> · </span>
+                                {c.time}
+                              </span>
+                              <span className={`hs-phys-pr-status-pill ${statusMod}`}>
+                                {consultStatusToLabel(c.status)}
+                              </span>
+                            </div>
+                            <div className="hs-phys-pr-timeline-card__row hs-phys-pr-timeline-card__row--detail">
+                              <span className="hs-phys-pr-timeline-card__svc">
+                                <span className="hs-phys-pr-timeline-card__svc-label">Service</span>
+                                <span className="hs-phys-pr-timeline-card__svc-value">{serviceLabel}</span>
+                              </span>
+                              {drLine ? <span className="hs-phys-pr-timeline-card__dr">{drLine}</span> : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <EmptyStateMessage
+                      compact
+                      icon={FileText}
+                      title="No consultation history yet."
+                      description="When a visit is completed from the physician queue, it appears here with date, time, and service."
+                    />
+                  )
+                ) : null}
+                {physicianRecordsSubTab === "prescriptions" ? (
                   <div className="hs-phys-records-list">
-                    {patientTimelineRows.map((c) => (
-                      <div key={c.id} className="hs-nurse-ticket">
-                        <strong>{c.date}</strong>
-                        <p>{c.reason}</p>
-                      </div>
-                    ))}
+                    <p className="hs-phys-records-hint">
+                      Rows are dated from completed visits (physician queue) or from the latest{" "}
+                      <strong>Save chart</strong> when the prescription field is filled. Click a row for full text.
+                    </p>
+                    <div className="hs-phys-student-accordion hs-phys-rx-accordion hs-phys-rx-accordion--records">
+                      {selectedPhysicianPrescriptionHistoryRows.length ? (
+                        selectedPhysicianPrescriptionHistoryRows.map((c) => {
+                          const expanded = physicianRecordsRxExpandedId === c.id;
+                          const rxText = c.prescription || c.treatment;
+                          return (
+                            <div key={c.id} className="hs-phys-student-group hs-nurse-ticket hs-phys-pr-rx-card">
+                              <button
+                                type="button"
+                                className="hs-phys-student-group-header"
+                                aria-expanded={expanded}
+                                onClick={() =>
+                                  setPhysicianRecordsRxExpandedId((cur) => (cur === c.id ? null : c.id))
+                                }
+                              >
+                                <div style={{ minWidth: 0 }}>
+                                  <strong className="hs-phys-pr-rx-card__title">
+                                    Consultation · {c.date}
+                                    <span className="hs-phys-pr-rx-card__time">{c.time}</span>
+                                  </strong>
+                                  <p className="hs-phys-pr-rx-card__subtitle">
+                                    {c.service || c.reason}
+                                    {c.doctor && c.doctor !== "—"
+                                      ? ` · ${formatPhysicianTimelineDoctor(c.doctor)}`
+                                      : ""}
+                                  </p>
+                                  {!expanded ? (
+                                    <p
+                                      className="hs-stat-meta hs-phys-rx-list-preview"
+                                      style={{ margin: "8px 0 0" }}
+                                    >
+                                      {prescriptionRowListPreview(rxText)}
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <ChevronRight
+                                  size={18}
+                                  aria-hidden
+                                  style={{
+                                    flexShrink: 0,
+                                    transform: expanded ? "rotate(90deg)" : "none",
+                                    transition: "transform 0.15s ease",
+                                  }}
+                                />
+                              </button>
+                              {expanded ? (
+                                <div className="hs-phys-rx-acc-detail">
+                                  <p style={{ margin: 0, fontWeight: 600 }}>Prescription</p>
+                                  <p style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>
+                                    {rxText?.trim()
+                                      ? rxText
+                                      : "No prescription was recorded for this visit."}
+                                  </p>
+                                  {c.diagnosis ? (
+                                    <p className="hs-stat-meta" style={{ marginTop: 12 }}>
+                                      <strong>Diagnosis:</strong> {c.diagnosis}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })
+                      ) : null}
+                    </div>
+                    {!selectedPhysicianPrescriptionHistoryRows.length ? (
+                      <EmptyStateMessage
+                        compact
+                        icon={FileText}
+                        title="No prescription history yet."
+                        description="Complete a visit from the physician queue, or save the chart with prescription text so a dated row is logged for this student."
+                      />
+                    ) : null}
                   </div>
-                ) : (
-                  <EmptyStateMessage
-                    compact
-                    icon={FileText}
-                    title="No consultation notes available."
-                    description="Completed consultation entries will appear in this patient chart."
-                  />
-                )}
+                ) : null}
+                {physicianRecordsSubTab === "documents" ? (
+                  <div className="hs-phys-records-doc-wrap">
+                    <p className="hs-phys-records-hint">
+                      Uploaded files (labs, imaging) and issued medical certificates. Preview opens below without downloading.
+                    </p>
+                    {selectedPhysicianCertificateDocs.length ? (
+                      <div className="hs-phys-records-doc-section">
+                        <strong>Medical certificates</strong>
+                        <ul className="hs-phys-chart-doc-list hs-phys-chart-doc-list--compact">
+                          {selectedPhysicianCertificateDocs.map((cert) => (
+                            <li key={cert.id} className="hs-phys-chart-doc-row">
+                              <button
+                                type="button"
+                                className="hs-phys-doc-preview-btn"
+                                onClick={() =>
+                                  setPhysicianRecordDocPreview({
+                                    kind: "certificate",
+                                    title: `Certificate · ${cert.consultationDateTimeLabel || cert.date}`,
+                                    body: [
+                                      `Reason: ${cert.certificateReason || cert.certReason}`,
+                                      cert.certificatePeriod ? `Period: ${cert.certificatePeriod}` : "",
+                                      cert.certificateStatus ? `Status: ${cert.certificateStatus}` : "",
+                                    ]
+                                      .filter(Boolean)
+                                      .join("\n"),
+                                  })
+                                }
+                              >
+                                <FileText size={14} aria-hidden />
+                                <span>View certificate — {cert.consultationDateTimeLabel || cert.date}</span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {selectedPhysicianHealthRecord?.physicianDocumentsAttachments?.length ? (
+                      <div className="hs-phys-records-doc-section">
+                        <strong>Uploaded files</strong>
+                        <ul className="hs-phys-chart-doc-list hs-phys-chart-doc-list--compact">
+                          {selectedPhysicianHealthRecord.physicianDocumentsAttachments.map((a) => (
+                            <li key={a.path || a.url} className="hs-phys-chart-doc-row">
+                              <button
+                                type="button"
+                                className="hs-phys-doc-preview-btn"
+                                onClick={() => {
+                                  const url = a.url;
+                                  if (patientRecordDocUrlIsImage(url)) {
+                                    setPhysicianRecordDocPreview({ kind: "image", url, title: a.name || "Image" });
+                                  } else if (patientRecordDocUrlIsPdf(url)) {
+                                    setPhysicianRecordDocPreview({ kind: "pdf", url, title: a.name || "PDF" });
+                                  } else {
+                                    setPhysicianRecordDocPreview({
+                                      kind: "other",
+                                      url,
+                                      title: a.name || "File",
+                                    });
+                                  }
+                                }}
+                              >
+                                <Eye size={14} aria-hidden />
+                                <span>Preview — {a.name || "File"}</span>
+                              </button>
+                              {a.uploadedAt ? (
+                                <span className="hs-stat-meta">{new Date(a.uploadedAt).toLocaleString()}</span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {selectedPhysicianHealthRecord?.physicianDocumentsNotes ? (
+                      <div className="hs-phys-records-doc-section hs-phys-records-doc-section--notes">
+                        <strong>Document notes</strong>
+                        <p className="hs-stat-meta" style={{ whiteSpace: "pre-wrap" }}>
+                          {selectedPhysicianHealthRecord.physicianDocumentsNotes}
+                        </p>
+                      </div>
+                    ) : null}
+                    {physicianRecordDocPreview ? (
+                      <div className="hs-phys-doc-preview-panel hs-phys-doc-preview-panel--records">
+                        <div className="hs-phys-doc-preview-head">
+                          <strong>{physicianRecordDocPreview.title || "Preview"}</strong>
+                          <button
+                            type="button"
+                            className="hs-icon-btn"
+                            aria-label="Close preview"
+                            onClick={() => setPhysicianRecordDocPreview(null)}
+                          >
+                            <X size={16} aria-hidden />
+                          </button>
+                        </div>
+                        {physicianRecordDocPreview.kind === "certificate" ? (
+                          <pre className="hs-phys-doc-preview-text">{physicianRecordDocPreview.body || ""}</pre>
+                        ) : null}
+                        {physicianRecordDocPreview.kind === "image" && physicianRecordDocPreview.url ? (
+                          <img
+                            className="hs-phys-doc-preview-img"
+                            src={physicianRecordDocPreview.url}
+                            alt={physicianRecordDocPreview.title || ""}
+                          />
+                        ) : null}
+                        {physicianRecordDocPreview.kind === "pdf" && physicianRecordDocPreview.url ? (
+                          <iframe
+                            className="hs-phys-doc-preview-iframe"
+                            title={physicianRecordDocPreview.title || "PDF"}
+                            src={physicianRecordDocPreview.url}
+                          />
+                        ) : null}
+                        {physicianRecordDocPreview.kind === "other" && physicianRecordDocPreview.url ? (
+                          <p className="hs-stat-meta">
+                            <a href={physicianRecordDocPreview.url} target="_blank" rel="noopener noreferrer">
+                              Open in new tab
+                            </a>{" "}
+                            if preview is not supported.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {!selectedPhysicianHealthRecord?.physicianDocumentsAttachments?.length &&
+                    !selectedPhysicianHealthRecord?.physicianDocumentsNotes &&
+                    !selectedPhysicianCertificateDocs.length ? (
+                      <EmptyStateMessage
+                        compact
+                        icon={Folder}
+                        title="No documents on file yet."
+                        description="Issue a certificate or attach files from Open Chart."
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </>
           ) : (
@@ -3530,52 +5787,72 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               <EmptyStateMessage
                 icon={FileText}
                 title="No patient selected."
-                description="Select a student record from the left panel to open patient chart details."
+                description="Choose a student on the left (from records or active queue)."
               />
             </div>
           )}
         </div>
-            </>
-          );
-        })()}
       </div>
     ) : isNurseUser ? (
       <>
         <div className="cases-panel hs-panel-elevated">
           <div className="cases-panel-header">
-            <div className="cases-panel-title cases-panel-title--strong">Patient Records</div>
+            <div>
+              <div className="cases-panel-title cases-panel-title--strong">Patient Records</div>
+              <p className="hs-list-sub hs-list-sub--tight">
+                One row per student — consolidates visits recorded under physician and dentist (health consultations) plus your medical record file dates.
+              </p>
+            </div>
           </div>
           <div className="cc-modal-body">
-            <div className="hs-modal-field" style={{ maxWidth: 340 }}>
-              <label>Search by Student ID or Name</label>
+            <div className="hs-modal-field" style={{ maxWidth: 420 }}>
+              <label>Search by Student ID, Name, or Program</label>
               <input
                 className="hs-filter-input"
                 value={recordsQuery}
                 onChange={(e) => setRecordsQuery(e.target.value)}
-                placeholder="e.g., 2023-12345 or Maria"
+                placeholder="e.g., 2023-12345, Maria, or BS Nursing"
               />
             </div>
           </div>
           <div className="cases-table-wrapper">
             <table className="cases-table">
-              <thead><tr><th>Date & Time</th><th>Student</th><th>Vitals Summary</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Student ID</th>
+                  <th>Student Name</th>
+                  <th>Program</th>
+                  <th>Last Visit</th>
+                  <th style={{ width: 140 }}>Action</th>
+                </tr>
+              </thead>
               <tbody>
-                {consultationRows
-                  .filter((r) => {
-                    const q = String(recordsQuery || "").trim().toLowerCase();
-                    if (!q) return true;
-                    return String(r.student || "").toLowerCase().includes(q) || String(r.studentId || "").toLowerCase().includes(q);
-                  })
-                  .slice(0, 20)
-                  .map((r) => (
-                    <tr key={r.id}>
-                      <td className="cell-text">{`${r.date || "—"} ${r.time || ""}`.trim()}</td>
-                      <td><p className="cell-student-name">{r.student}</p><p className="cell-student-id">{r.studentId}</p></td>
-                      <td className="cell-text">{`${r.bloodPressure || "—"} / ${r.temperature || "—"}°C / ${r.heartRate || "—"} BPM`}</td>
-                    </tr>
-                  ))}
-                {!consultationRows.length ? (
-                  <tr><td className="cell-text" colSpan={3}>No visit timeline records yet.</td></tr>
+                {nursePatientRecordsFiltered.map((row) => (
+                  <tr key={row.studentId}>
+                    <td className="cell-text cell-student-id">{row.studentId}</td>
+                    <td className="cell-text">{row.studentName}</td>
+                    <td className="cell-text">{row.program}</td>
+                    <td className="cell-text">{row.lastVisit}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="hs-btn-secondary hs-nurse-records-view-btn"
+                        onClick={() => openPhysicianChart(row.studentId)}
+                      >
+                        <Eye size={14} strokeWidth={1.75} aria-hidden />
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {!nursePatientRecordsFiltered.length ? (
+                  <tr>
+                    <td className="cell-text" colSpan={5}>
+                      {nursePatientRecordsRoster.length
+                        ? "No students match your search."
+                        : "No student records yet — they appear after consultations or medical records are saved."}
+                    </td>
+                  </tr>
                 ) : null}
               </tbody>
             </table>
@@ -3736,9 +6013,10 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     isPhysicianUser ? (
       (() => {
         const certQuery = String(certificateSearch || "").trim().toLowerCase();
-        const filteredCertificates = certificatesList.filter((row) => {
+        const filteredCertGroups = certificatesByStudent.filter((g) => {
           if (!certQuery) return true;
-          return `${row.id} ${row.patient} ${row.reason}`.toLowerCase().includes(certQuery);
+          const hay = `${g.studentId} ${g.studentName}`.toLowerCase();
+          return hay.includes(certQuery);
         });
         const pendingPickup = certificatesList.filter((row) => String(row.status).toLowerCase() === "pending").length;
         return (
@@ -3767,61 +6045,75 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               </div>
             </div>
             <div className="cases-panel hs-panel-elevated hs-phys-card">
-              {certificatesList.length ? (
+              {certificatesByStudent.length ? (
                 <div className="cases-panel-header hs-phys-cert-header">
-                  <div className="cases-panel-title cases-panel-title--strong">Recently Issued</div>
+                  <div className="cases-panel-title cases-panel-title--strong">Students with certificates</div>
                 </div>
               ) : null}
               <div className="cases-table-wrapper">
-                {certificatesList.length ? (
+                {certificatesByStudent.length ? (
                   <>
                     <div className="hs-phys-cert-table-tools">
                       <div className="hs-phys-cert-search-wrap">
                         <input
                           className="hs-filter-input"
-                          placeholder="Search by patient or ID..."
+                          placeholder="Search by student name or ID..."
                           value={certificateSearch}
                           onChange={(e) => setCertificateSearch(e.target.value)}
                         />
                       </div>
                     </div>
-                    <table className="cases-table">
-                      <thead><tr><th>Cert ID</th><th>Patient</th><th>Reason</th><th>Period</th><th>Issued</th><th>Status</th><th>Actions</th></tr></thead>
-                      <tbody>
-                        {filteredCertificates.map((row) => (
-                          <tr key={row.id}>
-                            <td className="cell-text">{row.id}</td>
-                            <td className="cell-text">{row.patient}</td>
-                            <td className="cell-text">{row.reason}</td>
-                            <td className="cell-text">{row.period}</td>
-                            <td className="cell-text">{row.issuedAt}</td>
-                            <td><span className={pillClass(statusLabel(row.status))}>{statusLabel(row.status)}</span></td>
-                            <td>
-                              <div className="hs-phys-cert-row-actions">
-                                <button type="button" className="hs-icon-btn" aria-label={`Print ${row.id}`}>
-                                  <Printer size={13} strokeWidth={1.9} aria-hidden />
-                                </button>
-                                <button type="button" className="hs-icon-btn" aria-label={`View ${row.id}`}>
-                                  <Eye size={13} strokeWidth={1.9} aria-hidden />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {!filteredCertificates.length ? (
-                          <tr>
-                            <td className="cell-text" colSpan={7}>No certificates match your search.</td>
-                          </tr>
-                        ) : null}
-                      </tbody>
-                    </table>
+                    <div className="cc-modal-body hs-phys-student-accordion">
+                      {filteredCertGroups.map((g) => (
+                        <div key={g.studentId} className="hs-phys-student-group">
+                          <button
+                            type="button"
+                            className="hs-phys-student-group-header"
+                            onClick={() =>
+                              setCertExpandedStudentId((cur) => (cur === g.studentId ? null : g.studentId))
+                            }
+                          >
+                            <div>
+                              <strong>{g.studentName}</strong>
+                              <p className="hs-stat-meta">{g.studentId} · {g.entries.length} certificate(s)</p>
+                            </div>
+                            <ChevronRight
+                              size={18}
+                              aria-hidden
+                              style={{
+                                flexShrink: 0,
+                                transform: certExpandedStudentId === g.studentId ? "rotate(90deg)" : "none",
+                                transition: "transform 0.15s ease",
+                              }}
+                            />
+                          </button>
+                          {certExpandedStudentId === g.studentId ? (
+                            <ul className="hs-phys-student-group-body">
+                              {g.entries.map((row) => (
+                                <li key={row.id}>
+                                  <strong>{row.consultationDateTimeLabel || `${row.date} ${row.time}`}</strong>
+                                  <p>{row.certificateReason || row.certReason}</p>
+                                  <p className="hs-stat-meta">
+                                    Period: {row.certificatePeriod || "—"} ·{" "}
+                                    {statusLabel(row.certificateStatus || row.status)}
+                                  </p>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ))}
+                      {!filteredCertGroups.length ? (
+                        <p className="hs-stat-meta" style={{ padding: 16 }}>No students match your search.</p>
+                      ) : null}
+                    </div>
                   </>
                 ) : (
                   <div className="cc-modal-body">
                     <EmptyStateMessage
                       icon={FileText}
                       title="No medical certificates issued yet."
-                      description="Issued certificates will appear here once consultations are completed."
+                      description="Use Issue Certificate from the physician dashboard after a visit, or complete the certificate workflow."
                     />
                   </div>
                 )}
@@ -3924,6 +6216,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
 
   const renderNurseStation = () => (
     <>
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginBottom: 24 }}>
         <div>
           <h3 className="hs-section-title" style={{ marginBottom: 12, fontSize: 14, fontWeight: 600 }}>Document Requests</h3>
@@ -4350,7 +6643,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     </>
   );
 
-  const renderReports = () => (
+  const renderAdminReports = () => (
     <>
       <div className="hs-reports-toolbar hs-reports-toolbar--card">
         <div className="hs-reports-toolbar-row">
@@ -4426,7 +6719,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     }
     switch (activeNav) {
       case "dashboard":
-        return { label: "New Appointment", onClick: openNewAppointmentModal, Icon: Plus };
+        return null;
       case "userManagement":
         return null;
       case "staffScheduling":
@@ -4448,9 +6741,8 @@ function HealthServices({ embedReportsOnly = false } = {}) {
           ? { label: "New Appointment", onClick: openNewAppointmentModal, Icon: CalendarDays }
           : null;
       case "nurseStation":
-        return userDesignation === "admin" || userDesignation === "nurse"
-          ? { label: "New Document Request", onClick: openNewDocModal, Icon: FileText }
-          : null;
+        /* Primary actions: dual buttons (document request + student referral) rendered in page heading */
+        return null;
       case "referrals":
         return userDesignation === "admin"
           ? { label: "Create Referral", onClick: openNewReferralModal, Icon: UserPlus }
@@ -4460,10 +6752,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
           ? { label: "New Request", onClick: openNewDocModal, Icon: FileText }
           : null;
       case "reports":
-        return null;
-      case "settings":
-        return null;
-      case "queueDisplay":
         return null;
       default:
         return null;
@@ -4497,11 +6785,8 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       case "docrequests":
         return renderDocRequests();
       case "reports":
-        return renderReports();
-      case "settings":
-        return renderSettings();
-      case "queueDisplay":
-        return renderQueueDisplay();
+        if (isNurseUser || isPhysicianUser || isDentistUser) return renderHealthServicesAnalytics();
+        return renderAdminReports();
       case "dentalQueue":
         return renderDentistQueue();
       case "dentalRecords":
@@ -4559,6 +6844,11 @@ function HealthServices({ embedReportsOnly = false } = {}) {
           userRole={userRole}
           notifications={HS_NOTIFICATIONS}
           notificationSlot={<StaffNotificationBell />}
+          avatar={
+            session?.profileAvatarDataUrl ? (
+              <img src={session.profileAvatarDataUrl} alt="" className="header-avatar-img" />
+            ) : undefined
+          }
         />
         <main className="dashboard-content hs-page hs-office-shell">
           <section className="hs-tab-page-heading">
@@ -4567,7 +6857,18 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                 <h1 className="hs-tab-page-title">{meta.title}</h1>
                 <p className="hs-tab-page-subtitle">{meta.subtitle}</p>
               </div>
-              {hsoTabPrimaryAction && TabPrimaryIcon ? (
+              {activeNav === "nurseStation" && (userDesignation === "admin" || userDesignation === "nurse") ? (
+                <div className="hs-inter-office-header-actions">
+                  <button type="button" className="btn-new-case" onClick={openNewDocModal}>
+                    <FileText size={16} strokeWidth={2} aria-hidden />
+                    New Document Request
+                  </button>
+                  <button type="button" className="btn-new-case btn-new-case--secondary-outline" onClick={openNewReferralModal}>
+                    <UserPlus size={16} strokeWidth={2} aria-hidden />
+                    Student referral
+                  </button>
+                </div>
+              ) : hsoTabPrimaryAction && TabPrimaryIcon ? (
                 <button type="button" className="btn-new-case" onClick={hsoTabPrimaryAction.onClick}>
                   <TabPrimaryIcon size={16} strokeWidth={2} aria-hidden />
                   {hsoTabPrimaryAction.label}
@@ -4575,31 +6876,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               ) : null}
             </div>
           </section>
-          {isNurseUser && activeNav === "queue" ? (
-            <section className="cases-panel hs-panel-elevated" style={{ marginBottom: 16 }}>
-              <div className="cases-panel-header">
-                <div className="cases-panel-title cases-panel-title--strong">Station Control Header</div>
-              </div>
-              <div className="cc-modal-body" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <button type="button" className="hs-btn-success" onClick={() => setNurseStationOnline(true)}>
-                  <CheckCircle size={14} strokeWidth={1.8} /> Start
-                </button>
-                <button
-                  type="button"
-                  className="hs-btn-secondary"
-                  onClick={() => {
-                    setNurseStationOnline(false);
-                    setActiveNurseSessionId(null);
-                  }}
-                >
-                  <X size={14} strokeWidth={1.8} /> Close
-                </button>
-                <span className="hs-stat-meta">
-                  Nurse Station 1 - {nurseStationOnline ? "Active (Online)" : "Inactive (Offline)"}
-                </span>
-              </div>
-            </section>
-          ) : null}
           {hsoLoading ? (
             <p className="hs-stat-meta" style={{ marginBottom: 12 }}>
               Loading Health Services data from Supabase…
@@ -4650,7 +6926,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       >
         <div className="cc-modal-body">
           <p className="hs-modal-lead">
-            For {workflowRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS)?.student || "selected patient"}
+            For {workflowRows.find((r) => r.workflowStatus === HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS)?.studentLabel || "selected patient"}
           </p>
           <div className="hs-modal-field">
             <label>Reason</label>
@@ -4687,9 +6963,298 @@ function HealthServices({ embedReportsOnly = false } = {}) {
             />
           </div>
           <div className="hs-modal-footer">
-            <button type="button" className="hs-btn-primary" onClick={() => setPhysicianCertModalOpen(false)}>
-              Issue &amp; Print
+            <button type="button" className="hs-btn-secondary" onClick={() => setPhysicianCertModalOpen(false)}>
+              Cancel
             </button>
+            <button type="button" className="hs-btn-primary" onClick={issuePhysicianCertificate}>
+              Issue &amp; save
+            </button>
+          </div>
+        </div>
+      </CCModal>
+
+      <CCModal
+        modalClassName="hs-cc-modal hs-phys-chart-modal"
+        open={physicianChartOpen}
+        title={isNurseUser ? "Student clinical record" : "Medical record"}
+        onClose={closePhysicianChart}
+        centered
+        wide
+      >
+        <div className="cc-modal-body hs-phys-chart-modal-body">
+          {physicianChartLoading ? <p className="hs-stat-meta">Loading student profile and chart…</p> : null}
+          {isNurseUser ? (
+            <p className="hs-stat-meta" style={{ marginBottom: 12 }}>
+              Read-only access — nurses can review the chart but cannot edit or save clinical notes.
+            </p>
+          ) : null}
+          <section className="hs-phys-chart-section hs-phys-chart-section--readonly">
+            <h4 className="hs-phys-chart-section-title">Personal information</h4>
+            <p className="hs-stat-meta">Maintained on the student mobile profile. Physicians can review only.</p>
+            <div className="hs-phys-chart-readonly-grid">
+              <div>
+                <span className="hs-phys-chart-label">Name</span>
+                <p className="hs-phys-chart-value">
+                  {physicianChartRoster
+                    ? [physicianChartRoster.lastName, physicianChartRoster.firstName, physicianChartRoster.middleInitial]
+                        .filter(Boolean)
+                        .join(", ") || physicianChartRoster.fullName || "—"
+                    : "—"}
+                </p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Course</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.course || "—"}</p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Student ID</span>
+                <p className="hs-phys-chart-value">{physicianChartStudentId || "—"}</p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Year level</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.yearLevel || "—"}</p>
+              </div>
+              <div className="hs-phys-chart-span-2">
+                <span className="hs-phys-chart-label">Address</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.address || "—"}</p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Contact no.</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.contactNo || "—"}</p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Birthdate</span>
+                <p className="hs-phys-chart-value">{formatRosterBirthdate(physicianChartRoster?.birthdate)}</p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Age</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.age || "—"}</p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Sex</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.sex || "—"}</p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Status</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.maritalStatus || "—"}</p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Religion</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.religion || "—"}</p>
+              </div>
+              <div className="hs-phys-chart-span-2">
+                <span className="hs-phys-chart-label">Person to notify (emergency)</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.emergencyContactName || "—"}</p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Relationship</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.emergencyRelationship || "—"}</p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Nationality</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.nationality || "—"}</p>
+              </div>
+              <div>
+                <span className="hs-phys-chart-label">Emergency contact no.</span>
+                <p className="hs-phys-chart-value">{physicianChartRoster?.emergencyContactNo || "—"}</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="hs-phys-chart-section">
+            <h4 className="hs-phys-chart-section-title">Medical history</h4>
+            <div className="hs-phys-chart-fields">
+              {PHYSICIAN_MEDICAL_HISTORY_FIELDS.map(({ key, label }) => (
+                <div className="hs-modal-field hs-phys-chart-field-line" key={key}>
+                  <label>{label}</label>
+                  <input
+                    className="hs-filter-input"
+                    readOnly={isNurseUser}
+                    value={physicianChartDraft.medicalHistory[key] ?? ""}
+                    onChange={(e) =>
+                      setPhysicianChartDraft((d) => ({
+                        ...d,
+                        medicalHistory: { ...d.medicalHistory, [key]: e.target.value },
+                      }))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="hs-phys-chart-section">
+            <h4 className="hs-phys-chart-section-title">Physical examination</h4>
+            <div className="hs-phys-chart-vitals-block">
+              <h5 className="hs-phys-chart-subtitle">Vital signs (from nurse station)</h5>
+              <p className="hs-stat-meta">Taken at triage and stored on the appointment. Shown read-only for physicians and dentists.</p>
+              <div className="hs-phys-chart-readonly-grid">
+                <div>
+                  <span className="hs-phys-chart-label">Blood pressure</span>
+                  <p className="hs-phys-chart-value">{physicianChartVitalsDisplay.bloodPressure}</p>
+                </div>
+                <div>
+                  <span className="hs-phys-chart-label">Pulse rate</span>
+                  <p className="hs-phys-chart-value">{physicianChartVitalsDisplay.pulse}</p>
+                </div>
+                <div>
+                  <span className="hs-phys-chart-label">Temperature</span>
+                  <p className="hs-phys-chart-value">{physicianChartVitalsDisplay.temperature}</p>
+                </div>
+                <div>
+                  <span className="hs-phys-chart-label">Height</span>
+                  <p className="hs-phys-chart-value">{physicianChartVitalsDisplay.heightCm}</p>
+                </div>
+                <div>
+                  <span className="hs-phys-chart-label">Weight</span>
+                  <p className="hs-phys-chart-value">{physicianChartVitalsDisplay.weightKg}</p>
+                </div>
+                <div>
+                  <span className="hs-phys-chart-label">O₂ (SpO₂)</span>
+                  <p className="hs-phys-chart-value">{physicianChartVitalsDisplay.spo2}</p>
+                </div>
+              </div>
+            </div>
+            <div className="hs-phys-chart-fields">
+              {PHYSICIAN_PHYSICAL_EXAM_FIELDS.map(({ key, label }) => (
+                <div className="hs-modal-field hs-phys-chart-field-line" key={key}>
+                  <label>{label}</label>
+                  <input
+                    className="hs-filter-input"
+                    readOnly={isNurseUser}
+                    value={physicianChartDraft.physicalExam[key] ?? ""}
+                    onChange={(e) =>
+                      setPhysicianChartDraft((d) => ({
+                        ...d,
+                        physicalExam: { ...d.physicalExam, [key]: e.target.value },
+                      }))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="hs-phys-chart-section">
+            <h4 className="hs-phys-chart-section-title">Prescription</h4>
+            <div className="hs-phys-chart-latest-rx hs-phys-chart-section--readonly">
+              <h5 className="hs-phys-chart-subtitle">Latest prescription on file</h5>
+              <p className="hs-stat-meta">
+                {clinicalLatestPrescriptionSnapshot.detail || "—"}
+                {clinicalLatestRxTimestampLabel ? ` · ${clinicalLatestRxTimestampLabel}` : null}
+              </p>
+              {clinicalLatestPrescriptionSnapshot.text ? (
+                <pre className="hs-phys-chart-latest-rx-pre">{clinicalLatestPrescriptionSnapshot.text}</pre>
+              ) : (
+                <p className="hs-stat-meta">No prescription recorded yet.</p>
+              )}
+            </div>
+            {!isNurseUser ? (
+              <>
+                <p className="hs-stat-meta" style={{ marginTop: 14 }}>
+                  Update prescription notes below — saved to the medical record when you click Save chart.
+                </p>
+                <textarea
+                  className="hs-filter-input hs-phys-chart-textarea"
+                  rows={5}
+                  placeholder="Drug name, dose, route, frequency, duration…"
+                  value={physicianChartDraft.prescriptionNotes}
+                  onChange={(e) => setPhysicianChartDraft((d) => ({ ...d, prescriptionNotes: e.target.value }))}
+                />
+              </>
+            ) : (
+              <p className="hs-stat-meta" style={{ marginTop: 12 }}>
+                Nurses see the latest prescription above (from saved chart notes or the most recent consultation).
+              </p>
+            )}
+          </section>
+
+          <section className="hs-phys-chart-section">
+            <h4 className="hs-phys-chart-section-title">Documents</h4>
+            <p className="hs-stat-meta">
+              All documents stored on this student&apos;s medical record ({clinicalChartDocumentsSorted.length}{" "}
+              file{clinicalChartDocumentsSorted.length === 1 ? "" : "s"}).
+            </p>
+            {clinicalChartDocumentsSorted.length ? (
+              <ul className="hs-phys-chart-doc-list">
+                {clinicalChartDocumentsSorted.map((a) => (
+                  <li key={a.path || a.url} className="hs-phys-chart-doc-row">
+                    <a
+                      href={a.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hs-phys-chart-doc-link"
+                    >
+                      <FileText size={14} aria-hidden />
+                      <span>{a.name || "File"}</span>
+                    </a>
+                    <span className="hs-stat-meta">
+                      {a.uploadedAt ? new Date(a.uploadedAt).toLocaleString() : ""}
+                    </span>
+                    {!isNurseUser ? (
+                      <button
+                        type="button"
+                        className="hs-icon-btn"
+                        aria-label={`Remove ${a.name || "file"}`}
+                        onClick={() => a.path && handleRemovePhysicianChartDocument(a.path)}
+                      >
+                        <X size={14} aria-hidden />
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="hs-stat-meta">No documents attached yet.</p>
+            )}
+            {!isNurseUser ? (
+              <>
+                <input
+                  ref={physicianChartFileInputRef}
+                  type="file"
+                  className="hs-phys-chart-file-input"
+                  onChange={handlePhysicianChartDocumentUpload}
+                />
+                <div className="hs-phys-chart-doc-actions">
+                  <button
+                    type="button"
+                    className="hs-btn-secondary"
+                    disabled={physicianChartDocUploading || physicianChartLoading}
+                    onClick={() => physicianChartFileInputRef.current?.click()}
+                  >
+                    <Upload size={14} aria-hidden />
+                    {physicianChartDocUploading ? "Uploading…" : "Attach file"}
+                  </button>
+                </div>
+              </>
+            ) : null}
+            <div className="hs-modal-field" style={{ marginTop: 14 }}>
+              <label>Notes (optional)</label>
+              <textarea
+                className="hs-filter-input hs-phys-chart-textarea"
+                rows={3}
+                readOnly={isNurseUser}
+                placeholder="Short summary or references to go with the attachments…"
+                value={physicianChartDraft.documentsNotes}
+                onChange={(e) => setPhysicianChartDraft((d) => ({ ...d, documentsNotes: e.target.value }))}
+              />
+            </div>
+          </section>
+
+          <div className="hs-modal-footer">
+            <button type="button" className="hs-btn-secondary" onClick={closePhysicianChart}>
+              Close
+            </button>
+            {!isNurseUser ? (
+              <button
+                type="button"
+                className="hs-btn-primary"
+                disabled={physicianChartSaving || physicianChartLoading}
+                onClick={savePhysicianChart}
+              >
+                {physicianChartSaving ? "Saving…" : "Save chart"}
+              </button>
+            ) : null}
           </div>
         </div>
       </CCModal>
@@ -4944,48 +7509,67 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       <CCModal
         modalClassName="hs-cc-modal"
         open={newReferralOpen}
-        title="Create New Referral"
+        title="Student referral to another office"
         onClose={() => setNewReferralOpen(false)}
         centered
         wide
       >
         <div className="cc-modal-body">
-          <p className="hs-modal-section-title" style={{ marginTop: 0 }}>
+          <p className="hs-modal-lead" style={{ marginTop: 0 }}>
+            Refer this student to another welfare department within CampusCare. The receiving office gets the details below so both teams can coordinate next steps.
+          </p>
+          <p className="hs-modal-section-title" style={{ marginTop: 12 }}>
             Student Information
           </p>
+          <p className="hs-stat-meta" style={{ marginBottom: 12 }}>
+            Enter <strong>Student ID</strong> first (year <strong>2022–2027</strong>, then <strong>6–7</strong> digits). The hyphen appears after the year; name, school email, and program load from the roster when the ID is valid.
+          </p>
+          <div className="hs-modal-field">
+            <label htmlFor="hs-referral-student-id">Student ID *</label>
+            <input
+              id="hs-referral-student-id"
+              autoComplete="off"
+              spellCheck={false}
+              inputMode="numeric"
+              placeholder="e.g. 2023-171863"
+              title="Format: YYYY-####### (year 2022–2027, hyphen, 6–7 digit unique ID)"
+              value={newReferralForm.studentId}
+              onChange={(e) =>
+                setNewReferralForm((f) => ({ ...f, studentId: formatReferralStudentIdInput(e.target.value) }))
+              }
+            />
+            {referralStudentLookup.status === "loading" ? (
+              <p className="hs-stat-meta" style={{ marginTop: 6 }}>
+                Loading student from roster…
+              </p>
+            ) : null}
+            {referralStudentLookup.message ? (
+              <p className="hs-stat-meta" style={{ marginTop: 6, color: "#b45309" }} role="status">
+                {referralStudentLookup.message}
+              </p>
+            ) : null}
+          </div>
           <div className="hs-modal-grid">
             <div className="hs-modal-field">
               <label>Student Name</label>
-              <input
-                value={newReferralForm.studentName}
-                onChange={(e) =>
-                  setNewReferralForm((f) => ({ ...f, studentName: sanitizePersonNameInput(e.target.value) }))
-                }
-              />
+              <input readOnly className="hs-input-readonly-roster" value={newReferralForm.studentName} placeholder="—" />
+              <span className="hs-stat-meta">From students table</span>
             </div>
             <div className="hs-modal-field">
-              <label>Student ID</label>
+              <label>School Email</label>
               <input
-                value={newReferralForm.studentId}
-                onChange={(e) =>
-                  setNewReferralForm((f) => ({ ...f, studentId: sanitizeDigitsOnlyInput(e.target.value) }))
-                }
-              />
-            </div>
-            <div className="hs-modal-field">
-              <label>Email</label>
-              <input
+                readOnly
+                className="hs-input-readonly-roster"
                 type="email"
                 value={newReferralForm.email}
-                onChange={(e) => setNewReferralForm((f) => ({ ...f, email: e.target.value }))}
+                placeholder="—"
               />
+              <span className="hs-stat-meta">From students table</span>
             </div>
-            <div className="hs-modal-field">
-              <label>Contact Number</label>
-              <input
-                value={newReferralForm.phone}
-                onChange={(e) => setNewReferralForm((f) => ({ ...f, phone: e.target.value }))}
-              />
+            <div className="hs-modal-field" style={{ gridColumn: "1 / -1" }}>
+              <label>Program</label>
+              <input readOnly className="hs-input-readonly-roster" value={newReferralForm.program} placeholder="—" />
+              <span className="hs-stat-meta">From students table</span>
             </div>
           </div>
           <p className="hs-modal-section-title">Referral Details</p>
@@ -5019,7 +7603,12 @@ function HealthServices({ embedReportsOnly = false } = {}) {
           <button type="button" className="cc-btn-secondary hs-modal-btn-cancel" onClick={() => setNewReferralOpen(false)}>
             Cancel
           </button>
-          <button type="button" className="cc-btn-primary" disabled={referralSaving} onClick={saveNewReferral}>
+          <button
+            type="button"
+            className="cc-btn-primary"
+            disabled={referralSaving || referralStudentLookup.status === "loading"}
+            onClick={saveNewReferral}
+          >
             {referralSaving ? "Sending…" : "Send Referral"}
           </button>
         </div>

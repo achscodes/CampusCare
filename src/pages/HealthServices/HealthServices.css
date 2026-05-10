@@ -93,6 +93,20 @@
   flex-shrink: 0;
 }
 
+.hs-inter-office-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.health-services-layout .btn-new-case--secondary-outline {
+  background: #fff;
+  border: 1px solid #1075f9;
+  color: #1075f9;
+}
+
 .health-services-layout .btn-new-case {
   background: #1075f9;
   border-color: #1075f9;
@@ -104,6 +118,12 @@
 .health-services-layout .btn-new-case:hover {
   background: #0b63d6;
   border-color: #0b63d6;
+}
+
+.health-services-layout .btn-new-case.btn-new-case--secondary-outline:hover {
+  background: #eff6ff;
+  border-color: #0b63d6;
+  color: #0b63d6;
 }
 
 /* Match reference: white panels, light page shell */
@@ -129,6 +149,11 @@
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
   min-height: 204px;
   overflow: hidden;
+}
+
+/** Compact nurse cards (e.g. Route Patient): avoid filler height from global min-height */
+.hs-nurse-card.hs-nurse-card--compact {
+  min-height: 0;
 }
 
 .hs-nurse-card .cases-panel-header {
@@ -316,9 +341,31 @@
 }
 
 .hs-nurse-route-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 8px;
+  align-items: stretch;
+}
+
+.hs-nurse-route-actions > .hs-btn-secondary {
+  flex: 1 1 calc(50% - 4px);
+  min-width: 0;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+}
+
+.hs-nurse-records-view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .hs-nurse-queue-layout {
@@ -326,6 +373,94 @@
   grid-template-columns: 1.15fr 0.85fr;
   gap: 14px;
   align-items: start;
+}
+
+/* Queue card header: Online = green pulsing dot + dark gray label; Offline = flat gray */
+.hs-queue-serving-header {
+  position: relative;
+  text-align: center;
+}
+
+.hs-queue-serving-header__status {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.hs-queue-station-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: "Inter", system-ui, sans-serif;
+  min-height: 18px;
+}
+
+.hs-queue-station-status__label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Fixed box matches text line height so the dot centers with the label, not the font’s bounding box */
+.hs-queue-station-status__dot-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.hs-queue-station-status__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hs-queue-station-status--online .hs-queue-station-status__label {
+  color: #374151;
+}
+
+.hs-queue-station-status--online .hs-queue-station-status__dot {
+  background: #22c55e;
+  animation: hs-queue-online-dot-pulse 2s ease-in-out infinite;
+}
+
+.hs-queue-station-status--offline .hs-queue-station-status__label {
+  color: #6b7280;
+}
+
+.hs-queue-station-status--offline .hs-queue-station-status__dot {
+  background: #9ca3af;
+  animation: none;
+}
+
+@keyframes hs-queue-online-dot-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(34, 197, 94, 0.45),
+      0 0 8px rgba(34, 197, 94, 0.35);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow:
+      0 0 0 5px rgba(34, 197, 94, 0.2),
+      0 0 14px rgba(34, 197, 94, 0.55);
+    transform: scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hs-queue-station-status--online .hs-queue-station-status__dot {
+    animation: none;
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35);
+  }
 }
 
 .hs-nurse-serving-label {
@@ -527,7 +662,7 @@
 .hs-phys-records-grid {
   display: grid;
   grid-template-columns: 0.95fr 1.05fr;
-  gap: 12px;
+  gap: 18px;
 }
 
 .hs-phys-records-left,
@@ -545,6 +680,28 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.hs-phys-records-pick {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  border-radius: 8px;
+  padding: 8px 10px;
+  transition: background 0.15s ease;
+}
+
+.hs-phys-records-pick:hover {
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.hs-phys-records-pick--active {
+  background: rgba(59, 130, 246, 0.12);
+  outline: 1px solid rgba(59, 130, 246, 0.35);
 }
 
 .hs-phys-records-header {
@@ -687,8 +844,8 @@
     grid-template-columns: 1fr;
   }
 
-  .hs-nurse-route-actions {
-    grid-template-columns: 1fr;
+  .hs-nurse-route-actions > .hs-btn-secondary {
+    flex: 1 1 100%;
   }
 }
 
@@ -1498,6 +1655,59 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 24px;
+}
+
+.hs-reports-kpi-row--physician,
+.hs-reports-kpi-row--hso3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hs-phys-analytics-period-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.hs-phys-analytics-period-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  font-family: "Inter", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.hs-phys-analytics-period-btn:hover {
+  border-color: #93c5fd;
+  color: #1e40af;
+}
+
+.hs-phys-analytics-period-btn--active {
+  border-color: #155dfc;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+@media (max-width: 900px) {
+  .hs-reports-kpi-row--physician,
+  .hs-reports-kpi-row--hso3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .hs-reports-kpi-row--physician,
+  .hs-reports-kpi-row--hso3 {
+    grid-template-columns: 1fr;
+  }
 }
 
 .hs-reports-kpi {
@@ -2514,6 +2724,13 @@
   cursor: not-allowed;
 }
 
+.hs-input-readonly-roster {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a;
+  cursor: default;
+}
+
 /* Outline cancel — modals + drawers (overrides default gray `cc-btn-secondary`) */
 .health-services-layout .cc-btn-secondary.hs-modal-btn-cancel {
   background: #fff;
@@ -3346,6 +3563,323 @@
   color: #0f172a;
 }
 
+/* Physician chart modal + certificate/prescription accordions */
+.hs-phys-chart-modal-body {
+  max-height: min(78vh, 900px);
+  overflow-y: auto;
+}
+
+.hs-phys-chart-section {
+  margin-bottom: 20px;
+}
+
+.hs-phys-chart-section--readonly {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.hs-phys-chart-latest-rx {
+  margin-bottom: 4px;
+}
+
+.hs-phys-chart-latest-rx-pre {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #0f172a;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hs-phys-chart-section-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.hs-phys-chart-subtitle {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.hs-phys-chart-vitals-block {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.hs-phys-chart-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hs-phys-chart-field-line label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.hs-phys-chart-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.hs-phys-chart-doc-actions {
+  margin-bottom: 12px;
+}
+
+.hs-phys-chart-doc-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.hs-phys-chart-doc-list--compact {
+  margin-top: 8px;
+  border: none;
+  background: transparent;
+}
+
+.hs-phys-chart-doc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.hs-phys-chart-doc-row:last-child {
+  border-bottom: none;
+}
+
+.hs-phys-chart-doc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #2563eb;
+  font-weight: 600;
+  text-decoration: none;
+  flex: 1;
+  min-width: 0;
+}
+
+.hs-phys-chart-doc-link:hover {
+  text-decoration: underline;
+}
+
+.hs-phys-chart-doc-link span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hs-phys-records-doc-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hs-phys-doc-preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #0f172a;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  max-width: 100%;
+}
+
+.hs-phys-doc-preview-btn:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.hs-phys-doc-preview-panel {
+  margin-top: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.hs-phys-doc-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.hs-phys-doc-preview-head strong {
+  font-size: 13px;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hs-phys-doc-preview-text {
+  margin: 0;
+  padding: 14px 12px;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #334155;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.hs-phys-doc-preview-img {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  background: #0f172a;
+}
+
+.hs-phys-doc-preview-iframe {
+  display: block;
+  width: 100%;
+  min-height: 420px;
+  border: 0;
+  background: #f1f5f9;
+}
+
+.hs-phys-chart-readonly-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+}
+
+.hs-phys-chart-span-2 {
+  grid-column: 1 / -1;
+}
+
+.hs-phys-chart-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.hs-phys-chart-value {
+  margin: 0;
+  font-size: 14px;
+  color: #0f172a;
+  line-height: 1.35;
+}
+
+.hs-phys-chart-textarea {
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.hs-phys-student-accordion {
+  padding: 8px 0 16px;
+}
+
+.hs-phys-rx-accordion {
+  padding-top: 0;
+}
+
+.hs-phys-rx-acc-detail {
+  padding: 0 16px 16px 24px;
+  border-top: 1px solid #f1f5f9;
+  margin: 0;
+}
+
+.hs-phys-rx-list-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.hs-phys-student-group {
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.hs-phys-student-group:last-child {
+  border-bottom: none;
+}
+
+.hs-phys-student-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.hs-phys-student-group-header:hover {
+  background: #f8fafc;
+}
+
+.hs-phys-student-group-body {
+  list-style: none;
+  margin: 0;
+  padding: 0 16px 16px 24px;
+}
+
+.hs-phys-student-group-body li {
+  padding: 10px 0;
+  border-top: 1px solid #f1f5f9;
+}
+
+.hs-phys-student-group-body li:first-child {
+  border-top: none;
+}
+
 @media (max-width: 1100px) {
   .hs-dent-kpi-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3385,4 +3919,375 @@
     max-width: 200px;
     margin-left: auto;
   }
+}
+
+/* ─── Physician Patient Records (modern) ─── */
+.hs-phys-records-detail {
+  padding-top: 2px;
+}
+
+.hs-phys-records-detail .cases-panel-title--strong {
+  font-size: 1.35rem;
+  letter-spacing: -0.03em;
+  color: #0f172a;
+}
+
+.hs-phys-tab-row--records {
+  display: inline-flex;
+  gap: 6px;
+  padding: 5px;
+  margin-bottom: 18px;
+  background: linear-gradient(180deg, #f1f5f9 0%, #e8eef5 100%);
+  border: none;
+  border-radius: 14px;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.85), inset 0 -1px 1px rgba(15, 23, 42, 0.06);
+}
+
+.hs-phys-records-detail .hs-phys-tab-btn {
+  border: none;
+  border-radius: 11px;
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: #64748b;
+  background: transparent;
+  transition: color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.hs-phys-records-detail .hs-phys-tab-btn:hover {
+  color: #334155;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.hs-phys-records-detail .hs-phys-tab-btn--active {
+  background: #fff;
+  color: #1d4ed8;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12), 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.hs-phys-records-hint {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #475569;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+/* Documents tab only: slimmer hint bar */
+.hs-phys-records-doc-wrap > .hs-phys-records-hint {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  line-height: 1.4;
+  border-radius: 10px;
+}
+
+.hs-phys-records-hint strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.hs-phys-records-list--timeline {
+  gap: 8px;
+}
+
+/* Compact timeline rows: date+status on one line, service+physician on the next */
+.hs-phys-pr-timeline-card {
+  padding: 8px 12px 8px 13px;
+  border-radius: 10px;
+  border: 1px solid #e8ecf1;
+  border-left: 3px solid #2563eb;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: box-shadow 0.15s ease;
+}
+
+.hs-phys-pr-timeline-card:hover {
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.07);
+}
+
+.hs-phys-pr-timeline-card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.hs-phys-pr-timeline-card__row--top {
+  min-height: 26px;
+}
+
+.hs-phys-pr-timeline-card__row--detail {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid #f1f5f9;
+  align-items: center;
+}
+
+.hs-phys-pr-timeline-card__when {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hs-phys-pr-timeline-card__dot {
+  font-weight: 400;
+  color: #94a3b8;
+}
+
+.hs-phys-pr-timeline-card__svc {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.hs-phys-pr-timeline-card__svc-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.hs-phys-pr-timeline-card__svc-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  line-height: 1.3;
+}
+
+.hs-phys-pr-timeline-card__dr {
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+  flex-shrink: 0;
+  max-width: 48%;
+  text-align: right;
+  line-height: 1.35;
+}
+
+.hs-phys-pr-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.hs-phys-pr-status-pill--success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.hs-phys-pr-status-pill--neutral {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.hs-phys-pr-status-pill--muted {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.hs-phys-records-left .hs-phys-records-pick.hs-nurse-ticket {
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  transition: border-color 0.18s ease, box-shadow 0.22s ease, transform 0.15s ease;
+}
+
+.hs-phys-records-left .hs-phys-records-pick.hs-nurse-ticket:hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.12);
+  transform: translateY(-1px);
+}
+
+.hs-phys-records-left .hs-phys-records-pick.hs-nurse-ticket.hs-phys-records-pick--active {
+  border-color: rgba(37, 99, 235, 0.45);
+  background: linear-gradient(145deg, rgba(239, 246, 255, 0.95), #fff);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.18);
+  outline: none;
+}
+
+.hs-phys-records-header .hs-btn-secondary {
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.hs-phys-records-header .hs-btn-secondary:hover {
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.15);
+}
+
+.hs-phys-rx-accordion--records .hs-phys-pr-rx-card {
+  margin-bottom: 12px;
+  border: 1px solid rgba(226, 232, 240, 0.95) !important;
+  border-radius: 14px !important;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+}
+
+.hs-phys-rx-accordion--records .hs-phys-pr-rx-card:last-child {
+  margin-bottom: 0;
+}
+
+.hs-phys-rx-accordion--records .hs-phys-student-group-header {
+  padding: 16px 18px;
+}
+
+.hs-phys-pr-rx-card__title {
+  display: block;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.hs-phys-pr-rx-card__time {
+  margin-left: 8px;
+  font-weight: 500;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.hs-phys-pr-rx-card__subtitle {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.hs-phys-rx-accordion--records .hs-phys-rx-acc-detail {
+  padding: 18px 20px 20px;
+  background: linear-gradient(180deg, #fafbfc 0%, #f8fafc 100%);
+  border-top: 1px solid #eef2f7;
+}
+
+.hs-phys-records-doc-section {
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: #fff;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.hs-phys-records-doc-section:last-of-type {
+  margin-bottom: 0;
+}
+
+.hs-phys-records-doc-section > strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+/* File rows: one line, preview grows, timestamp right-aligned and vertically centered */
+.hs-phys-records-doc-section .hs-phys-chart-doc-list {
+  margin-bottom: 0;
+}
+
+.hs-phys-records-doc-section .hs-phys-chart-doc-list--compact {
+  margin-top: 4px;
+}
+
+.hs-phys-records-doc-section .hs-phys-chart-doc-row {
+  padding: 6px 0;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.hs-phys-records-detail .hs-phys-records-doc-section .hs-phys-doc-preview-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none;
+  background: #f8fafc;
+}
+
+.hs-phys-records-detail .hs-phys-records-doc-section .hs-phys-doc-preview-btn:hover {
+  box-shadow: none;
+  border-color: #cbd5e1;
+}
+
+.hs-phys-records-doc-section .hs-phys-doc-preview-btn > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hs-phys-records-doc-section .hs-phys-chart-doc-row .hs-stat-meta {
+  flex-shrink: 0;
+  align-self: center;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.hs-phys-records-doc-section--notes > strong {
+  margin-bottom: 10px;
+}
+
+.hs-phys-records-doc-section--notes p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #334155;
+}
+
+.hs-phys-records-detail .hs-phys-doc-preview-btn {
+  border-radius: 12px;
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.hs-phys-records-detail .hs-phys-doc-preview-btn:hover {
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.12);
+}
+
+.hs-phys-doc-preview-panel--records {
+  border-radius: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.hs-phys-doc-preview-panel--records .hs-phys-doc-preview-head {
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  padding: 14px 16px;
 }

@@ -21,7 +21,8 @@ import { readCampusCareSession } from "../../utils/campusCareSession";
 import { normalizeHsoDesignation } from "../../utils/hsoAccess";
 import { DisciplineOfficeTopBar } from "../DODashboard/DisciplineOfficeTopBar";
 import { SDAO_NAV_ITEMS, SDAO_NOTIFICATIONS } from "../SDAO/SDAO";
-import { HEALTH_NAV_ITEMS, HS_NOTIFICATIONS } from "../HealthServices/hsoNavConfig";
+import { HS_NOTIFICATIONS } from "../HealthServices/hsoNavConfig";
+import { buildHealthNavItems } from "../HealthServices/hsoSidebarNav";
 import "../SDAO/SDAO.css";
 import "../HealthServices/HealthServices.css";
 
@@ -52,20 +53,27 @@ export default function ModuleProfileSettingsRoute({ variant }) {
     if (correct !== modulePath) navigate(correct, { replace: true });
   }, [sessionOffice, modulePath, navigate]);
 
-  const userName = session?.name || "—";
+  const [liveDisplayName, setLiveDisplayName] = useState(() => session?.name || "—");
+  const [liveAvatarUrl, setLiveAvatarUrl] = useState(() => readCampusCareSession()?.profileAvatarDataUrl ?? null);
+  const userName = liveDisplayName || "—";
   const userRole = session?.role || "—";
+
+  const handleProfileSaved = (name) => {
+    setLiveDisplayName(name?.trim() ? name.trim() : "—");
+  };
+
+  const handleAvatarSaved = (url) => {
+    setLiveAvatarUrl(url && String(url).trim() ? String(url).trim() : null);
+  };
+
+  const headerAvatar = liveAvatarUrl ? (
+    <img src={liveAvatarUrl} alt="" className="header-avatar-img" />
+  ) : undefined;
 
   const canInterOfficeDocRequest = canCreateDocumentRequest(session?.office);
   const hsoDesignation = normalizeHsoDesignation(session?.designation);
   const isStudentSession = isStudentLikeCampusRole(session?.role);
   const showSdaoDocRequestNav = canInterOfficeDocRequest || isStudentSession;
-  const hsoNavAllowedByDesignation = useMemo(() => {
-    if (hsoDesignation === "admin") {
-      return new Set(["dashboard", "userManagement", "staffScheduling", "queue", "reports", "settings"]);
-    }
-    if (hsoDesignation === "nurse") return new Set(["dashboard", "checkin", "queue", "visits", "records", "appointments", "queueDisplay"]);
-    return new Set(["dashboard", "consultation", "visits", "records", "appointments", "queueDisplay"]);
-  }, [hsoDesignation]);
 
   const sdaoNavItems = useMemo(() => {
     if (showSdaoDocRequestNav) return SDAO_NAV_ITEMS;
@@ -73,10 +81,8 @@ export default function ModuleProfileSettingsRoute({ variant }) {
   }, [showSdaoDocRequestNav]);
 
   const healthNavItems = useMemo(() => {
-    return HEALTH_NAV_ITEMS.filter(
-      (i) => hsoNavAllowedByDesignation.has(i.id) && (canInterOfficeDocRequest || i.id !== "docrequests"),
-    );
-  }, [canInterOfficeDocRequest, hsoNavAllowedByDesignation]);
+    return buildHealthNavItems({ designation: hsoDesignation, canInterOfficeDocRequest });
+  }, [hsoDesignation, canInterOfficeDocRequest]);
 
   const workflow =
     variant === "sdao" ? "development" : variant === "hso" ? "health" : "discipline";
@@ -93,7 +99,7 @@ export default function ModuleProfileSettingsRoute({ variant }) {
         <Sidebar profileSettingsPath={PROFILE_SETTINGS_PATH_DISCIPLINE} />
 
         <div className="dashboard-main">
-          <DisciplineOfficeTopBar />
+          <DisciplineOfficeTopBar userName={userName} userRole={userRole} avatarUrl={liveAvatarUrl} />
 
           <main className="dashboard-content do-office-shell do-ps-page">
             <div className="do-ps-page-head">
@@ -104,7 +110,11 @@ export default function ModuleProfileSettingsRoute({ variant }) {
                 </p>
               </div>
             </div>
-            <OfficeProfileSettings workflow={workflow} />
+            <OfficeProfileSettings
+              workflow={workflow}
+              onProfileSaved={handleProfileSaved}
+              onAvatarSaved={handleAvatarSaved}
+            />
           </main>
         </div>
       </div>
@@ -123,7 +133,12 @@ export default function ModuleProfileSettingsRoute({ variant }) {
           profileSettingsPath={PROFILE_SETTINGS_PATH_DEVELOPMENT}
         />
         <div className="dashboard-main">
-          <OfficeHeader userName={userName} userRole={userRole} notifications={SDAO_NOTIFICATIONS} />
+          <OfficeHeader
+            userName={userName}
+            userRole={userRole}
+            notifications={SDAO_NOTIFICATIONS}
+            avatar={headerAvatar}
+          />
           <main className="dashboard-content sdao-page">
             <header className="sdao-page-header">
               <div className="sdao-page-header-text">
@@ -133,7 +148,11 @@ export default function ModuleProfileSettingsRoute({ variant }) {
                 </p>
               </div>
             </header>
-            <OfficeProfileSettings workflow={workflow} />
+            <OfficeProfileSettings
+              workflow={workflow}
+              onProfileSaved={handleProfileSaved}
+              onAvatarSaved={handleAvatarSaved}
+            />
           </main>
         </div>
 
@@ -172,12 +191,23 @@ export default function ModuleProfileSettingsRoute({ variant }) {
         brandTitle="CampusCare Welfare Management"
         navItems={healthNavItems}
         activeNavId="__profile__"
-        onNavSelect={(id) => navigate("/health-services", { state: { restoreNav: id } })}
+        onNavSelect={(id) => {
+          if (id === "queueDisplay") {
+            navigate("/health-services/queue-display");
+            return;
+          }
+          navigate("/health-services", { state: { restoreNav: id } });
+        }}
         onLogoutRequest={() => setLogoutOpen(true)}
         profileSettingsPath={PROFILE_SETTINGS_PATH_HEALTH}
       />
       <div className="dashboard-main">
-        <OfficeHeader userName={userName} userRole={userRole} notifications={HS_NOTIFICATIONS} />
+        <OfficeHeader
+          userName={userName}
+          userRole={userRole}
+          notifications={HS_NOTIFICATIONS}
+          avatar={headerAvatar}
+        />
         <main className="dashboard-content hs-page hs-office-shell">
           <section className="hs-tab-page-heading">
             <div className="page-title-row">
@@ -189,7 +219,11 @@ export default function ModuleProfileSettingsRoute({ variant }) {
               </div>
             </div>
           </section>
-          <OfficeProfileSettings workflow={workflow} />
+          <OfficeProfileSettings
+            workflow={workflow}
+            onProfileSaved={handleProfileSaved}
+            onAvatarSaved={handleAvatarSaved}
+          />
         </main>
       </div>
 

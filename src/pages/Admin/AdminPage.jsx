@@ -1,22 +1,22 @@
 import { useCallback, useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { BarChart3, LogOut, Users } from "lucide-react";
+import { BarChart3, Building2, GraduationCap, LogOut, Users } from "lucide-react";
 import CCModal from "../../components/common/CCModal";
 import OfficeHeader from "../../components/OfficeHeader/OfficeHeader";
 import Sidebar from "../../components/Sidebar/Sidebar";
 import HealthServices from "../HealthServices/HealthServices";
-import { ReportsPage } from "../DODashboard/DO";
+import { ReportsPage as DisciplineReportsPage } from "../DODashboard/DO";
 import SDAO from "../SDAO/SDAO";
 import UserManagement from "./UserManagement";
 import { logoutCampusCare } from "../../utils/campusCareAuth";
-import { getHomeRouteForOffice } from "../../utils/officeRoutes";
-import { isSuperAdminForOffice } from "../../utils/superAdmin";
+import { getHomeRouteForSession } from "../../utils/officeRoutes";
+import { displayWelfareAdminRole, isWelfareAdminForAdminRoute } from "../../utils/welfareAdmin";
 import { readCampusCareSession } from "../../utils/campusCareSession";
 import { showToast } from "../../utils/toast";
 import "../DODashboard/DO.css";
 import "../HealthServices/HealthServices.css";
 import "../SDAO/SDAO.css";
-import "./SuperAdmin.css";
+import "./Admin.css";
 
 const OFFICE_CONFIG = {
   health: {
@@ -38,11 +38,15 @@ const SA_NOTIFICATIONS = [];
 const iconProps = { size: 20, strokeWidth: 1.5 };
 
 /**
+ * Institution / welfare admin portal (HSO, DO, SDAO).
  * @param {{ officeKey: 'health'|'discipline'|'development' }} props
  */
-export default function SuperAdminPage({ officeKey }) {
+export default function AdminPage({ officeKey }) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("reports");
+  const isDualOfficeShell = officeKey === "discipline" || officeKey === "development";
+  const [tab, setTab] = useState(() =>
+    officeKey === "discipline" ? "do_reports" : officeKey === "development" ? "sdao_reports" : "reports",
+  );
   const [logoutOpen, setLogoutOpen] = useState(false);
 
   const session = useMemo(() => {
@@ -52,9 +56,9 @@ export default function SuperAdminPage({ officeKey }) {
   const cfg = OFFICE_CONFIG[officeKey] ?? OFFICE_CONFIG.health;
 
   const userName = session?.name || session?.email || "User";
-  const userRole = session?.role || "Super Admin";
+  const userRole = displayWelfareAdminRole(session?.role);
 
-  const superAdminNavItems = useMemo(
+  const healthNavItems = useMemo(
     () => [
       { id: "reports", label: cfg.reportsLabel, icon: <BarChart3 {...iconProps} /> },
       { id: "users", label: "User Management", icon: <Users {...iconProps} /> },
@@ -62,9 +66,20 @@ export default function SuperAdminPage({ officeKey }) {
     [cfg.reportsLabel],
   );
 
+  const dualOfficeNavItems = useMemo(
+    () => [
+      { id: "do_reports", label: "Discipline Office", icon: <Building2 {...iconProps} /> },
+      { id: "sdao_reports", label: "Student Development", icon: <GraduationCap {...iconProps} /> },
+      { id: "users", label: "User Management", icon: <Users {...iconProps} /> },
+    ],
+    [],
+  );
+
+  const adminNavItems = isDualOfficeShell ? dualOfficeNavItems : healthNavItems;
+
   const sidebarProps = useMemo(() => {
     const base = {
-      navItems: superAdminNavItems,
+      navItems: adminNavItems,
       activeNavId: tab,
       onNavSelect: setTab,
       onLogoutRequest: () => setLogoutOpen(true),
@@ -73,11 +88,11 @@ export default function SuperAdminPage({ officeKey }) {
     if (officeKey === "health") {
       return { ...base, brandTitle: "CampusCare Welfare Management" };
     }
-    if (officeKey === "development") {
-      return { ...base, departmentTag: "Scholarship Management" };
+    if (isDualOfficeShell) {
+      return { ...base, brandTitle: "CampusCare Welfare Management" };
     }
     return { ...base };
-  }, [superAdminNavItems, tab, officeKey]);
+  }, [adminNavItems, tab, officeKey, isDualOfficeShell]);
 
   const layoutClass = useMemo(() => {
     if (officeKey === "health") return "dashboard-layout health-services-layout hs-office-shell";
@@ -92,12 +107,24 @@ export default function SuperAdminPage({ officeKey }) {
   }, [officeKey]);
 
   const userMgmtMeta = useMemo(
-    () => ({
-      title: "User Management",
-      subtitle: cfg.usersSubtitle,
-    }),
-    [cfg.usersSubtitle],
+    () =>
+      isDualOfficeShell
+        ? {
+            title: "User Management",
+            subtitle: "Create, manage, and control all staffs account",
+          }
+        : {
+            title: "User Management",
+            subtitle: cfg.usersSubtitle,
+          },
+    [isDualOfficeShell, cfg.usersSubtitle],
   );
+
+  const userMgmtFilterOffices = useMemo(() => {
+    if (officeKey === "health") return ["health"];
+    if (isDualOfficeShell) return ["discipline", "development"];
+    return [officeKey];
+  }, [officeKey, isDualOfficeShell]);
 
   const handleLogout = useCallback(async () => {
     await logoutCampusCare();
@@ -110,35 +137,69 @@ export default function SuperAdminPage({ officeKey }) {
     showToast("You have been signed out.", { variant: "info" });
   }, [handleLogout]);
 
-  const reportsPanel = useMemo(() => {
-    if (officeKey === "health") {
-      return (
-        <div className="sa-embed-hso">
-          <HealthServices embedReportsOnly />
-        </div>
-      );
-    }
-    if (officeKey === "discipline") {
-      return (
-        <div className="sa-embed-do">
-          <ReportsPage standalone />
-        </div>
-      );
-    }
-    return (
-      <div className="sa-embed-sdao">
-        <SDAO embedDashboardOnly />
+  const healthReportsPanel = useMemo(
+    () => (
+      <div className="sa-embed-hso">
+        <HealthServices embedReportsOnly />
       </div>
-    );
-  }, [officeKey]);
+    ),
+    [],
+  );
 
   if (!session?.userId) {
     return <Navigate to="/signin" replace />;
   }
 
-  if (!isSuperAdminForOffice(session, officeKey)) {
-    return <Navigate to={getHomeRouteForOffice(session.office)} replace />;
+  if (!isWelfareAdminForAdminRoute(session, officeKey)) {
+    return <Navigate to={getHomeRouteForSession(session)} replace />;
   }
+
+  const renderMain = () => {
+    if (officeKey === "health") {
+      if (tab === "reports") return healthReportsPanel;
+      return (
+        <>
+          <section className="sa-page-heading">
+            <div className="page-title-row">
+              <div>
+                <h1>{userMgmtMeta.title}</h1>
+                <p>{userMgmtMeta.subtitle}</p>
+              </div>
+            </div>
+          </section>
+          <UserManagement filterOffices={userMgmtFilterOffices} />
+        </>
+      );
+    }
+
+    if (tab === "do_reports") {
+      return (
+        <div className="sa-welfare-reports-embed">
+          <DisciplineReportsPage standalone />
+        </div>
+      );
+    }
+    if (tab === "sdao_reports") {
+      return (
+        <div className="sa-welfare-reports-embed">
+          <SDAO embedDashboardOnly />
+        </div>
+      );
+    }
+    return (
+      <>
+        <section className="sa-page-heading">
+          <div className="page-title-row">
+            <div>
+              <h1>{userMgmtMeta.title}</h1>
+              <p>{userMgmtMeta.subtitle}</p>
+            </div>
+          </div>
+        </section>
+        <UserManagement filterOffices={userMgmtFilterOffices} />
+      </>
+    );
+  };
 
   return (
     <div className={layoutClass}>
@@ -147,20 +208,7 @@ export default function SuperAdminPage({ officeKey }) {
       <div className="dashboard-main">
         <OfficeHeader userName={userName} userRole={userRole} notifications={SA_NOTIFICATIONS} />
 
-        <main className={mainContentClass}>
-          {tab === "users" ? (
-            <section className="sa-page-heading">
-              <div className="page-title-row">
-                <div>
-                  <h1>{userMgmtMeta.title}</h1>
-                  <p>{userMgmtMeta.subtitle}</p>
-                </div>
-              </div>
-            </section>
-          ) : null}
-
-          {tab === "reports" ? reportsPanel : <UserManagement officeKey={officeKey} />}
-        </main>
+        <main className={mainContentClass}>{renderMain()}</main>
       </div>
 
       <CCModal open={logoutOpen} title="Logout" onClose={() => setLogoutOpen(false)} centered showHeader={false}>

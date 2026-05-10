@@ -5,8 +5,9 @@ import AppVisitLogger from "./components/AppVisitLogger";
 import LandingPage from "./pages/LandingPage";
 import { profileSettingsPathForSessionOffice } from "./utils/profileSettingsRoutes";
 import { readCampusCareSession } from "./utils/campusCareSession";
+import { normalizeHsoDesignation } from "./utils/hsoAccess";
 import { useSupabaseAuthRecovery } from "./hooks/useSupabaseAuthRecovery";
-import { isSuperAdminForOffice } from "./utils/superAdmin";
+import { isWelfareAdminForAdminRoute } from "./utils/welfareAdmin";
 
 const SignupPage = lazy(() =>
   import("./pages/SignupPage").then((m) => ({ default: m.default ?? m.SignupPage }))
@@ -64,8 +65,8 @@ const SDAO = lazy(() =>
 const ModuleProfileSettingsRoute = lazy(() =>
   import("./pages/ProfileSettings/ModuleProfileSettingsRoute").then((m) => ({ default: m.default ?? m.ModuleProfileSettingsRoute }))
 );
-const SuperAdminPage = lazy(() =>
-  import("./pages/SuperAdmin/SuperAdminPage").then((m) => ({ default: m.default ?? m.SuperAdminPage }))
+const AdminPage = lazy(() =>
+  import("./pages/Admin/AdminPage").then((m) => ({ default: m.default ?? m.AdminPage }))
 );
 
 function RouteLoadingFallback() {
@@ -108,11 +109,19 @@ function RequireOffice({ office, children }) {
   return children;
 }
 
-function RequireSuperAdminOffice({ office, children }) {
+function RequireWelfareAdminOffice({ office, children }) {
   const session = readCampusCareSession();
   if (!session?.userId) return <Navigate to="/signin" replace />;
-  if (!isSuperAdminForOffice(session, office)) return <Navigate to="/" replace />;
+  if (!isWelfareAdminForAdminRoute(session, office)) return <Navigate to="/" replace />;
   return children;
+}
+
+function HealthServicesHome() {
+  const session = readCampusCareSession();
+  if (normalizeHsoDesignation(session?.designation) === "queue_display") {
+    return <Navigate to="/health-services/queue-display" replace />;
+  }
+  return <HealthServices />;
 }
 
 function App() {
@@ -133,11 +142,14 @@ function App() {
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/do" element={<RequireOffice office="discipline"><DashboardPage /></RequireOffice>} />
             <Route path="/dashboard" element={<RequireOffice office="discipline"><DashboardPage /></RequireOffice>} />
-            <Route path="/health-services" element={<RequireOffice office="health"><HealthServices /></RequireOffice>} />
-            <Route path="/health-services/queue-display" element={<HealthQueueDisplayPage />} />
-            <Route path="/super-admin/hso" element={<RequireSuperAdminOffice office="health"><SuperAdminPage officeKey="health" /></RequireSuperAdminOffice>} />
-            <Route path="/super-admin/do" element={<RequireSuperAdminOffice office="discipline"><SuperAdminPage officeKey="discipline" /></RequireSuperAdminOffice>} />
-            <Route path="/super-admin/sdao" element={<RequireSuperAdminOffice office="development"><SuperAdminPage officeKey="development" /></RequireSuperAdminOffice>} />
+            <Route path="/health-services" element={<RequireOffice office="health"><HealthServicesHome /></RequireOffice>} />
+            <Route path="/health-services/queue-display" element={<RequireOffice office="health"><HealthQueueDisplayPage /></RequireOffice>} />
+            <Route path="/super-admin/hso" element={<Navigate to="/admin/hso" replace />} />
+            <Route path="/super-admin/do" element={<Navigate to="/admin/do" replace />} />
+            <Route path="/super-admin/sdao" element={<Navigate to="/admin/do" replace />} />
+            <Route path="/admin/hso" element={<RequireWelfareAdminOffice office="health"><AdminPage officeKey="health" /></RequireWelfareAdminOffice>} />
+            <Route path="/admin/do" element={<RequireWelfareAdminOffice office="discipline"><AdminPage officeKey="discipline" /></RequireWelfareAdminOffice>} />
+            <Route path="/admin/sdao" element={<Navigate to="/admin/do" replace />} />
             <Route path="/sdao" element={<RequireOffice office="development"><SDAO /></RequireOffice>} />
             <Route path="/case-conference" element={<RequireOffice office="discipline"><CaseConferencePage /></RequireOffice>} />
             <Route path="/student-records" element={<RequireOffice office="discipline"><StudentRecordsPage /></RequireOffice>} />

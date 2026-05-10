@@ -1,12 +1,24 @@
-import { useMemo, useState } from "react";
-import { Bell, KeyRound, Mail, Phone, Shield, User } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Bell, Camera, Mail, Phone, User } from "lucide-react";
+import ProfileAvatarEditorModal from "../ProfileAvatarEditorModal/ProfileAvatarEditorModal";
 import { labelForOfficeKey, normalizeOfficeKey } from "../../constants/documentRequestAccess";
-import { readCampusCareSession } from "../../utils/campusCareSession";
+import {
+  campusCareSessionUsesPersistentStorage,
+  readCampusCareSession,
+  writeCampusCareSession,
+} from "../../utils/campusCareSession";
+import { normalizeHsoDesignation } from "../../utils/hsoAccess";
 import "../../pages/DODashboard/DO.css";
 
 /**
  * @typedef {"discipline" | "development" | "health"} ProfileSettingsWorkflow
  */
+
+/** Max decoded image size before base64 (browser memory); ~600 KB file typical. */
+const PROFILE_AVATAR_MAX_BYTES = 600 * 1024;
+
+/** HSO roles: roster name/email; only profile photo is editable in-app. */
+const HSO_ROSTER_PHOTO_DESIGNATIONS = ["nurse", "physician", "dentist"];
 
 /** @type {Record<ProfileSettingsWorkflow, { digestTitle: string; digestDesc: string; alertsTitle: string; alertsDesc: string; remindersTitle: string; remindersDesc: string }>} */
 const NOTIFICATION_COPY = {
@@ -38,14 +50,29 @@ const NOTIFICATION_COPY = {
 
 /**
  * Merged Profile + Settings (same `do-ps-*` styling as the DO portal).
- * @param {{ workflow: ProfileSettingsWorkflow }} props
+ * @param {{ workflow: ProfileSettingsWorkflow; onProfileSaved?: (name: string, email: string) => void; onAvatarSaved?: (dataUrl: string | null) => void }} props
  */
-export default function OfficeProfileSettings({ workflow }) {
+export default function OfficeProfileSettings({ workflow, onProfileSaved, onAvatarSaved }) {
   const session = useMemo(() => {
     return readCampusCareSession();
   }, []);
 
   const officeKey = normalizeOfficeKey(session?.office);
+  const hsoDesignation = normalizeHsoDesignation(session?.designation);
+  const isHsoStaffPhotoProfile =
+    officeKey === "health" && HSO_ROSTER_PHOTO_DESIGNATIONS.includes(hsoDesignation);
+
+  const rosterName = session?.name?.trim() || "";
+  const rosterEmail = session?.email?.trim() || "";
+
+  const [fullName, setFullName] = useState(() => rosterName);
+  const [email, setEmail] = useState(() => rosterEmail);
+  const [avatarDataUrl, setAvatarDataUrl] = useState(() => session?.profileAvatarDataUrl || "");
+  const [saveMessage, setSaveMessage] = useState(null);
+  const avatarFileRef = useRef(null);
+  const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
+  const [editorImageSrc, setEditorImageSrc] = useState(null);
+
   const profileOfficeUnit =
     officeKey === "health"
       ? "Health Services Office"
@@ -60,26 +87,160 @@ export default function OfficeProfileSettings({ workflow }) {
         : "NU Dasmarinas 4th Floor, Student Discipline Office";
   const profileRoleLine = session?.role?.trim() || labelForOfficeKey(officeKey);
 
-  const profileDisplayName = session?.name?.trim() || "—";
-  const profileEmail = session?.email?.trim() || "—";
-
   const [emailDigest, setEmailDigest] = useState(true);
   const [caseAlerts, setCaseAlerts] = useState(true);
   const [hearingReminders, setHearingReminders] = useState(false);
 
+  const displayNameHero = isHsoStaffPhotoProfile ? rosterName || "—" : fullName.trim() || "—";
+
+  const openAvatarEditor = (src) => {
+    setEditorImageSrc(src);
+    setAvatarEditorOpen(true);
+  };
+
+  const closeAvatarEditor = () => {
+    setAvatarEditorOpen(false);
+    setEditorImageSrc(null);
+  };
+
+  const handlePickAvatarFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !file.type.startsWith("image/")) {
+      if (file) setSaveMessage("Choose an image file (PNG, JPG, or WebP).");
+      return;
+    }
+    if (file.size > PROFILE_AVATAR_MAX_BYTES) {
+      setSaveMessage(`Image must be about ${Math.round(PROFILE_AVATAR_MAX_BYTES / 1024)} KB or smaller.`);
+      window.setTimeout(() => setSaveMessage(null), 5000);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result || "");
+      if (url.startsWith("data:image")) {
+        setSaveMessage(null);
+        openAvatarEditor(url);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAvatarZoneActivate = () => {
+    if (avatarDataUrl) {
+      openAvatarEditor(avatarDataUrl);
+    } else {
+      avatarFileRef.current?.click();
+    }
+  };
+
+  const persistProfileAvatar = (dataUrl) => {
+    const cur = readCampusCareSession();
+    if (!cur) {
+      setSaveMessage("Unable to save — session missing. Try signing in again.");
+      return;
+    }
+    const trimmed = String(dataUrl || "").trim();
+    const next = { ...cur, profileAvatarDataUrl: trimmed || undefined };
+    writeCampusCareSession(next, campusCareSessionUsesPersistentStorage());
+    setAvatarDataUrl(trimmed);
+    setSaveMessage(trimmed ? "Profile photo saved." : "Profile photo removed.");
+    if (typeof onAvatarSaved === "function") {
+      onAvatarSaved(trimmed || null);
+    }
+    window.setTimeout(() => setSaveMessage(null), 4000);
+  };
+
+  const handleAvatarEditorSave = (dataUrl) => {
+    persistProfileAvatar(dataUrl);
+  };
+
+  const handleRemoveAvatar = () => {
+    persistProfileAvatar("");
+  };
+
+  const handleSaveProfile = () => {
+    const cur = readCampusCareSession();
+    if (!cur) {
+      setSaveMessage("Unable to save — session missing. Try signing in again.");
+      return;
+    }
+
+    if (isHsoStaffPhotoProfile) {
+      return;
+    }
+
+    const nameTrim = fullName.trim();
+    const emailTrim = email.trim();
+    if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+      setSaveMessage("Enter a valid email address or leave the field empty.");
+      return;
+    }
+    const next = { ...cur, name: nameTrim || cur.name, email: emailTrim };
+    writeCampusCareSession(next, campusCareSessionUsesPersistentStorage());
+    setSaveMessage("Profile saved.");
+    if (typeof onProfileSaved === "function") {
+      onProfileSaved(String(next.name || "").trim(), emailTrim);
+    }
+    window.setTimeout(() => setSaveMessage(null), 4000);
+  };
+
   const notif = NOTIFICATION_COPY[workflow] ?? NOTIFICATION_COPY.discipline;
+
+  const personalLead = isHsoStaffPhotoProfile
+    ? "Your name and email come from your roster account and cannot be edited here. You may update your profile photo below."
+    : "Contact details visible to other authorized campus offices.";
 
   return (
     <div className="do-ps-shell do-ps-shell--merged">
       <div className="do-ps-panels">
         <section className="do-ps-card do-ps-card--hero" aria-labelledby="office-ps-identity-heading">
           <div className="do-ps-identity">
-            <div className="do-ps-avatar-lg" aria-hidden>
-              <User size={36} strokeWidth={1.5} />
+            <div>
+              {isHsoStaffPhotoProfile ? (
+                <>
+                  <input
+                    ref={avatarFileRef}
+                    id="office-ps-avatar-file"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    className="office-ps-avatar-file-input"
+                    aria-label="Choose profile photo file"
+                    onChange={handlePickAvatarFile}
+                  />
+                  <button
+                    type="button"
+                    className="do-ps-avatar-hover-wrap"
+                    onClick={handleAvatarZoneActivate}
+                    aria-label={avatarDataUrl ? "Update profile photo" : "Upload profile photo"}
+                  >
+                    <div className="do-ps-avatar-lg">
+                      {avatarDataUrl ? (
+                        <img src={avatarDataUrl} alt="" />
+                      ) : (
+                        <User size={36} strokeWidth={1.5} />
+                      )}
+                    </div>
+                    <span className="do-ps-avatar-hover-overlay">
+                      <Camera size={22} strokeWidth={1.75} aria-hidden />
+                      <span>Update</span>
+                    </span>
+                  </button>
+                  {avatarDataUrl ? (
+                    <button type="button" className="do-ps-avatar-remove-link" onClick={handleRemoveAvatar}>
+                      Remove photo
+                    </button>
+                  ) : null}
+                </>
+              ) : (
+                <div className="do-ps-avatar-lg" aria-hidden={!avatarDataUrl}>
+                  {avatarDataUrl ? <img src={avatarDataUrl} alt="" /> : <User size={36} strokeWidth={1.5} />}
+                </div>
+              )}
             </div>
             <div className="do-ps-identity-copy">
               <h2 id="office-ps-identity-heading" className="do-ps-identity-name">
-                {profileDisplayName}
+                {displayNameHero}
               </h2>
               <p className="do-ps-identity-role">{profileRoleLine}</p>
               <div className="do-ps-identity-meta">
@@ -99,7 +260,7 @@ export default function OfficeProfileSettings({ workflow }) {
               <h3 id="office-ps-personal-heading" className="do-ps-card-title">
                 Personal information
               </h3>
-              <p className="do-ps-card-desc">Contact details visible to other authorized campus offices.</p>
+              <p className="do-ps-card-desc">{personalLead}</p>
             </div>
           </div>
           <div className="do-ps-form-grid">
@@ -107,15 +268,49 @@ export default function OfficeProfileSettings({ workflow }) {
               <label className="do-ps-label" htmlFor="office-ps-fullname">
                 Full name
               </label>
-              <input id="office-ps-fullname" className="do-ps-input" readOnly value={profileDisplayName} />
+              <input
+                id="office-ps-fullname"
+                className="do-ps-input"
+                autoComplete="name"
+                readOnly={isHsoStaffPhotoProfile}
+                value={isHsoStaffPhotoProfile ? rosterName : fullName}
+                onChange={isHsoStaffPhotoProfile ? undefined : (e) => setFullName(e.target.value)}
+                placeholder="Your name as it should appear in CampusCare"
+              />
             </div>
             <div className="do-ps-field">
               <label className="do-ps-label" htmlFor="office-ps-email">
                 Email
               </label>
-              <input id="office-ps-email" className="do-ps-input" readOnly value={profileEmail} />
+              <input
+                id="office-ps-email"
+                className="do-ps-input"
+                type="email"
+                autoComplete="email"
+                readOnly={isHsoStaffPhotoProfile}
+                value={isHsoStaffPhotoProfile ? rosterEmail : email}
+                onChange={isHsoStaffPhotoProfile ? undefined : (e) => setEmail(e.target.value)}
+                placeholder="name@institution.edu"
+              />
             </div>
           </div>
+          {saveMessage ? (
+            <p className="do-ps-card-desc" style={{ marginTop: 12, marginBottom: 0 }} role="status">
+              {saveMessage}
+            </p>
+          ) : null}
+          {isHsoStaffPhotoProfile ? (
+            <p className="do-ps-card-desc" style={{ marginTop: 16, marginBottom: 0 }}>
+              Hover your photo and choose <strong>Update</strong> to upload or crop your picture. Your name stays on file
+              from the roster.
+            </p>
+          ) : (
+            <div className="do-ps-actions" style={{ marginTop: 16 }}>
+              <button type="button" className="cc-btn-primary" onClick={handleSaveProfile}>
+                Save profile
+              </button>
+            </div>
+          )}
         </section>
 
         <section className="do-ps-card" aria-labelledby="office-ps-office-heading">
@@ -142,70 +337,6 @@ export default function OfficeProfileSettings({ workflow }) {
                 Office location
               </label>
               <input id="office-ps-room" className="do-ps-input" readOnly value={profileOfficeLocation} />
-            </div>
-          </div>
-        </section>
-
-        <section className="do-ps-card" aria-labelledby="office-ps-security-heading">
-          <div className="do-ps-card-head">
-            <div className="do-ps-card-head-icon" aria-hidden>
-              <Shield size={20} strokeWidth={1.75} />
-            </div>
-            <div>
-              <h3 id="office-ps-security-heading" className="do-ps-card-title">
-                Security
-              </h3>
-              <p className="do-ps-card-desc">Password changes use your campus single sign-on provider.</p>
-            </div>
-          </div>
-          <div className="do-ps-form-stack">
-            <div className="do-ps-field">
-              <label className="do-ps-label" htmlFor="office-ps-cur-pw">
-                Current password
-              </label>
-              <input
-                id="office-ps-cur-pw"
-                className="do-ps-input"
-                type="password"
-                autoComplete="current-password"
-                placeholder="••••••••"
-                disabled
-              />
-            </div>
-            <div className="do-ps-field">
-              <label className="do-ps-label" htmlFor="office-ps-new-pw">
-                New password
-              </label>
-              <input
-                id="office-ps-new-pw"
-                className="do-ps-input"
-                type="password"
-                autoComplete="new-password"
-                placeholder="Minimum 12 characters"
-                disabled
-              />
-            </div>
-            <div className="do-ps-field">
-              <label className="do-ps-label" htmlFor="office-ps-confirm-pw">
-                Confirm new password
-              </label>
-              <input
-                id="office-ps-confirm-pw"
-                className="do-ps-input"
-                type="password"
-                autoComplete="new-password"
-                placeholder="Re-enter new password"
-                disabled
-              />
-            </div>
-            <p className="do-ps-hint">
-              <KeyRound size={14} strokeWidth={2} aria-hidden className="do-ps-hint-icon" />
-              Password updates are managed outside CampusCare. Contact IT for SSO or directory resets.
-            </p>
-            <div className="do-ps-actions">
-              <button type="button" className="cc-btn-primary" disabled>
-                Update password
-              </button>
             </div>
           </div>
         </section>
@@ -271,6 +402,16 @@ export default function OfficeProfileSettings({ workflow }) {
           </ul>
         </section>
       </div>
+
+      {isHsoStaffPhotoProfile ? (
+        <ProfileAvatarEditorModal
+          open={avatarEditorOpen}
+          imageSrc={editorImageSrc}
+          onClose={closeAvatarEditor}
+          onSave={handleAvatarEditorSave}
+          onPickAnother={() => avatarFileRef.current?.click()}
+        />
+      ) : null}
     </div>
   );
 }

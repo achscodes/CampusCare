@@ -418,7 +418,12 @@ function SDAO({ embedDashboardOnly = false } = {}) {
   const userName = session?.name || "Ms. Lourdes Virginia G. Dorios";
   const userRole = session?.role || "Senior Supervisor";
 
-  const meta = PAGE_META[activeNav] ?? PAGE_META.dashboard;
+  const meta = embedDashboardOnly
+    ? {
+        title: "Reports & Analytics",
+        subtitle: "Student Development (SDAO) — scholarship programs and dashboard metrics.",
+      }
+    : (PAGE_META[activeNav] ?? PAGE_META.dashboard);
 
   useEffect(() => {
     if (!showSdaoDocRequestNav && activeNav === "docrequests") setActiveNav("dashboard");
@@ -429,11 +434,12 @@ function SDAO({ embedDashboardOnly = false } = {}) {
   }, [embedDashboardOnly, activeNav]);
 
   useEffect(() => {
+    if (embedDashboardOnly) return;
     const id = location.state?.restoreNav;
     if (!id || typeof id !== "string") return;
     setActiveNav(id);
     navigate("/sdao", { replace: true, state: {} });
-  }, [location.state, navigate]);
+  }, [embedDashboardOnly, location.state, navigate]);
 
   const closeFeatureModal = () => {
     setActiveModal(null);

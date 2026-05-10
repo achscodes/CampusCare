@@ -11,11 +11,7 @@ import { formatAuthError } from "../utils/supabaseErrors";
 import { syncCampusCareSessionFromSupabaseUser } from "../utils/campusCareAuth";
 import { getAuthEmailRedirectUrl } from "../utils/supabaseAuthRedirect";
 import { getHomeRouteForOffice } from "../utils/officeRoutes";
-import {
-  getSuperAdminRouteForOffice,
-  isSuperAdminSession,
-  resolveSignupOfficeAndRole,
-} from "../utils/superAdmin";
+import { resolveSignupOfficeAndRole } from "../utils/welfareAdmin";
 import {
   getPasswordStrength,
   sanitizeMiddleInitialInput,
@@ -25,9 +21,9 @@ import {
   validateStaffPassword,
 } from "../utils/signupFieldValidation";
 import { showToast } from "../utils/toast";
-import { clearCampusCareSession, writeCampusCareSession } from "../utils/campusCareSession";
+import { clearCampusCareSession } from "../utils/campusCareSession";
 import { devLog, devWarn } from "../utils/devLog";
-import { HSO_DESIGNATION_OPTIONS } from "../utils/hsoAccess";
+import { HSO_SIGNUP_DESIGNATION_OPTIONS } from "../utils/hsoAccess";
 
 const SignupPage = () => {
   const navigate = useNavigate();
@@ -127,11 +123,13 @@ const SignupPage = () => {
 
     const resolved = resolveSignupOfficeAndRole(office, roleByOffice);
     const officeKey = resolved.officeKey;
-    const role = officeKey === "health"
-      ? (hsoRoleByDesignation[hsoDesignation] || "Nurse")
-      : resolved.role;
+    const role =
+      officeKey === "health"
+        ? (hsoRoleByDesignation[hsoDesignation] || "Nurse")
+        : resolved.role;
     const normalizedDesignation = officeKey === "health" ? hsoDesignation : undefined;
-    const accountStatus = officeKey === "health" && normalizedDesignation === "admin" ? "approved" : "pending";
+    const accountStatus =
+      officeKey === "health" && normalizedDesignation === "admin" ? "approved" : "pending";
 
     if (isSupabaseConfigured() && supabase) {
       setSubmitting(true);
@@ -149,6 +147,7 @@ const SignupPage = () => {
               middle_initial: middleInitial.trim(),
               last_name: lastName.trim(),
               office: officeKey,
+              signup_office_raw: office,
               role,
               designation: normalizedDesignation,
               account_status: accountStatus,
@@ -196,9 +195,7 @@ const SignupPage = () => {
             return;
           }
           devLog("[AUTH] Signup and session created");
-          const dest = isSuperAdminSession(sync.session)
-            ? getSuperAdminRouteForOffice(sync.session.office)
-            : getHomeRouteForOffice(sync.session.office);
+          const dest = getHomeRouteForOffice(sync.session.office);
           showToast("Account created. Welcome to CampusCare.", { variant: "success" });
           navigate(dest, { replace: true, state: {} });
           return;
@@ -231,24 +228,8 @@ const SignupPage = () => {
       });
       devLog("[AUTH] Offline user registered");
       setFormError("");
-      if (isSuperAdminSession({ role })) {
-        const session = {
-          userId: created.id,
-          email: created.email,
-          office: officeKey,
-          role,
-          name: `${created.firstName} ${created.lastName}`.trim(),
-          rememberMe: false,
-          accountStatus: created.accountStatus ?? "approved",
-          designation: normalizedDesignation,
-        };
-        writeCampusCareSession(session, false);
-        showToast("Account created. Welcome to CampusCare.", { variant: "success" });
-        navigate(getSuperAdminRouteForOffice(officeKey), { replace: true, state: {} });
-      } else {
-        showToast("Account created. You can sign in now.", { variant: "success" });
-        navigate("/signin", { state: { message: "Account created. You can sign in now." } });
-      }
+      showToast("Account created. You can sign in now.", { variant: "success" });
+      navigate("/signin", { state: { message: "Account created. You can sign in now." } });
     } catch (err) {
       devWarn("[AUTH] Offline registration failed:", err);
       setFormError(err?.message || "Unable to create account.");
@@ -426,7 +407,7 @@ const SignupPage = () => {
                   aria-invalid={Boolean(fieldErrors.hsoDesignation)}
                   aria-describedby={fieldErrors.hsoDesignation ? "hsoDesignation-error" : undefined}
                 >
-                  {HSO_DESIGNATION_OPTIONS.map((opt) => (
+                  {HSO_SIGNUP_DESIGNATION_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
                     </option>

@@ -42,8 +42,41 @@ export function designationToService(designation) {
   return "Physician Consultation";
 }
 
-export function generateCheckinCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+/** Next sequential check-in code for local/mock inserts (DB uses default on real inserts). */
+export function formatCheckinCodeFromNumber(n) {
+  const num = Math.max(1, Math.floor(Number(n) || 1));
+  return `CH-${String(num).padStart(4, "0")}`;
+}
+
+/**
+ * Normalize for comparison: legacy 6-digit numeric codes, or CH- / CH0001 → CH-0001.
+ * Also maps plain digits (e.g. "1" / "0001" from mobile or DB) to CH-####.
+ * @param {string} value
+ */
+export function normalizeCheckinCode(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const u = raw.toUpperCase().replace(/\s+/g, "");
+  const ch = u.match(/^CH-?(\d+)$/);
+  if (ch) return `CH-${ch[1].padStart(4, "0")}`;
+  if (/^\d{6}$/.test(u)) return u;
+  if (/^\d{1,8}$/.test(u)) return `CH-${u.padStart(4, "0")}`;
+  return u;
+}
+
+/** Values to try in DB lookup (CH-0001 vs 0001 vs 1). */
+export function checkinLookupVariants(normalizedCode) {
+  const code = String(normalizedCode || "").trim();
+  if (!code) return [];
+  const out = new Set([code]);
+  const ch = code.match(/^CH-(\d+)$/);
+  if (ch) {
+    const n = ch[1];
+    out.add(n);
+    const stripped = n.replace(/^0+/, "") || "0";
+    out.add(stripped);
+  }
+  return [...out];
 }
 
 export function computeCheckinWindow(dateIso, time) {

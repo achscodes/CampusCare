@@ -175,6 +175,20 @@ export function sanitizeDigitsOnlyInput(value) {
 }
 
 /**
+ * Patient check-in field: always the CH-#### template. Strips non-digits and
+ * prefixes "CH-"; paste "0001" or "CH-0001" both become CH-0001.
+ * @param {string} value
+ */
+export function sanitizeCheckinCodeInput(value) {
+  const digits = String(value ?? "")
+    .toUpperCase()
+    .replace(/\D/g, "")
+    .slice(0, 8);
+  if (!digits) return "";
+  return `CH-${digits}`;
+}
+
+/**
  * UI helper: middle initial as user types (single Unicode letter only).
  * @param {string} value
  */

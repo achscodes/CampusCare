@@ -8,8 +8,8 @@ import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { verifyCredentials } from "../utils/authStore";
 import { formatAuthError } from "../utils/supabaseErrors";
 import { syncCampusCareSessionFromSupabaseUser } from "../utils/campusCareAuth";
-import { getHomeRouteForOffice } from "../utils/officeRoutes";
-import { getSuperAdminRouteForOffice, isSuperAdminSession } from "../utils/superAdmin";
+import { getHomeRouteForSession } from "../utils/officeRoutes";
+import { getWelfareAdminRouteForOffice, isWelfareAdminSession } from "../utils/welfareAdmin";
 import { showToast } from "../utils/toast";
 import { clearCampusCareSession, writeCampusCareSession } from "../utils/campusCareSession";
 import { devLog, devWarn } from "../utils/devLog";
@@ -101,7 +101,7 @@ const SigninPage = () => {
         devLog("[AUTH] Session created");
         const { session } = sync;
         setSubmitting(false);
-        const dest = isSuperAdminSession(session) ? getSuperAdminRouteForOffice(session.office) : getHomeRouteForOffice(session.office);
+        const dest = isWelfareAdminSession(session) ? getWelfareAdminRouteForOffice(session.office) : getHomeRouteForSession(session);
         devLog("[AUTH] Navigating to:", dest);
         showToast("Signed in successfully.", { variant: "success" });
         navigate(dest, { replace: true, state: {} });
@@ -139,7 +139,7 @@ const SigninPage = () => {
       designation: user.designation,
     };
 
-    if (!isSuperAdminSession(session) && !isHsoAdminSession(session) && (accountStatus === "pending" || accountStatus === "rejected")) {
+    if (!isWelfareAdminSession(session) && !isHsoAdminSession(session) && (accountStatus === "pending" || accountStatus === "rejected")) {
       setFormError(
         accountStatus === "rejected"
           ? "Your account was rejected. Contact your office administrator."
@@ -150,7 +150,7 @@ const SigninPage = () => {
 
     writeCampusCareSession(session, rememberMe);
 
-    const dest = isSuperAdminSession(session) ? getSuperAdminRouteForOffice(office) : getHomeRouteForOffice(office);
+    const dest = isWelfareAdminSession(session) ? getWelfareAdminRouteForOffice(office) : getHomeRouteForSession(session);
     devLog("[AUTH] Offline navigation to:", dest);
     showToast("Signed in successfully.", { variant: "success" });
     navigate(dest);

@@ -6090,7 +6090,11 @@ export function ReportsPage({ standalone = false } = {}) {
                   </span>
                 )}
               </h1>
-              <p>Comprehensive discipline office statistics and insights.</p>
+              <p>
+                {standalone
+                  ? "Discipline Office reports and analytics from case data."
+                  : "Comprehensive discipline office statistics and insights."}
+              </p>
             </div>
             <div className="reports-toolbar">
               <div className="reports-period-field">
