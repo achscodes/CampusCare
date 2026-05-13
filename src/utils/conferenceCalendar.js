@@ -1,5 +1,55 @@
 /** Calendar helpers for Case Conference (real dates). */
 
+const US_MONTH_NAME_TO_INDEX = {
+  january: 0,
+  february: 1,
+  march: 2,
+  april: 3,
+  may: 4,
+  june: 5,
+  july: 6,
+  august: 7,
+  september: 8,
+  october: 9,
+  november: 10,
+  december: 11,
+};
+
+/**
+ * Parse hearing calendar day in local time (avoids Date.parse UTC shifts for labels like "May 13, 2026").
+ * @param {string} dateLabel
+ * @returns {Date | null}
+ */
+export function parseConferenceDateLabelToLocalDay(dateLabel) {
+  const s = String(dateLabel || "").trim();
+  if (!s) return null;
+
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    const y = parseInt(iso[1], 10);
+    const mo = parseInt(iso[2], 10) - 1;
+    const d = parseInt(iso[3], 10);
+    const x = new Date(y, mo, d);
+    if (x.getFullYear() === y && x.getMonth() === mo && x.getDate() === d) return x;
+    return null;
+  }
+
+  const m = s.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+  if (m) {
+    const mi = US_MONTH_NAME_TO_INDEX[m[1].toLowerCase()];
+    if (mi === undefined) return null;
+    const day = parseInt(m[2], 10);
+    const year = parseInt(m[3], 10);
+    const x = new Date(year, mi, day);
+    if (x.getFullYear() !== year || x.getMonth() !== mi || x.getDate() !== day) return null;
+    return x;
+  }
+
+  const t = Date.parse(s);
+  if (!Number.isNaN(t)) return new Date(t);
+  return null;
+}
+
 /**
  * @param {object} conf — conference row with dateLabel and/or day
  * @returns {Date | null}
@@ -7,8 +57,8 @@
 export function parseConferenceDate(conf) {
   if (!conf) return null;
   if (conf.dateLabel) {
-    const t = Date.parse(String(conf.dateLabel).trim());
-    if (!Number.isNaN(t)) return new Date(t);
+    const d = parseConferenceDateLabelToLocalDay(conf.dateLabel);
+    if (d && !Number.isNaN(d.getTime())) return d;
   }
   if (conf.day != null) {
     const now = new Date();
@@ -69,35 +119,49 @@ export function durationMinutesFromLabel(durationLabel) {
 }
 
 /**
+ * @param {object} conf
+ * @returns {{ start: Date, end: Date } | null}
+ */
+export function conferenceWindow(conf) {
+  const d = parseConferenceDate(conf);
+  if (!d || Number.isNaN(d.getTime())) return null;
+  // Schedule modal stores "7:00 PM - 8:00 PM"; only the start matched old parsers,
+  // so the full string failed and hearings were treated as noon–1pm → falsely "completed".
+  const raw = String(conf?.timeLabel || "").trim();
+  const parts = raw.split(/\s*-\s*/).map((p) => p.trim()).filter(Boolean);
+  const startHM = parseTimeLabelToHoursMinutes(parts[0] || raw);
+  const endHM = parts.length >= 2 ? parseTimeLabelToHoursMinutes(parts[1]) : null;
+
+  const start = new Date(d);
+  if (startHM) {
+    start.setHours(startHM.hours, startHM.minutes, 0, 0);
+  } else {
+    start.setHours(12, 0, 0, 0);
+  }
+
+  let end;
+  if (endHM) {
+    end = new Date(d);
+    end.setHours(endHM.hours, endHM.minutes, 0, 0);
+    if (end.getTime() <= start.getTime()) {
+      end.setDate(end.getDate() + 1);
+    }
+  } else {
+    const mins = durationMinutesFromLabel(conf?.durationLabel);
+    end = new Date(start);
+    end.setMinutes(end.getMinutes() + mins);
+  }
+  return { start, end };
+}
+
+/**
  * Local scheduled start datetime for a conference.
  * @param {object} conf
  * @returns {Date | null}
  */
 export function parseConferenceStartDateTime(conf) {
-  const d = parseConferenceDate(conf);
-  if (!d || Number.isNaN(d.getTime())) return null;
-  const t = parseTimeLabelToHoursMinutes(conf?.timeLabel);
-  const x = new Date(d);
-  if (t) {
-    x.setHours(t.hours, t.minutes, 0, 0);
-  } else {
-    // If time is missing/unparseable, treat as noon to avoid marking as past too early.
-    x.setHours(12, 0, 0, 0);
-  }
-  return x;
-}
-
-/**
- * @param {object} conf
- * @returns {{ start: Date, end: Date } | null}
- */
-export function conferenceWindow(conf) {
-  const start = parseConferenceStartDateTime(conf);
-  if (!start) return null;
-  const mins = durationMinutesFromLabel(conf?.durationLabel);
-  const end = new Date(start);
-  end.setMinutes(end.getMinutes() + mins);
-  return { start, end };
+  const w = conferenceWindow(conf);
+  return w ? w.start : null;
 }
 
 /**
@@ -147,6 +211,23 @@ export function conferenceTimeState(conf, now = new Date()) {
   if (t < w.start.getTime()) return "future";
   if (t >= w.start.getTime() && t < w.end.getTime()) return "ongoing";
   return "past";
+}
+
+/**
+ * Empty string if DO may mark completed (scheduled start has been reached); otherwise user-facing reason + tooltip text.
+ * Completion is allowed once the hearing begins — early wrap-up does not require waiting until the scheduled end.
+ * @param {object} conf
+ * @param {Date} [now]
+ * @returns {string}
+ */
+export function conferenceCompletionBlockedReason(conf, now = new Date()) {
+  const w = conferenceWindow(conf);
+  if (!w) {
+    return "Conference date or time could not be read. Update the schedule and try again.";
+  }
+  if (now.getTime() >= w.start.getTime()) return "";
+  const startStr = w.start.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return `Available at or after the scheduled start (${startStr}).`;
 }
 
 /**

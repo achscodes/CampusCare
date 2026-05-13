@@ -12,7 +12,6 @@ create table if not exists public.discipline_cases (
   student_id text not null,
   case_type text not null,
   status text not null,
-  priority text not null,
   reported_at timestamptz not null default now(),
   reporting_officer text not null default 'Discipline Office',
   description text not null default '',
@@ -21,9 +20,6 @@ create table if not exists public.discipline_cases (
   updated_at timestamptz not null default now(),
   constraint discipline_cases_status_check check (
     status in ('new', 'ongoing', 'pending', 'closed')
-  ),
-  constraint discipline_cases_priority_check check (
-    priority in ('low', 'medium', 'high')
   )
 );
 

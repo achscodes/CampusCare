@@ -30,7 +30,7 @@ function attachVoice(u) {
   const voice = pickEnglishVoice();
   if (voice) u.voice = voice;
   u.lang = "en-US";
-  u.rate = 0.85;
+  u.rate = 0. ;
   u.pitch = 1;
   u.volume = 1;
 }

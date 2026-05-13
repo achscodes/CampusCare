@@ -14,6 +14,7 @@ import {
   YAxis,
 } from "recharts";
 import {
+  Ban,
   CalendarDays,
   CheckCircle2,
   ClipboardList,
@@ -22,6 +23,7 @@ import {
   FileText,
   Info,
   Plus,
+  Scale,
   TrendingUp,
   User,
 } from "lucide-react";
@@ -47,12 +49,13 @@ import {
 import { useRealtimeDisciplineCases } from "../../hooks/useRealtimeDisciplineCases";
 import {
   buildMonthGrid,
+  conferenceCompletionBlockedReason,
   dateKey,
   effectiveConferenceStatus,
-  conferenceTimeState,
   endOfWeekSunday,
   fromDateInputToLabel,
   parseConferenceDate,
+  parseConferenceStartDateTime,
   startOfWeekSunday,
   toDateInputValue,
 } from "../../utils/conferenceCalendar";
@@ -71,7 +74,7 @@ import {
   isReferralPendingReferringReview,
   canReceivingOfficeReviewReferral,
 } from "../../utils/interOfficeWorkflow";
-import { formatCaseDateFromIso, formatCaseId } from "../../utils/disciplineCaseMapper";
+import { formatCaseDateFromIso, formatCaseId, makeNextDisciplineCaseId, buildCaseInsertRowFromIncident } from "../../utils/disciplineCaseMapper";
 import {
   sanitizeDoStudentIdInput,
   sanitizePersonNameInput,
@@ -92,6 +95,7 @@ import { downloadDisciplineReportsPdf } from "../../reports/pdf/downloadDiscipli
 import { fileToEvidenceItem } from "../../utils/disciplineEvidence";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import { appendEvidenceToInterOfficeRequest } from "../../services/interOfficeDocumentEvidence";
+import { sendConferenceDiscussionSummaryToStudents } from "../../services/conferenceStudentNotifications";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
 import { DisciplineOfficeTopBar } from "./DisciplineOfficeTopBar";
 import "../../components/common/ProgramSelect.css";
@@ -1967,17 +1971,9 @@ export function CaseManagementPage() {
 // INCIDENT REPORT PAGE — paste above ConferencePill
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── Status → badge CSS class (maps to existing DO.css badge-* classes) ───────
-const IR_STATUS_BADGE = {
-  submitted:         "new",
-  under_review:      "ongoing",
-  escalated:         "high",
-  rejected:          "pending",
-  converted_to_case: "closed",
-};
-
-const IR_STATUS_LABEL = {
-  submitted:         "Submitted",
+// ── Incident report status labels (modal) ───────────────────────────────────
+const IR_STATUS_MODAL_LABEL = {
+  submitted:         "Pending Review",
   under_review:      "Under Review",
   escalated:         "Escalated",
   rejected:          "Rejected",
@@ -1985,12 +1981,16 @@ const IR_STATUS_LABEL = {
 };
 
 const IR_TABS = [
-  { key: "all",               label: (rows) => `All Reports (${rows.length})` },
-  { key: "submitted",         label: (rows) => `Submitted (${rows.filter((r) => r.status === "submitted").length})` },
-  { key: "under_review",      label: (rows) => `Under Review (${rows.filter((r) => r.status === "under_review").length})` },
-  { key: "escalated",         label: (rows) => `Escalated (${rows.filter((r) => r.status === "escalated").length})` },
-  { key: "rejected",          label: (rows) => `Rejected (${rows.filter((r) => r.status === "rejected").length})` },
-  { key: "converted_to_case", label: (rows) => `Converted to Case (${rows.filter((r) => r.status === "converted_to_case").length})` },
+  { key: "all", label: "All Reports", count: (rows) => rows.length },
+  { key: "submitted", label: "Submitted", count: (rows) => rows.filter((r) => r.status === "submitted").length },
+  { key: "under_review", label: "Under Review", count: (rows) => rows.filter((r) => r.status === "under_review").length },
+  { key: "escalated", label: "Escalated", count: (rows) => rows.filter((r) => r.status === "escalated").length },
+  { key: "rejected", label: "Rejected", count: (rows) => rows.filter((r) => r.status === "rejected").length },
+  {
+    key: "converted_to_case",
+    label: "Converted to Case",
+    count: (rows) => rows.filter((r) => r.status === "converted_to_case").length,
+  },
 ];
 
 function irFormatDate(raw) {
@@ -2000,26 +2000,433 @@ function irFormatDate(raw) {
   } catch { return raw; }
 }
 
+function irFormatTime(raw) {
+  if (!raw) return "—";
+  try {
+    return new Date(raw).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  } catch { return raw; }
+}
+
+/** Incident / filing line e.g. "May 12, 2026 10:30 AM" */
+function irFormatDateTime(raw) {
+  if (!raw) return "—";
+  try {
+    const d = new Date(raw);
+    const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    return `${date} ${time}`;
+  } catch {
+    return raw;
+  }
+}
+
+/** Shown in modal as "Filed On" */
+function irFormatFiledOn(raw) {
+  return irFormatDateTime(raw);
+}
+
 function irFormatId(raw) {
   if (!raw) return "—";
   const s = String(raw).toUpperCase();
   return /^IR-/.test(s) ? s : `IR-${s}`;
 }
 
-function irRenderInvolvedParties(parties) {
-  if (!parties) return "—";
+/** Display form for tables and modals (e.g. #IR-2026-001). */
+function irDisplayReportId(raw) {
+  const id = irFormatId(raw);
+  if (id === "—") return "—";
+  return `#${id}`;
+}
+
+function irParseParties(parties) {
+  if (!parties) return [];
   try {
     const arr = Array.isArray(parties) ? parties : JSON.parse(parties);
-    if (!arr || arr.length === 0) return "—";
-    return arr.map((p, i) => {
-      if (typeof p === "string") return <span key={i} style={{ display: "block" }}>{p}</span>;
-      const name = p.name || p.student || p.id || JSON.stringify(p);
-      const role = p.role ? ` (${p.role})` : "";
-      return <span key={i} style={{ display: "block" }}>{name}{role}</span>;
-    });
+    return Array.isArray(arr) ? arr : [];
   } catch {
-    return String(parties);
+    return [];
   }
+}
+
+function irLooksLikeUuid(s) {
+  if (s == null || typeof s !== "string") return false;
+  const t = s.trim().toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(t);
+}
+
+/**
+ * Collect student roster lookup hints from incident rows (columns + embedded `involved_parties`).
+ * Used to batch-load `public.students` so complainant names resolve when only JSON carries ids.
+ */
+function irCollectEmbeddedRosterHints(reports) {
+  const uuids = new Set();
+  const sids = new Set();
+  const emails = new Set();
+  for (const r of reports || []) {
+    if (r?.complainant_id != null && String(r.complainant_id).trim()) {
+      uuids.add(String(r.complainant_id).trim().toLowerCase());
+    }
+    const subSid = r?.submitter_student_id ?? r?.submitterStudentId;
+    if (subSid != null && String(subSid).trim()) {
+      sids.add(String(subSid).trim());
+    }
+    const arr = irParseParties(r?.involved_parties);
+    for (const p of arr) {
+      if (typeof p !== "object" || !p) continue;
+      const sid =
+        p.student_id ??
+        p.studentId ??
+        p.school_id ??
+        p.reporter_student_id ??
+        p.studentNumber ??
+        p.enrollment_id ??
+        p.enrollmentId;
+      if (sid != null && String(sid).trim()) sids.add(String(sid).trim());
+      const em = p.email ?? p.school_email;
+      if (em != null && String(em).trim()) emails.add(String(em).trim().toLowerCase());
+      for (const key of [
+        "user_id",
+        "profile_id",
+        "student_uuid",
+        "students_id",
+        "reporter_id",
+        "reporterId",
+        "complainant_id",
+        "complainee_id",
+        "complainantId",
+        "complaineeId",
+      ]) {
+        const v = p[key];
+        if (v != null && irLooksLikeUuid(String(v))) uuids.add(String(v).trim().toLowerCase());
+      }
+    }
+  }
+  return { uuids: [...uuids], sids: [...sids], emails: [...emails] };
+}
+
+/** Resolve a party object to a roster display name using preloaded `nameByKey`. */
+function irPartyObjectRosterName(p, nameByKey) {
+  if (typeof p !== "object" || !p || typeof nameByKey !== "object") return null;
+  const sid =
+    p.student_id ??
+    p.studentId ??
+    p.school_id ??
+    p.reporter_student_id ??
+    p.studentNumber ??
+    p.enrollment_id ??
+    p.enrollmentId;
+  if (sid != null && String(sid).trim()) {
+    const k = `sid:${String(sid).trim()}`;
+    if (nameByKey[k]) return nameByKey[k];
+  }
+  const em = p.email ?? p.school_email;
+  if (em != null && String(em).trim()) {
+    const k = `email:${String(em).trim().toLowerCase()}`;
+    if (nameByKey[k]) return nameByKey[k];
+  }
+  for (const key of [
+    "user_id",
+    "profile_id",
+    "student_uuid",
+    "students_id",
+    "reporter_id",
+    "reporterId",
+    "complainant_id",
+    "complainee_id",
+    "complainantId",
+    "complaineeId",
+  ]) {
+    const v = p[key];
+    if (v != null && irLooksLikeUuid(String(v))) {
+      const k = `uuid:${String(v).trim().toLowerCase()}`;
+      if (nameByKey[k]) return nameByKey[k];
+    }
+  }
+  return null;
+}
+
+/** Non-roster text from a party entry (string or object). Returns "" if nothing usable. */
+function irPartyTextDisplayName(p) {
+  if (typeof p === "string") {
+    const t = p.trim();
+    return t || "";
+  }
+  if (typeof p !== "object" || !p) return "";
+  const n =
+    p.name ??
+    p.full_name ??
+    p.fullName ??
+    p.student ??
+    p.displayName ??
+    p.email ??
+    p.id;
+  return n != null && String(n).trim() ? String(n).trim() : "";
+}
+
+/** Pull complainant / complainee / witness from `involved_parties` when roles exist; otherwise best-effort. */
+function irPartyLabels(report) {
+  const out = { complainant: "—", complainee: "—", witness: "—" };
+  const arr = irParseParties(report?.involved_parties);
+  if (arr.length === 0) return out;
+
+  const nameOf = (p) => {
+    const t = irPartyTextDisplayName(p);
+    return t || "—";
+  };
+  const roleOf = (p) => String(p?.role || p?.type || "").toLowerCase();
+
+  const pickFirst = (matchers) => {
+    for (const p of arr) {
+      const role = roleOf(p);
+      if (matchers.some((m) => role.includes(m))) return nameOf(p);
+    }
+    return "—";
+  };
+
+  out.complainant = pickFirst([
+    "complainant",
+    "reporter",
+    "reporting",
+    "reported_by",
+    "submitter",
+    "author",
+    "filing",
+    "plaintiff",
+  ]);
+  out.complainee = pickFirst(["complainee", "accused", "respondent", "subject", "alleged", "student"]);
+  out.witness = pickFirst(["witness"]);
+
+  if (out.complainant === "—" && out.complainee === "—" && out.witness === "—") {
+    if (arr.every((p) => typeof p === "string")) {
+      out.complainant = nameOf(arr[0]);
+      out.complainee = arr[1] != null ? nameOf(arr[1]) : "—";
+      out.witness = arr[2] != null ? nameOf(arr[2]) : "—";
+    } else {
+      out.complainant = nameOf(arr[0]);
+      if (arr[1]) out.complainee = nameOf(arr[1]);
+      if (arr[2]) out.witness = nameOf(arr[2]);
+    }
+  }
+  return out;
+}
+
+/** Display name from `public.students` row (full_name or first + last). */
+function rosterStudentDisplayName(row) {
+  if (!row) return "—";
+  const full = row.full_name != null && String(row.full_name).trim();
+  if (full) return String(row.full_name).trim();
+  const fn = [row.first_name, row.last_name].filter(Boolean).join(" ").trim();
+  return fn || "—";
+}
+
+/** Index one roster row by `students.id` and `students.student_id` for incident lookups. */
+function irStudentRosterMapAddRow(map, row) {
+  if (!row || typeof map !== "object") return;
+  const name = rosterStudentDisplayName(row);
+  if (row.id != null && String(row.id).trim()) {
+    map[`uuid:${String(row.id).trim().toLowerCase()}`] = name;
+  }
+  if (row.student_id != null && String(row.student_id).trim()) {
+    map[`sid:${String(row.student_id).trim()}`] = name;
+  }
+  if (row.email != null && String(row.email).trim()) {
+    map[`email:${String(row.email).trim().toLowerCase()}`] = name;
+  }
+}
+
+/**
+ * Who filed / complainant label: DB snapshot (`filer_display_name`), then roster via `complainant_id`,
+ * then embedded `involved_parties` hints.
+ * @param {Record<string, string>} nameByKey keys `uuid:<lowercase id>`, `sid:<student_id>`, or `email:<lower>`
+ */
+function irComplainantDisplay(report, nameByKey = {}) {
+  const snap =
+    report?.filer_display_name ??
+    report?.filerDisplayName ??
+    report?.filer_name ??
+    report?.submitted_by_name;
+  if (snap != null && String(snap).trim()) return String(snap).trim();
+
+  const direct =
+    report?.complainant_name ??
+    report?.reporter_name ??
+    report?.submitter_name;
+  if (direct != null && String(direct).trim()) return String(direct).trim();
+
+  const subSid = report?.submitter_student_id ?? report?.submitterStudentId;
+  if (subSid != null && String(subSid).trim()) {
+    const k = `sid:${String(subSid).trim()}`;
+    if (nameByKey[k]) return nameByKey[k];
+  }
+
+  const cid = report?.complainant_id != null ? String(report.complainant_id).trim().toLowerCase() : "";
+  if (cid) {
+    const k = `uuid:${cid}`;
+    if (nameByKey[k]) return nameByKey[k];
+    return `Not in roster (${report.complainant_id})`;
+  }
+
+  const arr = irParseParties(report?.involved_parties);
+  const complainantRoles = [
+    "complainant",
+    "reporter",
+    "reporting",
+    "reported_by",
+    "submitter",
+    "author",
+    "filing",
+    "plaintiff",
+  ];
+  for (const p of arr) {
+    if (typeof p !== "object" || !p) continue;
+    const role = String(p.role || p.type || "").toLowerCase();
+    if (!complainantRoles.some((m) => role.includes(m))) continue;
+    const rn = irPartyObjectRosterName(p, nameByKey);
+    if (rn) return rn;
+  }
+  if (arr.length > 0 && typeof arr[0] === "object" && arr[0]) {
+    const rn0 = irPartyObjectRosterName(arr[0], nameByKey);
+    if (rn0) return rn0;
+    const tx0 = irPartyTextDisplayName(arr[0]);
+    if (tx0) return tx0;
+  }
+
+  return irPartyLabels(report).complainant;
+}
+
+/**
+ * Complainee / respondent display: roster match on party ids, then second party when order is [reporter, accused].
+ */
+function irComplaineeDisplay(report, nameByKey = {}) {
+  const arr = irParseParties(report?.involved_parties);
+  const specific = ["complainee", "accused", "respondent", "subject", "alleged", "defendant"];
+  for (const p of arr) {
+    if (typeof p !== "object" || !p) continue;
+    const role = String(p.role || p.type || "").toLowerCase();
+    if (!specific.some((m) => role.includes(m))) continue;
+    const rn = irPartyObjectRosterName(p, nameByKey);
+    if (rn) return rn;
+    const tx = irPartyTextDisplayName(p);
+    if (tx) return tx;
+  }
+  if (arr.length >= 2 && typeof arr[1] === "object" && arr[1]) {
+    const rn1 = irPartyObjectRosterName(arr[1], nameByKey);
+    if (rn1) return rn1;
+    const tx1 = irPartyTextDisplayName(arr[1]);
+    if (tx1) return tx1;
+  }
+  return irPartyLabels(report).complainee;
+}
+
+/** Comma-separated witness names when multiple have role "witness". */
+function irWitnessesDisplay(report, nameByKey = {}) {
+  const arr = irParseParties(report?.involved_parties);
+  const names = [];
+  for (const p of arr) {
+    const role = String(p?.role || p?.type || "").toLowerCase();
+    if (!role.includes("witness")) continue;
+    if (typeof p === "string") {
+      const t = p.trim();
+      if (t) names.push(t);
+    } else {
+      const rn = irPartyObjectRosterName(p, nameByKey);
+      if (rn) names.push(rn);
+      else {
+        const tx = irPartyTextDisplayName(p);
+        if (tx) names.push(tx);
+      }
+    }
+  }
+  if (names.length) return names.join(", ");
+  const fb = irPartyLabels(report).witness;
+  return fb === "—" ? "—" : fb;
+}
+
+function irTryExtractStudentId(report) {
+  const arr = irParseParties(report?.involved_parties);
+  for (const p of arr) {
+    if (typeof p !== "object" || !p) continue;
+    const role = String(p?.role || p?.type || "").toLowerCase();
+    if (!role.includes("complainee") && !role.includes("accused") && !role.includes("respondent") && !role.includes("student")) {
+      continue;
+    }
+    const raw = p.studentId ?? p.student_id ?? p.school_id ?? "";
+    const s = String(raw).trim();
+    if (s.length >= 4) return s;
+  }
+  for (const p of arr) {
+    if (typeof p !== "object" || !p) continue;
+    const raw = p.studentId ?? p.student_id ?? p.school_id ?? "";
+    const s = String(raw).trim();
+    if (s.length >= 4) return s;
+  }
+  return "";
+}
+
+function irIncidentType(report) {
+  return report?.incident_type || report?.subject || "—";
+}
+
+function irStatement(report) {
+  const s = report?.statement_of_incident ?? report?.description;
+  return s != null && String(s).trim() ? String(s).trim() : "—";
+}
+
+function irEvidenceSummary(report) {
+  const raw = report?.evidence ?? report?.evidences ?? report?.attachments;
+  if (raw == null) return "—";
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) return "—";
+    const n = raw.length;
+    return n === 1 ? "1 item" : `${n} items`;
+  }
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  return "—";
+}
+
+/** Lines for modal display (name / URL / string). */
+function irEvidenceLines(report) {
+  const raw = report?.evidence ?? report?.evidences ?? report?.attachments;
+  if (raw == null) return [];
+  if (Array.isArray(raw)) {
+    return raw.map((item, i) => {
+      if (item == null) return { key: i, text: "—" };
+      if (typeof item === "string") return { key: i, text: item.trim() || "—" };
+      const name =
+        item.name || item.filename || item.file_name || item.title || item.label;
+      const url = item.url || item.href || item.path;
+      if (name && url) return { key: i, text: `${name} (${url})` };
+      if (name) return { key: i, text: String(name) };
+      if (url) return { key: i, text: String(url) };
+      try {
+        return { key: i, text: JSON.stringify(item) };
+      } catch {
+        return { key: i, text: String(item) };
+      }
+    });
+  }
+  if (typeof raw === "string" && raw.trim()) return [{ key: 0, text: raw.trim() }];
+  return [];
+}
+
+function irRowSearchBlob(report, nameByKey = {}) {
+  const complainant = irComplainantDisplay(report, nameByKey);
+  const complainee = irComplaineeDisplay(report, nameByKey);
+  const witness = irWitnessesDisplay(report, nameByKey);
+  return [
+    report?.id,
+    irFormatId(report?.id),
+    irIncidentType(report),
+    report?.location,
+    irStatement(report),
+    irEvidenceSummary(report),
+    complainant,
+    complainee,
+    witness,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 }
 
 export function IncidentReportPage() {
@@ -2030,9 +2437,23 @@ export function IncidentReportPage() {
   const [irSearch, setIrSearch]             = useState("");
   const [irSearchField, setIrSearchField]   = useState("all");
   const [irSelected, setIrSelected]         = useState(null);
-  const [irStatusUpdate, setIrStatusUpdate] = useState("submitted");
-  const [irStaffNotes, setIrStaffNotes]     = useState("");
-  const [irModalError, setIrModalError]     = useState(null);
+  const [irDetailActionError, setIrDetailActionError] = useState(null);
+
+  const [irRejectTarget, setIrRejectTarget] = useState(null);
+  const [irRejectCommon, setIrRejectCommon] = useState({
+    duplicate: false,
+    insufficient_evidence: false,
+    lack_of_detail: false,
+    wrong_jurisdiction: false,
+    informally_resolved: false,
+    others: false,
+  });
+  const [irRejectOtherSpec, setIrRejectOtherSpec] = useState("");
+  const [irRejectExplanation, setIrRejectExplanation] = useState("");
+  const [irRejectSaving, setIrRejectSaving] = useState(false);
+  const [irRejectError, setIrRejectError] = useState(null);
+  /** Lookup keys: `uuid:<students.id>`, `sid:<students.student_id>` → display name. */
+  const [irStudentNames, setIrStudentNames] = useState({});
 
   const fetchIrReports = useCallback(async () => {
     setIrLoading(true);
@@ -2043,7 +2464,43 @@ export function IncidentReportPage() {
         .select("*")
         .order("created_at", { ascending: false });
       if (error) throw error;
-      setIrReports(data || []);
+      const reports = data || [];
+      const hints = irCollectEmbeddedRosterHints(reports);
+      const uuidList = hints.uuids;
+      const sidList = hints.sids;
+      const emailList = hints.emails;
+      const nameMap = {};
+      /** `*` keeps email (if present on `public.students`) for party JSON lookups without hard-failing on older schemas. */
+      const rosterSelect = "*";
+      if (uuidList.length > 0) {
+        const { data: studsByUuid, error: errUuid } = await supabase
+          .from("students")
+          .select(rosterSelect)
+          .in("id", uuidList);
+        if (!errUuid && Array.isArray(studsByUuid)) {
+          for (const s of studsByUuid) irStudentRosterMapAddRow(nameMap, s);
+        }
+      }
+      if (sidList.length > 0) {
+        const { data: studsBySid, error: errSid } = await supabase
+          .from("students")
+          .select(rosterSelect)
+          .in("student_id", sidList);
+        if (!errSid && Array.isArray(studsBySid)) {
+          for (const s of studsBySid) irStudentRosterMapAddRow(nameMap, s);
+        }
+      }
+      if (emailList.length > 0) {
+        const { data: studsByEmail, error: errEmail } = await supabase
+          .from("students")
+          .select(rosterSelect)
+          .in("email", emailList);
+        if (!errEmail && Array.isArray(studsByEmail)) {
+          for (const s of studsByEmail) irStudentRosterMapAddRow(nameMap, s);
+        }
+      }
+      setIrStudentNames(nameMap);
+      setIrReports(reports);
     } catch (err) {
       setIrError(err?.message || "Failed to load incident reports.");
     } finally {
@@ -2054,11 +2511,7 @@ export function IncidentReportPage() {
   useEffect(() => { fetchIrReports(); }, [fetchIrReports]);
 
   useEffect(() => {
-    setIrModalError(null);
-    if (irSelected) {
-      setIrStatusUpdate(irSelected.status || "submitted");
-      setIrStaffNotes(irSelected.staff_notes || "");
-    }
+    setIrDetailActionError(null);
   }, [irSelected]);
 
   const irStats = useMemo(() => ({
@@ -2073,20 +2526,131 @@ export function IncidentReportPage() {
       const matchesTab = irActiveTab === "all" || r.status === irActiveTab;
 
       const q = irSearch.toLowerCase();
+      const complainantDisp = irComplainantDisplay(r, irStudentNames);
+      const complaineeDisp = irComplaineeDisplay(r, irStudentNames);
+      const witnessDisp = irWitnessesDisplay(r, irStudentNames);
       const matchesSearch = (() => {
         if (!q) return true;
-        const id       = String(r.id       || "").toLowerCase();
-        const subject  = String(r.subject  || "").toLowerCase();
+        const id = String(r.id || "").toLowerCase();
+        const subject = String(r.subject || "").toLowerCase();
+        const incidentType = String(irIncidentType(r) || "").toLowerCase();
         const location = String(r.location || "").toLowerCase();
-        if (irSearchField === "reportId") return id.includes(q);
-        if (irSearchField === "subject")  return subject.includes(q);
+        const blob = irRowSearchBlob(r, irStudentNames);
+        if (irSearchField === "reportId") return id.includes(q) || irFormatId(r.id).toLowerCase().includes(q);
+        if (irSearchField === "subject") return subject.includes(q) || incidentType.includes(q);
         if (irSearchField === "location") return location.includes(q);
-        return id.includes(q) || subject.includes(q) || location.includes(q);
+        if (irSearchField === "complainant") return complainantDisp.toLowerCase().includes(q);
+        if (irSearchField === "complainee") return complaineeDisp.toLowerCase().includes(q);
+        if (irSearchField === "witness") return witnessDisp.toLowerCase().includes(q);
+        return blob.includes(q);
       })();
 
       return matchesTab && matchesSearch;
     });
-  }, [irReports, irActiveTab, irSearch, irSearchField]);
+  }, [irReports, irActiveTab, irSearch, irSearchField, irStudentNames]);
+
+  const irDetailEvidenceLines = useMemo(
+    () => (irSelected ? irEvidenceLines(irSelected) : []),
+    [irSelected],
+  );
+
+  const handleIrDetailConvert = useCallback(async () => {
+    if (!irSelected) return;
+    setIrDetailActionError(null);
+    try {
+      const { data: existingCases, error: fetchErr } = await supabase
+        .from("discipline_cases")
+        .select("id");
+      if (fetchErr) throw fetchErr;
+
+      const caseId = makeNextDisciplineCaseId(existingCases || []);
+      const complaineeDisp = irComplaineeDisplay(irSelected, irStudentNames);
+      const witness = irWitnessesDisplay(irSelected, irStudentNames);
+      const stmt = irStatement(irSelected);
+      const rawEv = irSelected.evidence ?? irSelected.evidences ?? irSelected.attachments ?? [];
+      const evidence = Array.isArray(rawEv) ? rawEv : [];
+
+      const studentName =
+        complaineeDisp && complaineeDisp !== "—"
+          ? complaineeDisp.trim()
+          : "Unknown respondent";
+      const sidRaw = irTryExtractStudentId(irSelected);
+      const studentId =
+        sidRaw ||
+        `PENDING-IR-${String(irSelected.id).replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || "UNKNOWN"}`;
+
+      const itype = irIncidentType(irSelected);
+      const caseType = CASE_TYPE_OPTIONS.includes(itype) ? itype : "Code of Conduct Violation";
+
+      const workflowNote =
+        "Created from an incident report; continue classification and investigation in case management as needed.";
+
+      const description = [
+        `Source incident report: ${irDisplayReportId(irSelected.id)}`,
+        `Complainant: ${irComplainantDisplay(irSelected, irStudentNames)}`,
+        `Respondent (complainee): ${complaineeDisp}`,
+        witness && witness !== "—" ? `Witness(es): ${witness}` : "",
+        irSelected.location ? `Location: ${irSelected.location}` : "",
+        `Incident date/time: ${irFormatDateTime(irSelected.incident_at)}`,
+        "",
+        "Statement of incident:",
+        stmt,
+        "",
+        workflowNote,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const row = buildCaseInsertRowFromIncident(caseId, {
+        studentName,
+        studentId,
+        caseType,
+        description,
+        evidence,
+        program: "",
+        school: "",
+        offenseType: "",
+        sourceIncidentReportId: String(irSelected.id),
+      });
+
+      const { error: insErr } = await supabase.from("discipline_cases").insert(row);
+      if (insErr) throw insErr;
+
+      const { error: updErr } = await supabase
+        .from("discipline_incident_reports")
+        .update({
+          status: "converted_to_case",
+          converted_case_id: caseId,
+        })
+        .eq("id", irSelected.id);
+
+      if (updErr) {
+        await supabase.from("discipline_cases").delete().eq("id", caseId);
+        throw updErr;
+      }
+
+      await fetchIrReports();
+      showToast(`Case ${caseId} created and linked to this report.`, { variant: "success" });
+      setIrSelected(null);
+    } catch (err) {
+      setIrDetailActionError(err?.message || "Could not convert this report.");
+    }
+  }, [irSelected, fetchIrReports, irStudentNames]);
+
+  const openIrRejectModal = useCallback((row) => {
+    setIrRejectError(null);
+    setIrRejectCommon({
+      duplicate: false,
+      insufficient_evidence: false,
+      lack_of_detail: false,
+      wrong_jurisdiction: false,
+      informally_resolved: false,
+      others: false,
+    });
+    setIrRejectOtherSpec("");
+    setIrRejectExplanation("");
+    setIrRejectTarget(row);
+  }, []);
 
   return (
     <div className="dashboard-layout do-office-layout">
@@ -2129,10 +2693,6 @@ export function IncidentReportPage() {
               <h1>Incident Report</h1>
               <p>Manage and track all disciplinary incident reports</p>
             </div>
-            <button className="btn-new-case" type="button" disabled style={{ opacity: 0.5, cursor: "not-allowed" }}>
-              <Plus size={16} strokeWidth={2} aria-hidden />
-              New Report
-            </button>
           </div>
 
           {/* ── Summary stat cards ── */}
@@ -2180,15 +2740,18 @@ export function IncidentReportPage() {
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 0 }}>
                 <select
                   className="cc-input"
-                  style={{ width: 140, height: 36, flexShrink: 0 }}
+                  style={{ width: 160, height: 36, flexShrink: 0 }}
                   value={irSearchField}
                   onChange={(e) => setIrSearchField(e.target.value)}
                   aria-label="Search by field"
                 >
                   <option value="all">All Fields</option>
                   <option value="reportId">Report ID</option>
-                  <option value="subject">Subject</option>
+                  <option value="subject">Incident Type</option>
                   <option value="location">Location</option>
+                  <option value="complainant">Complainant</option>
+                  <option value="complainee">Complainee</option>
+                  <option value="witness">Witness</option>
                 </select>
                 <div className="search-bar-wrapper" style={{ flex: 1, marginBottom: 0 }}>
                   <span className="search-icon" aria-hidden="true">
@@ -2202,8 +2765,11 @@ export function IncidentReportPage() {
                     className="search-input"
                     placeholder={
                       irSearchField === "reportId" ? "Search by report ID…" :
-                      irSearchField === "subject"  ? "Search by subject…"   :
+                      irSearchField === "subject"  ? "Search by incident type…"   :
                       irSearchField === "location" ? "Search by location…"  :
+                      irSearchField === "complainant" ? "Search by complainant…" :
+                      irSearchField === "complainee" ? "Search by complainee…" :
+                      irSearchField === "witness" ? "Search by witness…" :
                       "Search reports…"
                     }
                     value={irSearch}
@@ -2212,62 +2778,84 @@ export function IncidentReportPage() {
                 </div>
               </div>
 
-              <div className="tab-list">
-                {IR_TABS.map((tab) => (
-                  <button
-                    key={tab.key}
-                    className={`tab-btn${irActiveTab === tab.key ? " tab-active" : ""}`}
-                    type="button"
-                    onClick={() => setIrActiveTab(tab.key)}
-                  >
-                    {tab.label(irReports)}
-                  </button>
-                ))}
+              <div
+                className="ir-filter-tabs"
+                role="tablist"
+                aria-label="Filter incident reports by status"
+              >
+                {IR_TABS.map((tab) => {
+                  const n = tab.count(irReports);
+                  const active = irActiveTab === tab.key;
+                  return (
+                    <button
+                      key={tab.key}
+                      id={`ir-filter-tab-${tab.key}`}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      className={`ir-filter-tab${active ? " ir-filter-tab--active" : ""}`}
+                      onClick={() => setIrActiveTab(tab.key)}
+                    >
+                      <span className="ir-filter-tab__label">{tab.label}</span>
+                      <span className="ir-filter-tab__badge" aria-label={`${n} reports`}>
+                        {n}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
             {/* ── Table ── */}
-            <div className="cases-table-wrapper">
-              <table className="cases-table">
+            <div className="cases-table-wrapper ir-incident-table-wrap">
+              <table className="cases-table ir-incident-table">
                 <thead>
                   <tr>
                     <th>Report ID</th>
-                    <th>Subject</th>
-                    <th>Status</th>
-                    <th>Incident Date</th>
+                    <th>Complainee</th>
+                    <th>Incident Type</th>
+                    <th>Incident Date &amp; Time</th>
                     <th>Location</th>
-                    <th>Submitted On</th>
-                    <th className="cases-table-col-action">Action</th>
+                    <th className="cases-table-col-action ir-incident-table-actions-head">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {irFiltered.map((r) => (
-                    <tr key={r.id}>
-                      <td className="cell-case-id">{irFormatId(r.id)}</td>
-                      <td className="cell-text">{r.subject || "—"}</td>
-                      <td>
-                        <span className={`badge badge-${IR_STATUS_BADGE[r.status] || "new"}`}>
-                          {IR_STATUS_LABEL[r.status] || r.status || "—"}
-                        </span>
-                      </td>
-                      <td className="cell-date">{irFormatDate(r.incident_at)}</td>
-                      <td className="cell-text">{r.location || "—"}</td>
-                      <td className="cell-date">{irFormatDate(r.created_at)}</td>
-                      <td className="cases-table-col-action">
-                        <button
-                          className="btn-view btn-view--fixed"
-                          type="button"
-                          onClick={() => setIrSelected(r)}
-                        >
-                          <Eye size={16} strokeWidth={2} aria-hidden />
-                          View
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {irFiltered.map((r) => {
+                    const complaineeDisp = irComplaineeDisplay(r, irStudentNames);
+                    return (
+                      <tr key={r.id}>
+                        <td className="cell-case-id">{irDisplayReportId(r.id)}</td>
+                        <td className="cell-text ir-cell-ellipsis" title={complaineeDisp}>
+                          {complaineeDisp}
+                        </td>
+                        <td className="cell-text ir-cell-ellipsis" title={irIncidentType(r)}>
+                          {irIncidentType(r)}
+                        </td>
+                        <td className="cell-date ir-cell-datetime" title={irFormatDateTime(r.incident_at)}>
+                          {irFormatDateTime(r.incident_at)}
+                        </td>
+                        <td className="cell-text ir-cell-ellipsis" title={r.location || ""}>
+                          {r.location || "—"}
+                        </td>
+                        <td className="cases-table-col-action">
+                          <div className="ir-incident-table-actions">
+                            <button
+                              className="ir-do-icon-btn"
+                              type="button"
+                              title="View Details"
+                              aria-label="View Details"
+                              onClick={() => setIrSelected(r)}
+                            >
+                              <Eye size={18} strokeWidth={2} aria-hidden />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {irFiltered.length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: "center", color: "#64748b", padding: "32px 8px", fontFamily: "'Inter', sans-serif" }}>
+                      <td colSpan={6} style={{ textAlign: "center", color: "#64748b", padding: "32px 8px", fontFamily: "'Inter', sans-serif" }}>
                         {irLoading ? "Loading…" : "No incident reports found."}
                       </td>
                     </tr>
@@ -2279,178 +2867,428 @@ export function IncidentReportPage() {
         </main>
       </div>
 
-      {/* ── Detail / update modal ── */}
+      {/* ── Incident report detail modal ── */}
       {irSelected && (
         <div
           className="cc-modal-overlay do-modal-overlay"
           role="dialog"
           aria-modal="true"
+          aria-labelledby="ir-detail-modal-title"
           onMouseDown={() => setIrSelected(null)}
         >
           <div
-            className="cc-modal do-modal do-modal--lg do-modal--case-detail"
+            className="cc-modal do-modal do-modal--lg ir-incident-detail-modal"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="do-modal-head">
-              <button className="do-modal-x" type="button" aria-label="Close" onClick={() => setIrSelected(null)}>×</button>
+              <button
+                className="do-modal-x"
+                type="button"
+                aria-label="Close"
+                onClick={() => setIrSelected(null)}
+              >
+                ×
+              </button>
               <div className="do-modal-head-row">
                 <div className="do-modal-icon-wrap" aria-hidden><FileText size={22} strokeWidth={2} /></div>
                 <div>
-                  <h2 className="do-modal-heading">Incident Report Details</h2>
-                  <p className="do-modal-sub">Complete information about the incident report</p>
+                  <h2 id="ir-detail-modal-title" className="do-modal-heading">
+                    Incident Report Details:{" "}
+                    <span className="ir-detail-title-id">{irDisplayReportId(irSelected.id)}</span>
+                  </h2>
+                  <p className="do-modal-sub ir-detail-meta">
+                    <span>
+                      Status:{" "}
+                      <strong>
+                        {IR_STATUS_MODAL_LABEL[irSelected.status] || irSelected.status || "—"}
+                      </strong>
+                    </span>
+                    <span className="ir-detail-meta-sep" aria-hidden>
+                      {" "}
+                      |{" "}
+                    </span>
+                    <span>
+                      Filed On:{" "}
+                      <strong>{irFormatFiledOn(irSelected.created_at)}</strong>
+                    </span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="do-modal-body-scroll ir-detail-body">
+              <section className="ir-detail-section" aria-labelledby="ir-detail-general">
+                <h3 id="ir-detail-general" className="ir-detail-section-title">
+                  General Information
+                </h3>
+                <dl className="ir-detail-dl">
+                  <div>
+                    <dt>Incident Type</dt>
+                    <dd>{irIncidentType(irSelected)}</dd>
+                  </div>
+                  <div>
+                    <dt>Date &amp; Time</dt>
+                    <dd>{irFormatDateTime(irSelected.incident_at)}</dd>
+                  </div>
+                  <div>
+                    <dt>Location</dt>
+                    <dd>{irSelected.location || "—"}</dd>
+                  </div>
+                  {irSelected.converted_case_id && (
+                    <div>
+                      <dt>Linked discipline case</dt>
+                      <dd>{formatCaseId(irSelected.converted_case_id)}</dd>
+                    </div>
+                  )}
+                </dl>
+              </section>
+
+              <section className="ir-detail-section" aria-labelledby="ir-detail-parties">
+                <h3 id="ir-detail-parties" className="ir-detail-section-title">
+                  Parties Involved
+                </h3>
+                <dl className="ir-detail-dl ir-detail-dl--stacked">
+                  <div>
+                    <dt>Complainee</dt>
+                    <dd>{irComplaineeDisplay(irSelected, irStudentNames)}</dd>
+                  </div>
+                  <div>
+                    <dt>Complainant</dt>
+                    <dd>{irComplainantDisplay(irSelected, irStudentNames)}</dd>
+                  </div>
+                  <div>
+                    <dt>Witness(es)</dt>
+                    <dd>{irWitnessesDisplay(irSelected, irStudentNames)}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="ir-detail-section" aria-labelledby="ir-detail-statement">
+                <h3 id="ir-detail-statement" className="ir-detail-section-title">
+                  Statement of Incident
+                </h3>
+                <div className="ir-detail-prose">
+                  {irStatement(irSelected) !== "—" ? (
+                    <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{irStatement(irSelected)}</p>
+                  ) : (
+                    <p style={{ margin: 0, color: "#64748b" }}>—</p>
+                  )}
+                </div>
+              </section>
+
+              <section className="ir-detail-section" aria-labelledby="ir-detail-evidence">
+                <h3 id="ir-detail-evidence" className="ir-detail-section-title">
+                  Supporting Evidences
+                </h3>
+                <div className="ir-detail-prose">
+                  {irDetailEvidenceLines.length === 0 ? (
+                    <p style={{ margin: 0, color: "#64748b" }}>—</p>
+                  ) : (
+                    <ul className="ir-detail-evidence-list">
+                      {irDetailEvidenceLines.map((row) => (
+                        <li key={row.key}>{row.text}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </section>
+
+              {irDetailActionError && (
+                <div className="cc-form-error" role="alert">
+                  {irDetailActionError}
+                </div>
+              )}
+
+              <div className="ir-detail-primary-actions">
+                <button
+                  className="cc-btn-primary ir-detail-btn-with-icon"
+                  type="button"
+                  disabled={
+                    irSelected.status === "converted_to_case" ||
+                    irSelected.status === "rejected"
+                  }
+                  title={
+                    irSelected.status === "converted_to_case"
+                      ? "This report is already converted to a case."
+                      : irSelected.status === "rejected"
+                        ? "This report has been rejected."
+                        : undefined
+                  }
+                  onClick={handleIrDetailConvert}
+                >
+                  <Scale size={18} strokeWidth={2} aria-hidden />
+                  Convert to Case
+                </button>
+                <button
+                  className="cc-btn-secondary ir-detail-btn-with-icon ir-detail-btn-reject"
+                  type="button"
+                  disabled={
+                    irSelected.status === "rejected" ||
+                    irSelected.status === "converted_to_case"
+                  }
+                  title={
+                    irSelected.status === "rejected"
+                      ? "This report has already been rejected."
+                      : irSelected.status === "converted_to_case"
+                        ? "Converted reports cannot be rejected from here."
+                        : undefined
+                  }
+                  onClick={() => {
+                    const row = irSelected;
+                    setIrSelected(null);
+                    openIrRejectModal(row);
+                  }}
+                >
+                  <Ban size={18} strokeWidth={2} aria-hidden />
+                  Reject
+                </button>
+              </div>
+            </div>
+
+            <div className="cc-modal-actions">
+              <button className="cc-btn-secondary" type="button" onClick={() => setIrSelected(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {irRejectTarget && (
+        <div
+          className="cc-modal-overlay do-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ir-reject-modal-title"
+          onMouseDown={() => {
+            if (irRejectSaving) return;
+            setIrRejectTarget(null);
+          }}
+        >
+          <div
+            className="cc-modal do-modal do-modal--lg ir-reject-modal"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="do-modal-head">
+              <button
+                className="do-modal-x"
+                type="button"
+                aria-label="Close"
+                disabled={irRejectSaving}
+                onClick={() => setIrRejectTarget(null)}
+              >
+                ×
+              </button>
+              <div className="do-modal-head-row">
+                <div className="do-modal-icon-wrap" aria-hidden><Ban size={22} strokeWidth={2} /></div>
+                <div>
+                  <h2 id="ir-reject-modal-title" className="do-modal-heading">
+                    Reason for Rejection Modal
+                  </h2>
+                  <p className="do-modal-sub">
+                    Please provide a clear justification for rejecting this report. This explanation will be sent
+                    directly to the complainant to inform them why the case will not proceed.
+                  </p>
                 </div>
               </div>
             </div>
 
             <div className="do-modal-body-scroll">
-              {/* Banner */}
-              <div className="do-case-banner">
-                <div>
-                  <p className="do-case-banner-id">{irFormatId(irSelected.id)}</p>
-                  <p className="do-case-banner-type">{irSelected.subject || "—"}</p>
-                </div>
-                <div className="do-banner-badges">
-                  <span className={`badge badge-${IR_STATUS_BADGE[irSelected.status] || "new"}`}>
-                    {IR_STATUS_LABEL[irSelected.status] || irSelected.status || "—"}
-                  </span>
-                </div>
+              <div className="ir-reject-modal-summary">
+                <p>
+                  <span className="ir-reject-k">Report ID:</span>{" "}
+                  <strong>{irDisplayReportId(irRejectTarget.id)}</strong>
+                </p>
+                <p>
+                  <span className="ir-reject-k">Complainant:</span>{" "}
+                  <strong>{irComplainantDisplay(irRejectTarget, irStudentNames)}</strong>
+                </p>
               </div>
 
-              {/* Info cards */}
-              <div className="do-info-grid">
-                <div className="do-info-card">
-                  <div className="do-info-card-top">
-                    <FileText size={18} strokeWidth={2} aria-hidden />
-                    Report Information
-                  </div>
-                  <div className="do-info-row">
-                    <p className="do-info-dt">Report ID</p>
-                    <p className="do-info-dd">{irFormatId(irSelected.id)}</p>
-                  </div>
-                  <div className="do-info-row">
-                    <p className="do-info-dt">Status</p>
-                    <p className="do-info-dd">{IR_STATUS_LABEL[irSelected.status] || irSelected.status || "—"}</p>
-                  </div>
-                  <div className="do-info-row">
-                    <p className="do-info-dt">Submitted On</p>
-                    <p className="do-info-dd">{irFormatDate(irSelected.created_at)}</p>
-                  </div>
-                  <div className="do-info-row">
-                    <p className="do-info-dt">Last Updated</p>
-                    <p className="do-info-dd">{irFormatDate(irSelected.updated_at)}</p>
-                  </div>
-                  {irSelected.converted_case_id && (
-                    <div className="do-info-row">
-                      <p className="do-info-dt">Converted Case</p>
-                      <p className="do-info-dd">{irSelected.converted_case_id}</p>
-                    </div>
-                  )}
+              <div className="cc-field" style={{ marginBottom: 14 }}>
+                <div className="cc-label" style={{ marginBottom: 8 }}>
+                  Select a Common Reason
                 </div>
-                <div className="do-info-card">
-                  <div className="do-info-card-top">
-                    <Info size={18} strokeWidth={2} aria-hidden />
-                    Incident Details
-                  </div>
-                  <div className="do-info-row">
-                    <p className="do-info-dt">Subject</p>
-                    <p className="do-info-dd">{irSelected.subject || "—"}</p>
-                  </div>
-                  <div className="do-info-row">
-                    <p className="do-info-dt">Incident Date</p>
-                    <p className="do-info-dd">{irFormatDate(irSelected.incident_at)}</p>
-                  </div>
-                  <div className="do-info-row">
-                    <p className="do-info-dt">Location</p>
-                    <p className="do-info-dd">{irSelected.location || "—"}</p>
-                  </div>
-                  <div className="do-info-row">
-                    <p className="do-info-dt">Reviewed At</p>
-                    <p className="do-info-dd">{irFormatDate(irSelected.reviewed_at)}</p>
-                  </div>
-                </div>
+                <p className="ir-reject-hint">Quick-select options to save time for the DO staff</p>
+                <ul className="ir-reject-reason-list">
+                  <li>
+                    <label className="ir-reject-check">
+                      <input
+                        type="checkbox"
+                        checked={irRejectCommon.duplicate}
+                        onChange={(e) => setIrRejectCommon((c) => ({ ...c, duplicate: e.target.checked }))}
+                        disabled={irRejectSaving}
+                      />
+                      <span>Duplicate: This incident has already been reported.</span>
+                    </label>
+                  </li>
+                  <li>
+                    <label className="ir-reject-check">
+                      <input
+                        type="checkbox"
+                        checked={irRejectCommon.insufficient_evidence}
+                        onChange={(e) =>
+                          setIrRejectCommon((c) => ({ ...c, insufficient_evidence: e.target.checked }))
+                        }
+                        disabled={irRejectSaving}
+                      />
+                      <span>Insufficient Evidence: The provided evidence does not support the claim.</span>
+                    </label>
+                  </li>
+                  <li>
+                    <label className="ir-reject-check">
+                      <input
+                        type="checkbox"
+                        checked={irRejectCommon.lack_of_detail}
+                        onChange={(e) => setIrRejectCommon((c) => ({ ...c, lack_of_detail: e.target.checked }))}
+                        disabled={irRejectSaving}
+                      />
+                      <span>Lack of Detail: The statement is too vague to initiate an investigation.</span>
+                    </label>
+                  </li>
+                  <li>
+                    <label className="ir-reject-check">
+                      <input
+                        type="checkbox"
+                        checked={irRejectCommon.wrong_jurisdiction}
+                        onChange={(e) =>
+                          setIrRejectCommon((c) => ({ ...c, wrong_jurisdiction: e.target.checked }))
+                        }
+                        disabled={irRejectSaving}
+                      />
+                      <span>
+                        Wrong Jurisdiction: This matter should be handled by a different office (e.g., Guidance,
+                        Academics).
+                      </span>
+                    </label>
+                  </li>
+                  <li>
+                    <label className="ir-reject-check">
+                      <input
+                        type="checkbox"
+                        checked={irRejectCommon.informally_resolved}
+                        onChange={(e) =>
+                          setIrRejectCommon((c) => ({ ...c, informally_resolved: e.target.checked }))
+                        }
+                        disabled={irRejectSaving}
+                      />
+                      <span>Informally Resolved: The parties involved have already settled the matter.</span>
+                    </label>
+                  </li>
+                  <li>
+                    <label className="ir-reject-check ir-reject-check--others">
+                      <input
+                        type="checkbox"
+                        checked={irRejectCommon.others}
+                        onChange={(e) => setIrRejectCommon((c) => ({ ...c, others: e.target.checked }))}
+                        disabled={irRejectSaving}
+                      />
+                      <span>Others;</span>
+                      <input
+                        type="text"
+                        className="cc-input ir-reject-other-input"
+                        placeholder="please specify"
+                        value={irRejectOtherSpec}
+                        onChange={(e) => setIrRejectOtherSpec(e.target.value)}
+                        disabled={irRejectSaving || !irRejectCommon.others}
+                        aria-label="Other reason (please specify)"
+                      />
+                    </label>
+                  </li>
+                </ul>
               </div>
 
-              {/* Description */}
-              {irSelected.description && (
-                <div className="do-section-card">
-                  <h4>Description</h4>
-                  <p style={{ whiteSpace: "pre-wrap" }}>{irSelected.description}</p>
-                </div>
-              )}
-
-              {/* Involved Parties */}
-              {irSelected.involved_parties && Array.isArray(irSelected.involved_parties) && irSelected.involved_parties.length > 0 && (
-                <div className="do-section-card">
-                  <h4>Involved Parties</h4>
-                  <div>{irRenderInvolvedParties(irSelected.involved_parties)}</div>
-                </div>
-              )}
-
-              {/* Staff Notes (read-only display) */}
-              {irSelected.staff_notes && (
-                <div className="do-section-card">
-                  <h4>Staff Notes</h4>
-                  <p style={{ whiteSpace: "pre-wrap" }}>{irSelected.staff_notes}</p>
-                </div>
-              )}
-
-              <div style={{ borderTop: "1px solid #e2e8f0", marginBottom: 16, marginTop: 8 }} />
-
-              {/* Update form */}
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-                  Update Report
-                </div>
-                <div className="cc-field" style={{ marginBottom: 12 }}>
-                  <div className="cc-label">Status</div>
-                  <select className="cc-input" value={irStatusUpdate} onChange={(e) => setIrStatusUpdate(e.target.value)}>
-                    <option value="submitted">Submitted</option>
-                    <option value="under_review">Under Review</option>
-                    <option value="escalated">Escalated</option>
-                    <option value="rejected">Rejected</option>
-                    <option value="converted_to_case">Converted to Case</option>
-                  </select>
-                </div>
-                <div className="cc-field">
-                  <div className="cc-label">Staff Notes</div>
-                  <textarea
-                    className="cc-textarea"
-                    value={irStaffNotes}
-                    onChange={(e) => setIrStaffNotes(e.target.value)}
-                    placeholder="Add or update staff notes for this report..."
-                  />
-                </div>
+              <div className="cc-field">
+                <div className="cc-label">Detailed Explanation (Mandatory)</div>
+                <p className="ir-reject-hint">
+                  Write a specific note here. This is the exact text the complainant will receive.
+                </p>
+                <textarea
+                  className="cc-textarea"
+                  rows={5}
+                  value={irRejectExplanation}
+                  onChange={(e) => setIrRejectExplanation(e.target.value)}
+                  disabled={irRejectSaving}
+                  placeholder='e.g., The video evidence provided is blurry and does not clearly show the face of the complainee. Please re-submit with clearer documentation if available.'
+                />
               </div>
+
+              {irRejectError && (
+                <div className="cc-form-error" role="alert" style={{ marginTop: 12 }}>
+                  {irRejectError}
+                </div>
+              )}
             </div>
 
-            {irModalError && (
-              <div className="cc-form-error" role="alert" style={{ padding: "0 20px 12px" }}>
-                {irModalError}
-              </div>
-            )}
             <div className="cc-modal-actions">
-              <button className="cc-btn-secondary" type="button" onClick={() => setIrSelected(null)}>
-                Close
+              <button
+                className="cc-btn-secondary"
+                type="button"
+                disabled={irRejectSaving}
+                onClick={() => setIrRejectTarget(null)}
+              >
+                Cancel
               </button>
               <button
                 className="cc-btn-primary"
                 type="button"
+                disabled={!irRejectExplanation.trim() || irRejectSaving}
                 onClick={async () => {
-                  setIrModalError(null);
+                  const detail = irRejectExplanation.trim();
+                  if (!detail) return;
+                  setIrRejectError(null);
+                  setIrRejectSaving(true);
                   try {
+                    const quickLines = [];
+                    if (irRejectCommon.duplicate) {
+                      quickLines.push("Duplicate: This incident has already been reported.");
+                    }
+                    if (irRejectCommon.insufficient_evidence) {
+                      quickLines.push("Insufficient Evidence: The provided evidence does not support the claim.");
+                    }
+                    if (irRejectCommon.lack_of_detail) {
+                      quickLines.push("Lack of Detail: The statement is too vague to initiate an investigation.");
+                    }
+                    if (irRejectCommon.wrong_jurisdiction) {
+                      quickLines.push(
+                        "Wrong Jurisdiction: This matter should be handled by a different office (e.g., Guidance, Academics).",
+                      );
+                    }
+                    if (irRejectCommon.informally_resolved) {
+                      quickLines.push("Informally Resolved: The parties involved have already settled the matter.");
+                    }
+                    if (irRejectCommon.others && irRejectOtherSpec.trim()) {
+                      quickLines.push(`Others: ${irRejectOtherSpec.trim()}`);
+                    }
+                    const quickBlock =
+                      quickLines.length > 0
+                        ? `Common reasons selected:\n${quickLines.map((l) => `• ${l}`).join("\n")}`
+                        : "Common reasons selected: (none)";
+                    const stamp = new Date().toISOString();
+                    const appended = `---\nRejection (${stamp})\n${quickBlock}\n\nMessage to complainant:\n${detail}`;
+                    const prior = String(irRejectTarget.staff_notes || "").trim();
+                    const staff_notes = prior ? `${prior}\n\n${appended}` : appended;
+
                     const { error } = await supabase
                       .from("discipline_incident_reports")
-                      .update({ status: irStatusUpdate, staff_notes: irStaffNotes })
-                      .eq("id", irSelected.id);
+                      .update({
+                        status: "rejected",
+                        staff_notes,
+                        complainant_notified_at: new Date().toISOString(),
+                      })
+                      .eq("id", irRejectTarget.id);
                     if (error) throw error;
                     await fetchIrReports();
-                    setIrSelected(null);
+                    showToast("Report rejected and archived.", { variant: "success" });
+                    setIrRejectTarget(null);
                   } catch (err) {
-                    setIrModalError(err?.message || "Could not update report. Check Supabase and try again.");
+                    setIrRejectError(err?.message || "Could not reject this report. Try again.");
+                  } finally {
+                    setIrRejectSaving(false);
                   }
                 }}
               >
-                Save Changes
+                Confirm
               </button>
             </div>
           </div>
@@ -2482,6 +3320,10 @@ export function CaseConferencePage() {
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [selectedConference, setSelectedConference] = useState(null);
   const [scheduleEditId, setScheduleEditId] = useState(null);
+  const [conferenceCompletionDraft, setConferenceCompletionDraft] = useState(null);
+  const [completionSummaryDraft, setCompletionSummaryDraft] = useState("");
+  const [completionSaving, setCompletionSaving] = useState(false);
+  const [completionFormError, setCompletionFormError] = useState("");
 
   const {
     conferences,
@@ -2490,6 +3332,7 @@ export function CaseConferencePage() {
     refresh: refreshConferences,
     insertConference,
     updateConference,
+    useRemote: conferencesUseRemote,
   } = useCaseConferences(DO_CONFERENCES_SEED);
   const {
     cases,
@@ -2570,27 +3413,27 @@ export function CaseConferencePage() {
         .match(/^DC-\d{4}-(\d+)$/);
       setCaseIdInput(suffixMatch ? suffixMatch[1] : "");
       setCaseIdError("");
-      // Convert stored timeLabel (e.g. "10:00 AM") back to HH:MM for input[type=time]
+      // Convert stored timeLabel (e.g. "10:00 AM" or "7:00 PM - 8:00 PM") back to HH:MM for inputs
       const storedTime = conf.timeLabel || "";
-      let timeValue = "";
-      if (storedTime) {
-        const m = storedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-        if (m) {
-          let h = parseInt(m[1], 10);
-          const min = m[2];
-          const ampm = m[3].toUpperCase();
-          if (ampm === "PM" && h !== 12) h += 12;
-          if (ampm === "AM" && h === 12) h = 0;
-          timeValue = `${String(h).padStart(2, "0")}:${min}`;
-        } else {
-          timeValue = storedTime;
-        }
-      }
+      const segments = storedTime.split(/\s*-\s*/).map((s) => s.trim()).filter(Boolean);
+      const toTimeInput = (segment) => {
+        if (!segment) return "";
+        const m = segment.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+        if (!m) return "";
+        let h = parseInt(m[1], 10);
+        const min = m[2];
+        const ampm = m[3].toUpperCase();
+        if (ampm === "PM" && h !== 12) h += 12;
+        if (ampm === "AM" && h === 12) h = 0;
+        return `${String(h).padStart(2, "0")}:${min}`;
+      };
+      const startVal = toTimeInput(segments[0] || storedTime);
+      const endVal = segments.length >= 2 ? toTimeInput(segments[1]) : "";
       setScheduleForm({
         caseId: conf.caseId || defaultCaseId,
         dateIso: toDateInputValue(d),
-        startTime: timeValue,
-        endTime: "",
+        startTime: startVal,
+        endTime: endVal,
         location: conf.location || "",
         attendees: attendeeText,
         notes: conf.notes || "",
@@ -2674,10 +3517,10 @@ export function CaseConferencePage() {
   }, [conferences]);
 
   const upcomingInWindow = useMemo(() => {
-    const t0 = new Date();
-    t0.setHours(0, 0, 0, 0);
-    const t1 = new Date(t0);
-    t1.setDate(t1.getDate() + 8);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const windowEndExclusive = new Date(todayStart);
+    windowEndExclusive.setDate(windowEndExclusive.getDate() + 8);
     return conferences
       .filter((c) => {
         if (effectiveConferenceStatus(c) !== "scheduled") return false;
@@ -2685,12 +3528,12 @@ export function CaseConferencePage() {
         if (!d) return false;
         const day = new Date(d);
         day.setHours(0, 0, 0, 0);
-        return day > t0 && day < t1;
+        return day.getTime() > todayStart.getTime() && day.getTime() < windowEndExclusive.getTime();
       })
       .sort((a, b) => {
-        const da = parseConferenceDate(a);
-        const db = parseConferenceDate(b);
-        return (da?.getTime() || 0) - (db?.getTime() || 0);
+        const sa = parseConferenceStartDateTime(a)?.getTime() ?? parseConferenceDate(a)?.getTime() ?? 0;
+        const sb = parseConferenceStartDateTime(b)?.getTime() ?? parseConferenceDate(b)?.getTime() ?? 0;
+        return sa - sb;
       });
   }, [conferences]);
 
@@ -2724,6 +3567,12 @@ export function CaseConferencePage() {
       }),
     [],
   );
+
+  const conferenceCompleteBlockedReason = useMemo(() => {
+    if (!selectedConference) return "";
+    if (String(selectedConference.status || "").toLowerCase() !== "scheduled") return "";
+    return conferenceCompletionBlockedReason(selectedConference);
+  }, [selectedConference]);
 
   const goMonth = (delta) => {
     setViewMonth((prev) => {
@@ -3553,6 +4402,17 @@ export function CaseConferencePage() {
                   </div>
                 </div>
               ) : null}
+
+              {String(selectedConference.status || "").toLowerCase() === "completed" &&
+              String(selectedConference.discussionSummary || "").trim() ? (
+                <div className="do-notes-callout" style={{ borderColor: "#bfdbfe", background: "#eff6ff" }}>
+                  <FileText size={18} strokeWidth={2} aria-hidden />
+                  <div>
+                    <strong>Discussion summary (on file)</strong>
+                    <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{selectedConference.discussionSummary}</p>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="cc-modal-actions" style={{ flexWrap: "wrap", gap: 10 }}>
@@ -3581,16 +4441,15 @@ export function CaseConferencePage() {
                   <button
                     className="cc-btn-primary"
                     type="button"
-                    disabled={conferenceTimeState(selectedConference) !== "past"}
-                    onClick={async () => {
-                      try {
-                        await updateConference(selectedConference.conferenceId, { status: "completed" });
-                        setSelectedConference((prev) => (prev ? { ...prev, status: "completed" } : null));
-                        await refreshConferences();
-                        showToast("Conference marked completed.", { variant: "success" });
-                      } catch (err) {
-                        showToast(err?.message || "Could not mark conference completed.", { variant: "error" });
-                      }
+                    disabled={!!conferenceCompleteBlockedReason}
+                    title={
+                      conferenceCompleteBlockedReason ||
+                      "Enter the discussion summary and mark this hearing completed."
+                    }
+                    onClick={() => {
+                      setConferenceCompletionDraft(selectedConference);
+                      setCompletionSummaryDraft("");
+                      setCompletionFormError("");
                     }}
                   >
                     Completed
@@ -3613,6 +4472,197 @@ export function CaseConferencePage() {
                   </button>
                 </>
               ) : null}
+              {conferenceCompleteBlockedReason ? (
+                <p
+                  style={{
+                    flexBasis: "100%",
+                    fontSize: 12,
+                    color: "#64748b",
+                    margin: "4px 0 0",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {conferenceCompleteBlockedReason}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {conferenceCompletionDraft && (
+        <div
+          className="cc-modal-overlay do-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cc-conf-complete-title"
+          style={{ zIndex: 11000 }}
+          onMouseDown={() => {
+            if (!completionSaving) setConferenceCompletionDraft(null);
+          }}
+        >
+          <div className="cc-modal do-modal do-modal--lg" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="do-modal-head">
+              <button
+                className="do-modal-x"
+                type="button"
+                aria-label="Close"
+                disabled={completionSaving}
+                onClick={() => setConferenceCompletionDraft(null)}
+              >
+                ×
+              </button>
+              <div className="do-modal-head-row">
+                <div className="do-modal-icon-wrap" aria-hidden>
+                  <FileText size={22} strokeWidth={2} />
+                </div>
+                <div>
+                  <h2 id="cc-conf-complete-title" className="do-modal-heading">
+                    Complete case conference
+                  </h2>
+                  <p className="do-modal-sub">
+                    Record the official discussion summary. The same text is sent as an in-app notification to the
+                    student when their roster record has a linked CampusCare account ({conferenceCompletionDraft.studentId || "student ID"}).
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="do-modal-body-scroll">
+              <div className="do-info-grid" style={{ marginBottom: 16 }}>
+                <div className="do-info-card">
+                  <div className="do-info-card-top">
+                    <User size={18} strokeWidth={2} aria-hidden />
+                    Case & student
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Case</p>
+                    <p className="do-info-dd">{formatCaseId(conferenceCompletionDraft.caseId)}</p>
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Student</p>
+                    <p className="do-info-dd">
+                      {conferenceCompletionDraft.studentName || "—"} ({conferenceCompletionDraft.studentId || "—"})
+                    </p>
+                  </div>
+                </div>
+                <div className="do-info-card">
+                  <div className="do-info-card-top">
+                    <CalendarDays size={18} strokeWidth={2} aria-hidden />
+                    Schedule
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">When</p>
+                    <p className="do-info-dd">
+                      {conferenceCompletionDraft.dateLabel} · {conferenceCompletionDraft.timeLabel}
+                    </p>
+                  </div>
+                  <div className="do-info-row">
+                    <p className="do-info-dt">Where</p>
+                    <p className="do-info-dd">{conferenceCompletionDraft.location || "—"}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="cc-field">
+                <label className="cc-label" htmlFor="cc-completion-summary">
+                  Discussion summary <span style={{ color: "#dc2626" }}>*</span>
+                </label>
+                <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px" }}>
+                  Summarize decisions, expectations, and follow-ups from the hearing. This is required to finalize
+                  completion.
+                </p>
+                <textarea
+                  id="cc-completion-summary"
+                  className="cc-textarea"
+                  rows={8}
+                  value={completionSummaryDraft}
+                  disabled={completionSaving}
+                  onChange={(e) => {
+                    setCompletionSummaryDraft(e.target.value);
+                    if (completionFormError) setCompletionFormError("");
+                  }}
+                  placeholder="e.g., Outcomes discussed, sanctions or behavioral agreements, deadlines for compliance…"
+                />
+                {completionFormError ? (
+                  <div className="cc-form-error" role="alert" style={{ marginTop: 8 }}>
+                    {completionFormError}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="cc-modal-actions">
+              <button
+                className="cc-btn-secondary"
+                type="button"
+                disabled={completionSaving}
+                onClick={() => setConferenceCompletionDraft(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="cc-btn-primary"
+                type="button"
+                disabled={completionSaving}
+                onClick={async () => {
+                  const text = completionSummaryDraft.trim();
+                  if (!text) {
+                    setCompletionFormError("Discussion summary is required.");
+                    return;
+                  }
+                  setCompletionFormError("");
+                  setCompletionSaving(true);
+                  try {
+                    await updateConference(conferenceCompletionDraft.conferenceId, {
+                      status: "completed",
+                      discussionSummary: text,
+                    });
+                    if (conferencesUseRemote && isSupabaseConfigured() && supabase) {
+                      try {
+                        const { sent, attempted } = await sendConferenceDiscussionSummaryToStudents(
+                          supabase,
+                          { ...conferenceCompletionDraft, discussionSummary: text },
+                          text,
+                        );
+                        if (attempted === 0) {
+                          showToast(
+                            "Conference completed. Summary saved. No linked student account was found for in-app delivery.",
+                            { variant: "success" },
+                          );
+                        } else if (sent === attempted) {
+                          showToast(
+                            `Conference completed. Discussion summary delivered to ${sent} linked student account(s).`,
+                            { variant: "success" },
+                          );
+                        } else {
+                          showToast(
+                            `Conference completed. Delivered to ${sent} of ${attempted} linked account(s); some deliveries failed (check notification policies).`,
+                            { variant: "warning" },
+                          );
+                        }
+                      } catch (notifyErr) {
+                        showToast(
+                          notifyErr?.message ||
+                            "Summary saved, but sending student notifications failed. Check roster links and policies.",
+                          { variant: "warning" },
+                        );
+                      }
+                    } else {
+                      showToast("Conference completed and summary saved.", { variant: "success" });
+                    }
+                    setConferenceCompletionDraft(null);
+                    setSelectedConference(null);
+                    await refreshConferences();
+                  } catch (err) {
+                    showToast(err?.message || "Could not complete conference.", { variant: "error" });
+                  } finally {
+                    setCompletionSaving(false);
+                  }
+                }}
+              >
+                {completionSaving ? "Saving…" : "Submit & mark completed"}
+              </button>
             </div>
           </div>
         </div>

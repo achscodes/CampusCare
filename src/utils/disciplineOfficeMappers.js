@@ -166,6 +166,7 @@ export function rowToCaseConference(row) {
     attendees,
     notes: String(row.notes ?? ""),
     presidingOfficer: String(row.presiding_officer ?? ""),
+    discussionSummary: String(row.discussion_summary ?? ""),
   };
 }
 
@@ -185,6 +186,7 @@ export function caseConferenceToInsert(id, payload) {
     attendees: Array.isArray(payload.attendees) ? payload.attendees : [],
     notes: (payload.notes || "").trim(),
     presiding_officer: payload.presidingOfficer || "Ms. Arny Lynne Saragina",
+    discussion_summary: String(payload.discussionSummary ?? "").trim(),
   };
 }
 

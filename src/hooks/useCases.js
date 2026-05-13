@@ -164,7 +164,6 @@ export function useCases(initialCases = []) {
         caseType,
         description: mergedDescription,
         evidence,
-        priority: pri,
         officer: assignOfficer,
         program: String(program || "").trim(),
         school: String(school || "").trim(),

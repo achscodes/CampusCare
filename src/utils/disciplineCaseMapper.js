@@ -80,7 +80,10 @@ export function rowToCase(row) {
     studentId: String(row.student_id ?? ""),
     caseType: String(row.case_type ?? ""),
     status: normalizeCaseStatus(row.status),
-    priority: String(row.priority ?? "medium"),
+    priority:
+      row.priority != null && String(row.priority).trim() !== ""
+        ? String(row.priority).trim()
+        : "medium",
     date: formatCaseDateFromIso(row.reported_at),
     officer: String(row.reporting_officer ?? ""),
     program: program || "",
@@ -100,7 +103,6 @@ export function rowToCase(row) {
  * @param {string} payload.caseType
  * @param {string} payload.description
  * @param {object[]} [payload.evidence]
- * @param {string} [payload.priority]
  * @param {string} [payload.officer]
  */
 export function buildCaseInsertRow(id, payload) {
@@ -110,7 +112,6 @@ export function buildCaseInsertRow(id, payload) {
     student_id: payload.studentId.trim(),
     case_type: payload.caseType,
     status: "new",
-    priority: payload.priority || "medium",
     reporting_officer: payload.officer || "Discipline Office",
     description: payload.description.trim(),
     evidence: Array.isArray(payload.evidence) ? payload.evidence : [],
@@ -118,5 +119,59 @@ export function buildCaseInsertRow(id, payload) {
     program: String(payload.program || "").trim(),
     school: String(payload.school || "").trim(),
     offense_type: String(payload.offenseType || "").trim(),
+  };
+}
+
+/**
+ * Next `DC-YYYY-NN` id from existing `discipline_cases` rows (same rules as DO case creation).
+ * @param {{ id: string }[]} rows
+ */
+export function makeNextDisciplineCaseId(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const year = String(new Date().getFullYear());
+  const prefix = `DC-${year}-`;
+  const parseCaseIndex = (caseId) => {
+    const parts = String(caseId).split("-");
+    const last = parts[parts.length - 1];
+    const n = Number(last);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const maxIdx = list.reduce((acc, row) => Math.max(acc, parseCaseIndex(row.id)), 0);
+  return `${prefix}${String(maxIdx + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Insert row for a case created from an incident report (includes workflow link columns when present in DB).
+ * @param {string} id
+ * @param {{
+ *   studentName: string,
+ *   studentId: string,
+ *   caseType: string,
+ *   description: string,
+ *   evidence?: object[],
+ *   officer?: string,
+ *   program?: string,
+ *   school?: string,
+ *   offenseType?: string,
+ *   sourceIncidentReportId?: string | null,
+ * }} payload
+ */
+export function buildCaseInsertRowFromIncident(id, payload) {
+  const base = buildCaseInsertRow(id, {
+    student: payload.studentName,
+    studentId: payload.studentId,
+    caseType: payload.caseType,
+    description: payload.description,
+    evidence: payload.evidence,
+    officer: payload.officer,
+    program: payload.program,
+    school: payload.school,
+    offenseType: payload.offenseType,
+  });
+  return {
+    ...base,
+    ...(payload.sourceIncidentReportId != null && String(payload.sourceIncidentReportId).trim() !== ""
+      ? { source_incident_report_id: String(payload.sourceIncidentReportId).trim() }
+      : {}),
   };
 }

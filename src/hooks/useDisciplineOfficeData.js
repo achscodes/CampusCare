@@ -435,11 +435,15 @@ export function useCaseConferences(seed) {
       const existing = items.find((x) => String(x.conferenceId) === String(conferenceId)) || null;
       const nextForValidation = existing ? { ...existing, ...patch } : patch;
       if (String(patch?.status || "").toLowerCase() === "completed") {
+        const summary = String(patch?.discussionSummary ?? "").trim();
+        if (!summary) {
+          throw new Error("Discussion summary is required before marking the conference completed.");
+        }
         const w = conferenceWindow(nextForValidation);
         if (!w) throw new Error("Cannot complete hearing: missing schedule date/time.");
         const now = new Date();
-        if (now.getTime() < w.end.getTime()) {
-          throw new Error("Cannot complete hearing before its scheduled time has passed.");
+        if (now.getTime() < w.start.getTime()) {
+          throw new Error("Cannot complete hearing before its scheduled start time.");
         }
       }
       if (!useRemote) {
@@ -459,6 +463,7 @@ export function useCaseConferences(seed) {
       if (patch.attendees != null) dbPatch.attendees = Array.isArray(patch.attendees) ? patch.attendees : [];
       if (patch.notes != null) dbPatch.notes = String(patch.notes);
       if (patch.presidingOfficer != null) dbPatch.presiding_officer = String(patch.presidingOfficer);
+      if (patch.discussionSummary != null) dbPatch.discussion_summary = String(patch.discussionSummary).trim();
       const { error } = await supabase.from("discipline_case_conferences").update(dbPatch).eq("id", conferenceId);
       if (error) throw error;
       await refresh();
@@ -466,5 +471,13 @@ export function useCaseConferences(seed) {
     [items, useRemote, setLocal, refresh],
   );
 
-  return { conferences: items, loading, fetchError, refresh, insertConference, updateConference };
+  return {
+    conferences: items,
+    loading,
+    fetchError,
+    refresh,
+    insertConference,
+    updateConference,
+    useRemote,
+  };
 }
