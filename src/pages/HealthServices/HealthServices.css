@@ -4291,3 +4291,12 @@
   background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   padding: 14px 16px;
 }
+
+/* Shared Admin UserManagement embedded in HSO HealthServices (welfare-style accounts UI) */
+.hs-user-mgmt-embed {
+  margin-top: 4px;
+}
+
+.hs-user-mgmt-embed .sa-welfare-accounts {
+  margin-top: 0;
+}

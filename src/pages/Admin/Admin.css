@@ -340,6 +340,13 @@
   flex-shrink: 0;
 }
 
+img.sa-welfare-avatar.sa-welfare-avatar--photo {
+  display: block;
+  padding: 0;
+  object-fit: cover;
+  background: #e2e8f0;
+}
+
 .sa-welfare-user-name {
   display: block;
   font-weight: 600;
@@ -374,6 +381,64 @@
 .sa-welfare-status--pending {
   background: #fef9c3;
   color: #854d0e;
+}
+
+.sa-welfare-presence-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.sa-welfare-presence-pill {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sa-welfare-presence-pill--online {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.sa-welfare-presence-pill--idle {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.sa-welfare-presence-pill--do_not_disturb {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.sa-welfare-presence-pill--on_break {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.sa-welfare-presence-pill--offline {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.sa-welfare-presence-sub {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.3;
+}
+
+.sa-welfare-edit-presence-hint {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.sa-welfare-edit-presence-hint strong {
+  color: #334155;
+  font-weight: 600;
 }
 
 .sa-welfare-row-actions {
@@ -413,7 +478,46 @@
 }
 
 .sa-welfare-edit-modal {
-  padding: 8px 0 0 0;
+  padding: 0;
+}
+
+.sa-welfare-edit-modal-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(92vh, 520px);
+}
+
+.sa-welfare-edit-modal-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 14px 20px 10px;
+}
+
+.sa-welfare-edit-dept-hint {
+  margin: 0 0 14px 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.cc-modal.cc-modal--wide.sa-welfare-edit-cc-modal {
+  min-height: 0;
+  max-height: min(92vh, 560px);
+  width: min(480px, calc(100vw - 32px));
+}
+
+.sa-welfare-edit-cc-modal .sa-welfare-edit-footer--modal {
+  flex-shrink: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding: 14px 20px 18px;
+  border-top: 1px solid #e2e8f0;
+  background: #fafafa;
+  gap: 12px;
 }
 
 .sa-welfare-edit-meta {
@@ -423,6 +527,11 @@
   gap: 4px;
   font-size: 14px;
   color: #64748b;
+}
+
+.sa-welfare-edit-meta span {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .sa-welfare-edit-meta strong {
@@ -439,18 +548,34 @@
 .sa-welfare-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   font-size: 13px;
   font-weight: 600;
   color: #475569;
 }
 
 .sa-welfare-input {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
   padding: 10px 12px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   font-size: 14px;
   font-family: "Inter", sans-serif;
+  background: #fff;
+  color: #0f172a;
+}
+
+.sa-welfare-input:focus {
+  outline: none;
+  border-color: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(21, 93, 252, 0.12);
+}
+
+.sa-welfare-input:focus-visible {
+  outline: none;
 }
 
 .sa-welfare-edit-footer {
@@ -490,27 +615,40 @@
 
 .sa-welfare-create-form {
   font-family: "Inter", sans-serif;
-  padding-top: 4px;
 }
 
 .sa-welfare-create-hint {
-  margin: 0 0 16px 0;
+  margin: 0 0 12px 0;
   font-size: 13px;
+  line-height: 1.55;
+  color: #64748b;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.sa-welfare-create-hint--follow {
+  margin-top: -4px;
+  margin-bottom: 18px;
+  font-size: 12px;
   line-height: 1.5;
   color: #64748b;
 }
 
 .sa-welfare-create-hint code {
-  font-size: 12px;
+  font-size: 11px;
   background: #f1f5f9;
   padding: 2px 6px;
   border-radius: 4px;
+  word-break: break-all;
+  font-weight: 500;
+  color: #334155;
 }
 
 .sa-welfare-create-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px 16px;
+  align-items: start;
 }
 
 @media (max-width: 560px) {
@@ -521,4 +659,47 @@
 
 .sa-welfare-field--full {
   grid-column: 1 / -1;
+}
+
+.sa-welfare-create-cc-modal .sa-welfare-field {
+  min-width: 0;
+}
+
+/* Create staff account modal: scroll body + visible footer (Admin uses DO.cc-modal--wide) */
+.cc-modal.cc-modal--wide.sa-welfare-create-cc-modal {
+  min-height: 0;
+  max-height: min(92vh, 760px);
+  width: min(520px, calc(100vw - 32px));
+}
+
+.sa-welfare-create-cc-modal .sa-welfare-create-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sa-welfare-create-cc-modal .sa-welfare-create-form-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 14px 20px 10px;
+  scroll-padding-top: 8px;
+}
+
+.sa-welfare-create-cc-modal .sa-welfare-edit-footer.sa-welfare-create-footer {
+  margin-top: 0;
+}
+
+.sa-welfare-create-cc-modal .sa-welfare-create-footer {
+  flex-shrink: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding: 14px 20px 18px;
+  border-top: 1px solid #e2e8f0;
+  background: #fafafa;
+  gap: 12px;
 }

@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Search, SquarePen, Trash2 } from "lucide-react";
-import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
+import { supabase, isSupabaseConfigured, getEdgeFunctionInvokeUrl, getSupabaseProjectRef } from "../../lib/supabaseClient";
+import { normalizePresenceStatus, presenceStatusLabel } from "../../constants/userPresence";
 import { showToast } from "../../utils/toast";
 import { isWelfareAdminProfileRole } from "../../utils/welfareAdmin";
 import { readCampusCareSession } from "../../utils/campusCareSession";
 import CCModal from "../../components/common/CCModal";
 
-/** UI value → profiles.office */
-const DEPT_OPTIONS = [
+/** Departments available for welfare-admin “Create account” (subset is shown from `filterOffices`). */
+const ALL_DEPT_OPTIONS = [
+  { value: "health", label: "Health Services" },
   { value: "development", label: "SDAO" },
   { value: "discipline", label: "Discipline Office" },
 ];
@@ -15,6 +17,7 @@ const DEPT_OPTIONS = [
 const ROLES_BY_OFFICE = {
   development: ["SDAO Coordinator", "SDAO Associate", "Senior Supervisor"],
   discipline: ["DO Coordinator", "DO Assistant"],
+  health: ["Nurse", "Physician", "Dentist", "Admin", "Queue display", "Institution admin"],
 };
 
 const INITIAL_CREATE = {
@@ -22,10 +25,46 @@ const INITIAL_CREATE = {
   middleInitial: "",
   lastName: "",
   email: "",
-  password: "",
   department: "development",
   role: "SDAO Coordinator",
 };
+
+/** @param {string[]} officeKeys */
+function defaultCreateFormForOffices(officeKeys) {
+  const set = new Set(officeKeys.map((o) => String(o).toLowerCase()));
+  const opts = ALL_DEPT_OPTIONS.filter((d) => set.has(d.value));
+  const first = opts[0]?.value || "development";
+  const roles = ROLES_BY_OFFICE[first] || ROLES_BY_OFFICE.development;
+  return {
+    ...INITIAL_CREATE,
+    department: first,
+    role: roles[0] || "SDAO Coordinator",
+  };
+}
+
+/** @param {string | null | undefined} designation */
+function healthDesignationToDisplayRole(designation) {
+  const d = String(designation || "").trim().toLowerCase();
+  if (d === "nurse") return "Nurse";
+  if (d === "physician") return "Physician";
+  if (d === "dentist") return "Dentist";
+  if (d === "admin") return "Admin";
+  if (d === "queue_display") return "Queue display";
+  if (d === "welfare_admin") return "Institution admin";
+  return "";
+}
+
+function displayStaffRole(r) {
+  const office = String(r.office || "").toLowerCase();
+  if (office === "health") {
+    const fromDes = healthDesignationToDisplayRole(r.designation);
+    if (fromDes) return fromDes;
+  }
+  return r.role || "—";
+}
+
+const STAFF_FN_UNREACHABLE_HELP =
+  "Deploy from repo root: npx supabase link --project-ref YOUR_ID (id only, not https URL) && npx supabase functions deploy create-staff-account. Local: npx supabase functions serve. Docs: supabase/functions/create-staff-account/README.md";
 
 /**
  * @param {{ filterOffices: string[] }} props
@@ -33,9 +72,20 @@ const INITIAL_CREATE = {
 export default function UserManagement({ filterOffices }) {
   const offices = useMemo(() => (Array.isArray(filterOffices) ? filterOffices.filter(Boolean) : []), [filterOffices]);
   const canCreateStaffViaForm = useMemo(
-    () => offices.some((o) => o === "discipline" || o === "development"),
+    () =>
+      offices.some((o) => {
+        const k = String(o).toLowerCase();
+        return k === "health" || k === "discipline" || k === "development";
+      }),
     [offices],
   );
+
+  const departmentSelectOptions = useMemo(() => {
+    const set = new Set(offices.map((o) => String(o).toLowerCase()));
+    return ALL_DEPT_OPTIONS.filter((d) => set.has(d.value));
+  }, [offices]);
+
+  const initialCreateFormForOffices = useMemo(() => defaultCreateFormForOffices(offices), [offices]);
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +105,14 @@ export default function UserManagement({ filterOffices }) {
     return ROLES_BY_OFFICE[createForm.department] || ROLES_BY_OFFICE.development;
   }, [createForm.department]);
 
-  const load = useCallback(async () => {
+  const editRoleOptions = useMemo(() => {
+    if (!editRow) return [];
+    const office = String(editRow.office || "").toLowerCase();
+    return ROLES_BY_OFFICE[office] || ROLES_BY_OFFICE.development;
+  }, [editRow]);
+
+  const load = useCallback(async (opts = {}) => {
+    const silent = Boolean(opts?.silent);
     if (!isSupabaseConfigured() || !supabase) {
       setLoading(false);
       setError("Supabase is not configured.");
@@ -68,29 +125,103 @@ export default function UserManagement({ filterOffices }) {
       setRows([]);
       return;
     }
-    setLoading(true);
-    setError(null);
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
+    // All staff in the selected offices stay listed; presence_status is never used to exclude rows here.
     const { data, error: qErr } = await supabase
       .from("profiles")
-      .select("id, first_name, middle_initial, last_name, email, office, role, account_status, created_at")
+      .select(
+        "id, first_name, middle_initial, last_name, email, office, role, account_status, created_at, presence_status, last_active_at, designation, avatar_data_url",
+      )
       .in("office", offices)
       .order("created_at", { ascending: false });
-    setLoading(false);
+    if (!silent) {
+      setLoading(false);
+    }
     if (qErr) {
-      setError(qErr.message || "Could not load accounts.");
-      setRows([]);
+      if (!silent) {
+        setError(qErr.message || "Could not load accounts.");
+        setRows([]);
+      }
       return;
     }
+    setError(null);
     const list = (data || []).filter((r) => !isWelfareAdminProfileRole(r.role));
     setRows(list);
   }, [offices]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !supabase || offices.length === 0) return undefined;
+
+    const officeKeys = new Set(offices.map((o) => String(o).toLowerCase()));
+    let debounceTimer = 0;
+
+    const scheduleReload = () => {
+      window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        void load({ silent: true });
+      }, 400);
+    };
+
+    const rowMatchesOffices = (row) => {
+      if (!row || typeof row !== "object") return false;
+      return officeKeys.has(String(/** @type {Record<string, unknown>} */ (row).office ?? "").toLowerCase());
+    };
+
+    const channelName = `welfare-user-mgmt:${[...officeKeys].sort().join(",")}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles" },
+        (payload) => {
+          const next = /** @type {Record<string, unknown> | null} */ (payload.new);
+          const prev = /** @type {Record<string, unknown> | null} */ (payload.old);
+          const target = next && Object.keys(next).length > 0 ? next : prev;
+          if (!rowMatchesOffices(target)) return;
+          scheduleReload();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      window.clearTimeout(debounceTimer);
+      void supabase.removeChannel(channel);
+    };
+  }, [supabase, offices, load]);
+
+  useEffect(() => {
+    setEditRow((prev) => {
+      if (!prev) return prev;
+      const u = rows.find((r) => r.id === prev.id);
+      if (!u) return prev;
+      if (u.presence_status === prev.presence_status && u.last_active_at === prev.last_active_at) return prev;
+      return { ...prev, presence_status: u.presence_status, last_active_at: u.last_active_at };
+    });
+  }, [rows]);
 
   const displayName = (r) =>
     [r.first_name, r.middle_initial, r.last_name].filter(Boolean).join(" ").trim() || "—";
+
+  const formatRelativeLastActive = (iso) => {
+    if (!iso) return "";
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return "";
+    const m = Math.floor((Date.now() - t) / 60_000);
+    if (m < 1) return "just now";
+    if (m === 1) return "1 min ago";
+    if (m < 60) return `${m} min ago`;
+    const h = Math.floor(m / 60);
+    if (h === 1) return "1 hr ago";
+    if (h < 24) return `${h} hr ago`;
+    return new Date(iso).toLocaleDateString(undefined, { dateStyle: "short" });
+  };
 
   const departmentLabel = (office) => {
     const o = String(office || "").toLowerCase();
@@ -123,6 +254,17 @@ export default function UserManagement({ filterOffices }) {
     return "sa-welfare-status sa-welfare-status--pending";
   };
 
+  const presenceCell = (r) => {
+    const st = normalizePresenceStatus(r.presence_status);
+    const rel = formatRelativeLastActive(r.last_active_at);
+    return (
+      <div className="sa-welfare-presence-cell">
+        <span className={`sa-welfare-presence-pill sa-welfare-presence-pill--${st}`}>{presenceStatusLabel(st)}</span>
+        {rel ? <span className="sa-welfare-presence-sub">Last active {rel}</span> : null}
+      </div>
+    );
+  };
+
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
@@ -130,7 +272,9 @@ export default function UserManagement({ filterOffices }) {
       const name = displayName(r).toLowerCase();
       const em = String(r.email || "").toLowerCase();
       const role = String(r.role || "").toLowerCase();
-      return name.includes(q) || em.includes(q) || role.includes(q);
+      const roleDisp = displayStaffRole(r).toLowerCase();
+      const pres = presenceStatusLabel(normalizePresenceStatus(r.presence_status)).toLowerCase();
+      return name.includes(q) || em.includes(q) || role.includes(q) || roleDisp.includes(q) || pres.includes(q);
     });
   }, [rows, search]);
 
@@ -144,8 +288,18 @@ export default function UserManagement({ filterOffices }) {
     return { total, active, inactive };
   }, [rows]);
 
+  const staffFnUnreachableDetail = useMemo(() => {
+    const target = getEdgeFunctionInvokeUrl("create-staff-account");
+    const ref = getSupabaseProjectRef();
+    const dash = ref ? `https://supabase.com/dashboard/project/${ref}/functions` : "";
+    const lines = ["Could not reach create-staff-account.", "", STAFF_FN_UNREACHABLE_HELP];
+    if (target) lines.push("", `App is calling: ${target}`);
+    if (dash) lines.push("", `Supabase Dashboard (deploy here): ${dash}`);
+    return lines.join("\n");
+  }, []);
+
   const openCreateModal = () => {
-    setCreateForm({ ...INITIAL_CREATE });
+    setCreateForm({ ...initialCreateFormForOffices });
     setCreateOpen(true);
   };
 
@@ -163,6 +317,27 @@ export default function UserManagement({ filterOffices }) {
     return msg;
   };
 
+  function isInvokeLikelyUnreachable(fnError, parsedMessage) {
+    const msg = String(parsedMessage || fnError?.message || "").toLowerCase();
+    const status = fnError?.context?.status ?? fnError?.context?.response?.status ?? fnError?.status;
+    if (
+      msg.includes("failed to send")
+      || msg.includes("fetch failed")
+      || msg.includes("failed to fetch")
+      || msg.includes("networkerror")
+      || msg.includes("load failed")
+      || msg.includes("network request failed")
+    ) {
+      return true;
+    }
+    if (status === 404) return true;
+    if (status === 502 || status === 503 || status === 504) return true;
+    if (msg.includes("non-2xx") || msg.includes("edge function returned")) {
+      return status == null;
+    }
+    return false;
+  }
+
   const submitCreateAccount = async (e) => {
     e.preventDefault();
     if (!supabase || !isSupabaseConfigured()) return;
@@ -176,10 +351,6 @@ export default function UserManagement({ filterOffices }) {
       showToast("Enter a valid email address.", { variant: "warning" });
       return;
     }
-    if (createForm.password.length < 8) {
-      showToast("Password must be at least 8 characters.", { variant: "warning" });
-      return;
-    }
 
     const allowed = ROLES_BY_OFFICE[createForm.department];
     if (!allowed?.includes(createForm.role)) {
@@ -187,28 +358,33 @@ export default function UserManagement({ filterOffices }) {
       return;
     }
 
+    const signInUrl =
+      typeof window !== "undefined" ? `${window.location.origin.replace(/\/+$/, "")}/signin` : "";
+
     setCreateSubmitting(true);
     const { data, error: fnError } = await supabase.functions.invoke("create-staff-account", {
       body: {
         email: createForm.email.trim(),
-        password: createForm.password,
         first_name: createForm.firstName.trim(),
         middle_initial: createForm.middleInitial.trim(),
         last_name: createForm.lastName.trim(),
         office: createForm.department,
         role: createForm.role,
+        sign_in_url: signInUrl,
       },
     });
     setCreateSubmitting(false);
 
     if (fnError) {
       const msg = await parseFunctionsError(fnError);
-      showToast(
-        msg.includes("Failed to send") || msg.includes("fetch")
-          ? "Could not reach create-staff-account. Deploy the Edge Function (see supabase/functions/create-staff-account) and try again."
-          : msg,
-        { variant: "error", duration: 8000 },
-      );
+      if (isInvokeLikelyUnreachable(fnError, msg)) {
+        showToast(staffFnUnreachableDetail, {
+          variant: "error",
+          duration: 20000,
+        });
+      } else {
+        showToast(msg, { variant: "error", duration: 9000 });
+      }
       return;
     }
 
@@ -217,30 +393,78 @@ export default function UserManagement({ filterOffices }) {
       return;
     }
 
-    showToast("Account created. The staff member can sign in with the email and password you set.", {
-      variant: "success",
-    });
+    if (!data || data.ok !== true) {
+      showToast("Unexpected response from server. Refresh the account list to verify.", { variant: "warning" });
+      setCreateOpen(false);
+      setCreateForm({ ...initialCreateFormForOffices });
+      await load();
+      return;
+    }
+
+    const createdEmail = createForm.email.trim();
+    if (data?.emailSent) {
+      showToast(
+        `Account created. A welcome email with a randomly generated password was sent to ${createdEmail}.`,
+        {
+          variant: "success",
+          duration: 9000,
+        },
+      );
+    } else {
+      const extra = data?.emailError ? ` ${data.emailError}` : "";
+      const pw = data?.initial_password ? ` Generated password: ${data.initial_password}` : "";
+      showToast(
+        `Account created.${pw}${extra ? ` Email not sent:${extra}` : " Configure RESEND_API_KEY to email credentials automatically."} Share the password securely with the staff member if it was not emailed.`,
+        { variant: "warning", duration: data?.initial_password ? 22000 : 12000 },
+      );
+    }
     setCreateOpen(false);
-    setCreateForm({ ...INITIAL_CREATE });
+    setCreateForm({ ...initialCreateFormForOffices });
     await load();
   };
 
   const openEdit = (r) => {
     setEditRow(r);
-    setEditRole(String(r.role || ""));
+    const office = String(r.office || "").toLowerCase();
+    const allowed = ROLES_BY_OFFICE[office] || ROLES_BY_OFFICE.development;
+    if (office === "health") {
+      const fromDes = healthDesignationToDisplayRole(r.designation);
+      setEditRole(fromDes || allowed[0] || "Nurse");
+    } else {
+      const current = String(r.role || "").trim();
+      const exact = allowed.find((x) => x === current);
+      const ci = allowed.find((x) => x.toLowerCase() === current.toLowerCase());
+      setEditRole(exact || ci || allowed[0] || current);
+    }
     setEditStatus(String(r.account_status || "pending").toLowerCase());
   };
 
   const saveEdit = async () => {
     if (!supabase || !editRow) return;
+    const office = String(editRow.office || "").toLowerCase();
+    const allowed = ROLES_BY_OFFICE[office] || [];
+    if (!allowed.includes(editRole)) {
+      showToast("Choose a role that matches the staff member's department.", { variant: "warning" });
+      return;
+    }
     setBusyId(editRow.id);
-    const { error: upErr } = await supabase
-      .from("profiles")
-      .update({
-        role: editRole.trim() || "Staff",
-        account_status: editStatus,
-      })
-      .eq("id", editRow.id);
+    const healthDesignation =
+      editRole === "Nurse"
+        ? "nurse"
+        : editRole === "Physician"
+          ? "physician"
+          : editRole === "Dentist"
+            ? "dentist"
+            : editRole === "Queue display"
+              ? "queue_display"
+              : editRole === "Institution admin"
+                ? "welfare_admin"
+                : "admin";
+    const updates =
+      office === "health"
+        ? { role: editRole, account_status: editStatus, designation: healthDesignation }
+        : { role: editRole, account_status: editStatus };
+    const { error: upErr } = await supabase.from("profiles").update(updates).eq("id", editRow.id);
     setBusyId(null);
     if (upErr) {
       showToast(upErr.message || "Could not update account.", { variant: "error" });
@@ -338,7 +562,8 @@ export default function UserManagement({ filterOffices }) {
                   <th>USER</th>
                   <th>ROLE</th>
                   <th>DEPARTMENT</th>
-                  <th>STATUS</th>
+                  <th>PRESENCE</th>
+                  <th>ACCOUNT</th>
                   <th>DATE CREATED</th>
                   <th style={{ width: 100 }}>ACTIONS</th>
                 </tr>
@@ -348,17 +573,26 @@ export default function UserManagement({ filterOffices }) {
                   <tr key={r.id}>
                     <td>
                       <div className="sa-welfare-user-cell">
-                        <span className="sa-welfare-avatar" aria-hidden>
-                          {initials(r)}
-                        </span>
+                        {typeof r.avatar_data_url === "string" && r.avatar_data_url.trim().startsWith("data:image") ? (
+                          <img
+                            src={r.avatar_data_url.trim()}
+                            alt=""
+                            className="sa-welfare-avatar sa-welfare-avatar--photo"
+                          />
+                        ) : (
+                          <span className="sa-welfare-avatar" aria-hidden>
+                            {initials(r)}
+                          </span>
+                        )}
                         <div>
                           <span className="sa-welfare-user-name">{displayName(r)}</span>
                           <span className="sa-welfare-user-email">{r.email || "—"}</span>
                         </div>
                       </div>
                     </td>
-                    <td>{r.role || "—"}</td>
+                    <td>{displayStaffRole(r)}</td>
                     <td>{departmentLabel(r.office)}</td>
+                    <td>{presenceCell(r)}</td>
                     <td>
                       <span className={statusBadgeClass(r.account_status)}>{statusLabel(r.account_status)}</span>
                     </td>
@@ -393,101 +627,110 @@ export default function UserManagement({ filterOffices }) {
         )}
       </div>
 
-      <CCModal open={createOpen} title="Create staff account" onClose={() => !createSubmitting && setCreateOpen(false)} centered wide>
+      <CCModal
+        open={createOpen}
+        title="Create staff account"
+        onClose={() => !createSubmitting && setCreateOpen(false)}
+        centered
+        wide
+        modalClassName="sa-welfare-create-cc-modal"
+      >
         <form className="sa-welfare-create-form" onSubmit={submitCreateAccount}>
-          <p className="sa-welfare-create-hint">
-            Creates a Supabase Auth user and profile for <strong>SDAO</strong> or <strong>Discipline Office</strong> staff. Requires the{" "}
-            <code>create-staff-account</code> Edge Function to be deployed.
-          </p>
-          <div className="sa-welfare-create-grid">
-            <label className="sa-welfare-field">
-              <span>First name *</span>
-              <input
-                className="sa-welfare-input"
-                value={createForm.firstName}
-                onChange={(e) => setCreateForm((f) => ({ ...f, firstName: e.target.value }))}
-                autoComplete="given-name"
-                required
-              />
-            </label>
-            <label className="sa-welfare-field">
-              <span>Middle initial</span>
-              <input
-                className="sa-welfare-input"
-                value={createForm.middleInitial}
-                onChange={(e) => setCreateForm((f) => ({ ...f, middleInitial: e.target.value.slice(0, 3) }))}
-                autoComplete="additional-name"
-              />
-            </label>
-            <label className="sa-welfare-field">
-              <span>Last name *</span>
-              <input
-                className="sa-welfare-input"
-                value={createForm.lastName}
-                onChange={(e) => setCreateForm((f) => ({ ...f, lastName: e.target.value }))}
-                autoComplete="family-name"
-                required
-              />
-            </label>
-            <label className="sa-welfare-field sa-welfare-field--full">
-              <span>Department *</span>
-              <select
-                className="sa-welfare-input"
-                value={createForm.department}
-                onChange={(e) => {
-                  const dept = e.target.value;
-                  const roles = ROLES_BY_OFFICE[dept] || ROLES_BY_OFFICE.development;
-                  setCreateForm((f) => ({ ...f, department: dept, role: roles[0] }));
-                }}
-                required
-              >
-                {DEPT_OPTIONS.map((d) => (
-                  <option key={d.value} value={d.value}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="sa-welfare-field sa-welfare-field--full">
-              <span>Role *</span>
-              <select
-                className="sa-welfare-input"
-                value={createForm.role}
-                onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value }))}
-                required
-              >
-                {roleOptions.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="sa-welfare-field sa-welfare-field--full">
-              <span>Email (sign-in) *</span>
-              <input
-                type="email"
-                className="sa-welfare-input"
-                value={createForm.email}
-                onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
-                autoComplete="email"
-                required
-              />
-            </label>
-            <label className="sa-welfare-field sa-welfare-field--full">
-              <span>Initial password *</span>
-              <input
-                type="password"
-                className="sa-welfare-input"
-                value={createForm.password}
-                onChange={(e) => setCreateForm((f) => ({ ...f, password: e.target.value }))}
-                autoComplete="new-password"
-                minLength={8}
-                required
-              />
-            </label>
+          <div className="sa-welfare-create-form-scroll">
+            <p className="sa-welfare-create-hint">
+              Creates staff logins for{" "}
+              {departmentSelectOptions.map((d, i) => (
+                <span key={d.value}>
+                  {i > 0 ? (i === departmentSelectOptions.length - 1 ? ", or " : ", ") : null}
+                  <strong>{d.label}</strong>
+                </span>
+              ))}
+              . A secure random password is generated on the server. When <code>RESEND_API_KEY</code> is set on the{" "}
+              <code>create-staff-account</code> Edge Function, that password and account details are emailed to the address
+              below (HTML and plain text).
+            </p>
+            <p className="sa-welfare-create-hint sa-welfare-create-hint--follow">
+              If the welcome email cannot be sent, the password appears once in a warning toast—copy it and share securely.
+              Deploy the function from the repo README (<code>supabase/functions/create-staff-account/README.md</code>).
+            </p>
+            <div className="sa-welfare-create-grid">
+              <label className="sa-welfare-field">
+                <span>First name *</span>
+                <input
+                  className="sa-welfare-input"
+                  value={createForm.firstName}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, firstName: e.target.value }))}
+                  autoComplete="given-name"
+                  required
+                />
+              </label>
+              <label className="sa-welfare-field">
+                <span>Middle initial</span>
+                <input
+                  className="sa-welfare-input"
+                  value={createForm.middleInitial}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, middleInitial: e.target.value.slice(0, 3) }))}
+                  autoComplete="additional-name"
+                />
+              </label>
+              <label className="sa-welfare-field sa-welfare-field--full">
+                <span>Last name *</span>
+                <input
+                  className="sa-welfare-input"
+                  value={createForm.lastName}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, lastName: e.target.value }))}
+                  autoComplete="family-name"
+                  required
+                />
+              </label>
+              <label className="sa-welfare-field sa-welfare-field--full">
+                <span>Department *</span>
+                <select
+                  className="sa-welfare-input"
+                  value={createForm.department}
+                  onChange={(e) => {
+                    const dept = e.target.value;
+                    const roles = ROLES_BY_OFFICE[dept] || ROLES_BY_OFFICE.development;
+                    setCreateForm((f) => ({ ...f, department: dept, role: roles[0] }));
+                  }}
+                  required
+                >
+                  {departmentSelectOptions.map((d) => (
+                    <option key={d.value} value={d.value}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="sa-welfare-field sa-welfare-field--full">
+                <span>Role *</span>
+                <select
+                  className="sa-welfare-input"
+                  value={createForm.role}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value }))}
+                  required
+                >
+                  {roleOptions.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="sa-welfare-field sa-welfare-field--full">
+                <span>Email (sign-in) *</span>
+                <input
+                  type="email"
+                  className="sa-welfare-input"
+                  value={createForm.email}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
+                  autoComplete="email"
+                  required
+                />
+              </label>
+            </div>
           </div>
-          <div className="sa-welfare-edit-footer">
+          <div className="sa-welfare-edit-footer sa-welfare-create-footer">
             <button type="button" className="sa-welfare-btn-secondary" disabled={createSubmitting} onClick={() => setCreateOpen(false)}>
               Cancel
             </button>
@@ -498,38 +741,63 @@ export default function UserManagement({ filterOffices }) {
         </form>
       </CCModal>
 
-      <CCModal open={Boolean(editRow)} title="Edit account" onClose={() => setEditRow(null)} centered wide>
+      <CCModal
+        open={Boolean(editRow)}
+        title="Edit account"
+        onClose={() => busyId !== editRow?.id && setEditRow(null)}
+        centered
+        wide
+        modalClassName="sa-welfare-edit-cc-modal"
+      >
         {editRow ? (
-          <div className="sa-welfare-edit-modal">
-            <p className="sa-welfare-edit-meta">
-              <strong>{displayName(editRow)}</strong>
-              <span>{editRow.email}</span>
-            </p>
-            <div className="sa-welfare-edit-fields">
-              <label className="sa-welfare-field">
-                <span>Role</span>
-                <input
-                  className="sa-welfare-input"
-                  value={editRole}
-                  onChange={(e) => setEditRole(e.target.value)}
-                  placeholder="Role label"
-                />
-              </label>
-              <label className="sa-welfare-field">
-                <span>Account status</span>
-                <select className="sa-welfare-input" value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
-                  <option value="pending">Pending</option>
-                  <option value="approved">Approved (Active)</option>
-                  <option value="rejected">Rejected (Inactive)</option>
-                </select>
-              </label>
+          <div className="sa-welfare-edit-modal-shell">
+            <div className="sa-welfare-edit-modal-scroll">
+              <div className="sa-welfare-edit-modal">
+                <p className="sa-welfare-edit-meta">
+                  <strong>{displayName(editRow)}</strong>
+                  <span>{editRow.email || "—"}</span>
+                </p>
+                <p className="sa-welfare-edit-dept-hint">Department: {departmentLabel(editRow.office)}</p>
+                <p className="sa-welfare-edit-presence-hint">
+                  Presence:{" "}
+                  <strong>{presenceStatusLabel(normalizePresenceStatus(editRow.presence_status))}</strong>
+                  {editRow.last_active_at ? (
+                    <span> · Last active {formatRelativeLastActive(editRow.last_active_at)}</span>
+                  ) : null}
+                </p>
+                <div className="sa-welfare-edit-fields">
+                  <label className="sa-welfare-field">
+                    <span>Role</span>
+                    <select className="sa-welfare-input" value={editRole} onChange={(e) => setEditRole(e.target.value)}>
+                      {editRoleOptions.map((roleLabel) => (
+                        <option key={roleLabel} value={roleLabel}>
+                          {roleLabel}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="sa-welfare-field">
+                    <span>Account status</span>
+                    <select className="sa-welfare-input" value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
+                      <option value="pending">Pending</option>
+                      <option value="approved">Approved (Active)</option>
+                      <option value="rejected">Rejected (Inactive)</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
             </div>
-            <div className="sa-welfare-edit-footer">
-              <button type="button" className="sa-welfare-btn-secondary" onClick={() => setEditRow(null)}>
+            <div className="sa-welfare-edit-footer sa-welfare-edit-footer--modal">
+              <button
+                type="button"
+                className="sa-welfare-btn-secondary"
+                disabled={busyId === editRow.id}
+                onClick={() => setEditRow(null)}
+              >
                 Cancel
               </button>
               <button type="button" className="sa-welfare-btn-primary" disabled={busyId === editRow.id} onClick={saveEdit}>
-                Save
+                {busyId === editRow.id ? "Saving…" : "Save"}
               </button>
             </div>
           </div>

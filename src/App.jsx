@@ -1,7 +1,8 @@
 import { lazy, Suspense, useMemo } from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import ToastProvider from "./components/common/ToastProvider";
 import AppVisitLogger from "./components/AppVisitLogger";
+import { PresenceProvider } from "./context/PresenceContext";
 import LandingPage from "./pages/LandingPage";
 import { profileSettingsPathForSessionOffice } from "./utils/profileSettingsRoutes";
 import { readCampusCareSession } from "./utils/campusCareSession";
@@ -68,6 +69,9 @@ const ModuleProfileSettingsRoute = lazy(() =>
 const AdminPage = lazy(() =>
   import("./pages/Admin/AdminPage").then((m) => ({ default: m.default ?? m.AdminPage }))
 );
+const StaffDirectoryPage = lazy(() =>
+  import("./pages/StaffDirectory/StaffDirectoryPage").then((m) => ({ default: m.default }))
+);
 
 function RouteLoadingFallback() {
   return (
@@ -116,6 +120,14 @@ function RequireWelfareAdminOffice({ office, children }) {
   return children;
 }
 
+/** Deprecated path segment only; all welfare admins use `/admin/*` (no separate Super Admin app). */
+function LegacyWelfareAdminUrlRedirect() {
+  const { pathname } = useLocation();
+  const first = pathname.replace(/^\/super-admin\/?/, "").split("/").filter(Boolean)[0] || "";
+  if (first === "hso") return <Navigate to="/admin/hso" replace />;
+  return <Navigate to="/admin/do" replace />;
+}
+
 function HealthServicesHome() {
   const session = readCampusCareSession();
   if (normalizeHsoDesignation(session?.designation) === "queue_display") {
@@ -130,10 +142,11 @@ function App() {
 
   return (
     <Router>
-      <ToastProvider>
-        <AppVisitLogger />
-        <Suspense fallback={<RouteLoadingFallback />}>
-          <Routes>
+      <PresenceProvider>
+        <ToastProvider>
+          <AppVisitLogger />
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/terms" element={<TermsPage />} />
@@ -144,9 +157,7 @@ function App() {
             <Route path="/dashboard" element={<RequireOffice office="discipline"><DashboardPage /></RequireOffice>} />
             <Route path="/health-services" element={<RequireOffice office="health"><HealthServicesHome /></RequireOffice>} />
             <Route path="/health-services/queue-display" element={<RequireOffice office="health"><HealthQueueDisplayPage /></RequireOffice>} />
-            <Route path="/super-admin/hso" element={<Navigate to="/admin/hso" replace />} />
-            <Route path="/super-admin/do" element={<Navigate to="/admin/do" replace />} />
-            <Route path="/super-admin/sdao" element={<Navigate to="/admin/do" replace />} />
+            <Route path="/super-admin/*" element={<LegacyWelfareAdminUrlRedirect />} />
             <Route path="/admin/hso" element={<RequireWelfareAdminOffice office="health"><AdminPage officeKey="health" /></RequireWelfareAdminOffice>} />
             <Route path="/admin/do" element={<RequireWelfareAdminOffice office="discipline"><AdminPage officeKey="discipline" /></RequireWelfareAdminOffice>} />
             <Route path="/admin/sdao" element={<Navigate to="/admin/do" replace />} />
@@ -164,10 +175,19 @@ function App() {
             <Route path="/health-services/profile-settings" element={<RequireOffice office="health"><ModuleProfileSettingsRoute variant="hso" /></RequireOffice>} />
             <Route path="/profile" element={<LegacyProfileSettingsRedirect />} />
             <Route path="/settings" element={<LegacyProfileSettingsRedirect />} />
+            <Route
+              path="/staff-directory"
+              element={
+                <RequireSignedIn>
+                  <StaffDirectoryPage />
+                </RequireSignedIn>
+              }
+            />
             <Route path="*" element={<RequireSignedIn><Navigate to="/" replace /></RequireSignedIn>} />
           </Routes>
         </Suspense>
-      </ToastProvider>
+        </ToastProvider>
+      </PresenceProvider>
     </Router>
   );
 }

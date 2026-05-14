@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
-import { BarChart3, Building2, GraduationCap, LogOut, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { BarChart3, Building2, CalendarDays, GraduationCap, LogOut, Users } from "lucide-react";
 import CCModal from "../../components/common/CCModal";
 import OfficeHeader from "../../components/OfficeHeader/OfficeHeader";
 import Sidebar from "../../components/Sidebar/Sidebar";
@@ -8,10 +8,12 @@ import HealthServices from "../HealthServices/HealthServices";
 import { ReportsPage as DisciplineReportsPage } from "../DODashboard/DO";
 import SDAO from "../SDAO/SDAO";
 import UserManagement from "./UserManagement";
+import WelfareStaffScheduling from "./WelfareStaffScheduling";
 import { logoutCampusCare } from "../../utils/campusCareAuth";
 import { getHomeRouteForSession } from "../../utils/officeRoutes";
 import { displayWelfareAdminRole, isWelfareAdminForAdminRoute } from "../../utils/welfareAdmin";
-import { readCampusCareSession } from "../../utils/campusCareSession";
+import { profileSettingsPathForSessionOffice } from "../../utils/profileSettingsRoutes";
+import { useLiveCampusCareSession } from "../../hooks/useLiveCampusCareSession";
 import { showToast } from "../../utils/toast";
 import "../DODashboard/DO.css";
 import "../HealthServices/HealthServices.css";
@@ -43,15 +45,27 @@ const iconProps = { size: 20, strokeWidth: 1.5 };
  */
 export default function AdminPage({ officeKey }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isDualOfficeShell = officeKey === "discipline" || officeKey === "development";
   const [tab, setTab] = useState(() =>
     officeKey === "discipline" ? "do_reports" : officeKey === "development" ? "sdao_reports" : "reports",
   );
   const [logoutOpen, setLogoutOpen] = useState(false);
 
-  const session = useMemo(() => {
-    return readCampusCareSession();
-  }, []);
+  useEffect(() => {
+    if (!isDualOfficeShell) return;
+    if (searchParams.get("tab") === "staff_scheduling") setTab("staff_scheduling");
+  }, [isDualOfficeShell, searchParams]);
+
+  const handleNavSelect = useCallback(
+    (id) => {
+      setTab(id);
+      if (searchParams.get("tab")) setSearchParams({}, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const session = useLiveCampusCareSession();
 
   const cfg = OFFICE_CONFIG[officeKey] ?? OFFICE_CONFIG.health;
 
@@ -70,6 +84,7 @@ export default function AdminPage({ officeKey }) {
     () => [
       { id: "do_reports", label: "Discipline Office", icon: <Building2 {...iconProps} /> },
       { id: "sdao_reports", label: "Student Development", icon: <GraduationCap {...iconProps} /> },
+      { id: "staff_scheduling", label: "Staff Scheduling", icon: <CalendarDays {...iconProps} /> },
       { id: "users", label: "User Management", icon: <Users {...iconProps} /> },
     ],
     [],
@@ -78,12 +93,14 @@ export default function AdminPage({ officeKey }) {
   const adminNavItems = isDualOfficeShell ? dualOfficeNavItems : healthNavItems;
 
   const sidebarProps = useMemo(() => {
+    const profilePath = profileSettingsPathForSessionOffice(session?.office);
     const base = {
       navItems: adminNavItems,
       activeNavId: tab,
-      onNavSelect: setTab,
+      onNavSelect: handleNavSelect,
       onLogoutRequest: () => setLogoutOpen(true),
-      hideProfileFooter: true,
+      hideProfileFooter: false,
+      profileSettingsPath: typeof profilePath === "string" && profilePath.length > 0 ? profilePath : undefined,
     };
     if (officeKey === "health") {
       return { ...base, brandTitle: "CampusCare Welfare Management" };
@@ -92,7 +109,7 @@ export default function AdminPage({ officeKey }) {
       return { ...base, brandTitle: "CampusCare Welfare Management" };
     }
     return { ...base };
-  }, [adminNavItems, tab, officeKey, isDualOfficeShell]);
+  }, [adminNavItems, tab, officeKey, isDualOfficeShell, handleNavSelect, session?.office]);
 
   const layoutClass = useMemo(() => {
     if (officeKey === "health") return "dashboard-layout health-services-layout hs-office-shell";
@@ -186,6 +203,9 @@ export default function AdminPage({ officeKey }) {
         </div>
       );
     }
+    if (tab === "staff_scheduling") {
+      return <WelfareStaffScheduling />;
+    }
     return (
       <>
         <section className="sa-page-heading">
@@ -206,7 +226,16 @@ export default function AdminPage({ officeKey }) {
       <Sidebar {...sidebarProps} />
 
       <div className="dashboard-main">
-        <OfficeHeader userName={userName} userRole={userRole} notifications={SA_NOTIFICATIONS} />
+        <OfficeHeader
+          userName={userName}
+          userRole={userRole}
+          notifications={SA_NOTIFICATIONS}
+          avatar={
+            session?.profileAvatarDataUrl ? (
+              <img src={session.profileAvatarDataUrl} alt="" className="header-avatar-img" />
+            ) : undefined
+          }
+        />
 
         <main className={mainContentClass}>{renderMain()}</main>
       </div>

@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useDONotificationStore } from "../../stores/doNotificationStore";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
+import { usePresenceOptional } from "../../context/PresenceContext";
 
 /** Shared notification bell for DO, HSO, and SDAO headers (same store + UI). */
 export default function StaffNotificationBell() {
   const [open, setOpen] = useState(false);
+  const presence = usePresenceOptional();
+  const dnd = presence?.status === "do_not_disturb";
   const notifications = useDONotificationStore((s) => s.notifications);
   const markRead = useDONotificationStore((s) => s.markNotificationRead);
   const markAllRead = useDONotificationStore((s) => s.markAllNotificationsRead);
@@ -27,26 +30,27 @@ export default function StaffNotificationBell() {
   };
 
   const unreadCount = notifications.filter((n) => n.unread).length;
+  const badgeCount = dnd ? 0 : unreadCount;
 
   return (
     <div style={{ position: "relative" }}>
       <button
         className="header-notifications"
         type="button"
-        aria-label="Notifications"
+        aria-label={dnd ? "Notifications (muted — Do not disturb)" : "Notifications"}
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
           <path
             d="M15 6.667A5 5 0 005 6.667C5 10.833 3.333 12.5 3.333 12.5h13.334S15 10.833 15 6.667zM11.442 17.5a1.667 1.667 0 01-2.884 0"
-            stroke="#374151"
+            stroke={dnd ? "#94a3b8" : "#374151"}
             strokeWidth="1.5"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
         </svg>
-        {unreadCount > 0 ? <span className="notif-badge">{unreadCount}</span> : null}
+        {badgeCount > 0 ? <span className="notif-badge">{badgeCount}</span> : null}
       </button>
 
       {open && (

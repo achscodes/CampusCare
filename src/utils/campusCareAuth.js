@@ -5,8 +5,19 @@ import { devLog, devWarn } from "./devLog";
 import { isHsoAdminSession, normalizeHsoDesignation } from "./hsoAccess";
 
 export async function logoutCampusCare() {
-  clearCampusCareSession();
   if (isSupabaseConfigured() && supabase) {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData?.session?.user?.id;
+      if (uid) {
+        await supabase
+          .from("profiles")
+          .update({ presence_status: "offline", last_active_at: new Date().toISOString() })
+          .eq("id", uid);
+      }
+    } catch {
+      /* non-fatal */
+    }
     try {
       devLog("[AUTH] Signing out from Supabase...");
       await supabase.auth.signOut();
@@ -15,6 +26,7 @@ export async function logoutCampusCare() {
       devWarn("[AUTH] Error signing out:", err);
     }
   }
+  clearCampusCareSession();
 }
 
 /**
@@ -35,6 +47,8 @@ export async function syncCampusCareSessionFromSupabaseUser(authUser, opts = {})
     devLog("[AUTH] Syncing session for user:", authUser.id);
 
     const profileSelectVariants = [
+      "first_name, middle_initial, last_name, office, role, account_status, designation, presence_status, last_active_at, avatar_data_url",
+      "first_name, middle_initial, last_name, office, role, account_status, designation, presence_status, last_active_at",
       "first_name, middle_initial, last_name, office, role, account_status, designation",
       "first_name, middle_initial, last_name, office, role, account_status",
       "first_name, middle_initial, last_name, office, role",
@@ -76,6 +90,11 @@ export async function syncCampusCareSessionFromSupabaseUser(authUser, opts = {})
       designation,
     };
 
+    const avatarFromDb = profile?.avatar_data_url;
+    if (typeof avatarFromDb === "string" && avatarFromDb.trim()) {
+      session.profileAvatarDataUrl = avatarFromDb.trim();
+    }
+
     devLog("[AUTH] Session synced. Office:", office, "Role:", role, "Status:", accountStatus);
 
     const isApprovalExempt = isWelfareAdminSession(session) || isHsoAdminSession(session);
@@ -85,6 +104,15 @@ export async function syncCampusCareSessionFromSupabaseUser(authUser, opts = {})
     }
 
     writeCampusCareSession(session, rememberMe);
+
+    const { error: presenceErr } = await supabase
+      .from("profiles")
+      .update({ presence_status: "online", last_active_at: new Date().toISOString() })
+      .eq("id", authUser.id);
+    if (presenceErr) {
+      devWarn("[AUTH] Could not set profile presence online:", presenceErr.message || presenceErr);
+    }
+
     return { ok: true, session };
   } catch (err) {
     devWarn("[AUTH] Error syncing session:", err);

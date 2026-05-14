@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import "./ForgotPasswordPage.css";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
+import { logoutCampusCare } from "../utils/campusCareAuth";
 import { formatAuthError } from "../utils/supabaseErrors";
 import { validateStaffPassword } from "../utils/signupFieldValidation";
 import {
@@ -218,7 +219,7 @@ const ForgotPasswordPage = () => {
         return;
       }
 
-      await supabase.auth.signOut();
+      await logoutCampusCare();
       clearReset();
       showToast("Password updated. Sign in with your new password.", { variant: "success" });
       navigate("/signin", {

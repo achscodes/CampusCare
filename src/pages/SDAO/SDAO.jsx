@@ -28,11 +28,11 @@ import OfficeHeader from "../../components/OfficeHeader/OfficeHeader";
 import StaffNotificationBell from "../../components/common/StaffNotificationBell";
 import CCModal from "../../components/common/CCModal";
 import { useDONotificationsRealtime } from "../../hooks/useDONotificationsRealtime";
+import { useLiveCampusCareSession } from "../../hooks/useLiveCampusCareSession";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
 import { logoutCampusCare } from "../../utils/campusCareAuth";
 import { canCreateDocumentRequest, labelForOfficeKey } from "../../constants/documentRequestAccess";
 import { isStudentLikeCampusRole } from "../../utils/officeSession";
-import { readCampusCareSession } from "../../utils/campusCareSession";
 import { NU_PROGRAM_OPTIONS } from "../../data/nuPrograms";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import { interOfficeDocumentRequestToInsert } from "../../services/interOfficeDocumentRequests";
@@ -208,7 +208,7 @@ const INITIAL_REFERRAL_FORM = {
 
 /**
  * @param {{ embedDashboardOnly?: boolean }} props
- * When true, renders only the SDAO dashboard body (no sidebar) for Super Admin embed.
+ * When true, renders only the SDAO dashboard body (no sidebar) for welfare AdminPage embed.
  */
 function SDAO({ embedDashboardOnly = false } = {}) {
   const navigate = useNavigate();
@@ -398,9 +398,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
     return { total, urgent, completed, inProgress };
   }, [referralsList]);
 
-  const session = useMemo(() => {
-    return readCampusCareSession();
-  }, []);
+  const session = useLiveCampusCareSession();
 
   useDONotificationsRealtime();
 
@@ -1482,6 +1480,11 @@ function SDAO({ embedDashboardOnly = false } = {}) {
               userRole={userRole}
               notifications={SDAO_NOTIFICATIONS}
               notificationSlot={<StaffNotificationBell />}
+              avatar={
+                session?.profileAvatarDataUrl ? (
+                  <img src={session.profileAvatarDataUrl} alt="" className="header-avatar-img" />
+                ) : undefined
+              }
             />
             {sdaoPageMain}
           </div>

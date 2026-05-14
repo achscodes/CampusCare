@@ -1,6 +1,9 @@
 import { normalizeHsoDesignation } from "./hsoAccess";
 
-/** Welfare / institution portal admins (DO, SDAO, HSO) — stored in `profiles.role`. */
+/**
+ * Welfare institution admins (DO / SDAO / HSO) use **`/admin/do`**, **`/admin/hso`**, etc. only.
+ * There is no separate "Super Admin" React app; legacy `/super-admin/*` URLs redirect to `/admin/*`.
+ */
 export const WELFARE_ADMIN_ROLE = "Admin";
 
 /** Pre-migration profiles only; keep until all DBs run `20260530120000_welfare_admin_role_rename.sql`. */

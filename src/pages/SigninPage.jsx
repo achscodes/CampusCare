@@ -7,11 +7,11 @@ import "./SigninPage.css";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { verifyCredentials } from "../utils/authStore";
 import { formatAuthError } from "../utils/supabaseErrors";
-import { syncCampusCareSessionFromSupabaseUser } from "../utils/campusCareAuth";
+import { logoutCampusCare, syncCampusCareSessionFromSupabaseUser } from "../utils/campusCareAuth";
 import { getHomeRouteForSession } from "../utils/officeRoutes";
 import { getWelfareAdminRouteForOffice, isWelfareAdminSession } from "../utils/welfareAdmin";
 import { showToast } from "../utils/toast";
-import { clearCampusCareSession, writeCampusCareSession } from "../utils/campusCareSession";
+import { writeCampusCareSession } from "../utils/campusCareSession";
 import { devLog, devWarn } from "../utils/devLog";
 import { isHsoAdminSession } from "../utils/hsoAccess";
 
@@ -87,8 +87,7 @@ const SigninPage = () => {
 
         if (!sync.ok) {
           devWarn("[AUTH] Session sync failed:", sync.accountStatus);
-          await supabase.auth.signOut();
-          clearCampusCareSession();
+          await logoutCampusCare();
           setSubmitting(false);
           setFormError(
             sync.accountStatus === "rejected"

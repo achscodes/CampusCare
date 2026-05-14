@@ -1,4 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { usePresenceOptional } from "../../context/PresenceContext";
+import { readCampusCareSession } from "../../utils/campusCareSession";
+import StatusPicker from "../userPresence/StatusPicker";
+import "./OfficeHeader.css";
 
 const defaultAvatar = (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -30,16 +35,52 @@ function OfficeHeader({
   pageSubtitle,
   /** When set, replaces the default notification bell (e.g. Discipline Office `DONotificationBell`). */
   notificationSlot = null,
+  /** Optional; defaults to session email when available. */
+  userEmail = null,
 }) {
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [items, setItems] = useState(notifications);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRootRef = useRef(null);
+  const presence = usePresenceOptional();
+  const showPresence = Boolean(presence?.presenceEnabled);
+  const session = readCampusCareSession();
+  const email = userEmail ?? session?.email ?? "";
+
   const hasTitle = Boolean(pageTitle);
 
   useEffect(() => {
     setItems(notifications);
   }, [notifications]);
 
+  useEffect(() => {
+    if (!profileOpen) return undefined;
+    const onDoc = (e) => {
+      if (profileRootRef.current && !profileRootRef.current.contains(e.target)) {
+        setProfileOpen(false);
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setProfileOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [profileOpen]);
+
+  const toggleProfile = useCallback(() => {
+    setIsNotifOpen(false);
+    setProfileOpen((o) => !o);
+  }, []);
+
   const unreadCount = items.filter((n) => n.unread).length;
+
+  const presenceDotClass = showPresence
+    ? `office-header-presence-dot office-header-presence-dot--${presence.status}`
+    : "";
 
   return (
     <header
@@ -164,14 +205,53 @@ function OfficeHeader({
           </div>
         )}
 
-        <div className="header-user">
-          <div className="header-avatar" aria-hidden="true">
-            {avatar}
-          </div>
-          <div className="header-user-info">
-            <span className="header-user-name">{userName}</span>
-            <span className="header-user-role">{userRole}</span>
-          </div>
+        <div className="office-header-profile" ref={profileRootRef}>
+          <button
+            type="button"
+            className="office-header-profile-trigger"
+            onClick={toggleProfile}
+            aria-expanded={profileOpen}
+            aria-haspopup="dialog"
+          >
+            <div className="header-avatar office-header-avatar-wrap" aria-hidden="true">
+              {showPresence ? <span className={presenceDotClass} /> : null}
+              {avatar}
+            </div>
+            <div className="header-user-info">
+              <span className="header-user-name">{userName}</span>
+              <span className="header-user-role">{userRole}</span>
+            </div>
+            <ChevronDown
+              className="office-header-profile-chevron"
+              size={18}
+              strokeWidth={1.75}
+              aria-hidden
+              style={{
+                transform: profileOpen ? "rotate(180deg)" : undefined,
+                transition: "transform 0.15s ease",
+              }}
+            />
+          </button>
+
+          {profileOpen ? (
+            <div className="office-header-profile-panel" role="dialog" aria-label="Account and status">
+              <div className="office-header-profile-panel__identity">
+                <p className="office-header-profile-panel__name">{userName}</p>
+                {email ? <p className="office-header-profile-panel__email">{email}</p> : null}
+                <p className="office-header-profile-panel__role">{userRole}</p>
+              </div>
+              {showPresence && presence ? (
+                <div className="office-header-profile-panel__presence">
+                  <p className="office-header-profile-panel__presence-label">Set status</p>
+                  <StatusPicker
+                    status={presence.status}
+                    onSelect={presence.setManualStatus}
+                    embedded
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </header>

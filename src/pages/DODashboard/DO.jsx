@@ -7075,7 +7075,7 @@ function PieSliceLabel({ name, value }) {
 
 /**
  * @param {{ standalone?: boolean }} props
- * When true, renders reports main content only (no DO sidebar / top bar) for Super Admin embed.
+ * When true, renders reports main content only (no DO sidebar / top bar) for welfare AdminPage embed.
  */
 export function ReportsPage({ standalone = false } = {}) {
   const navigate = useNavigate();

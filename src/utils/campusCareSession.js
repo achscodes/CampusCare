@@ -1,5 +1,13 @@
 const SESSION_KEY = "campuscare_session_v1";
 
+function notifySessionStorageChanged() {
+  try {
+    window.dispatchEvent(new CustomEvent("campuscare-session-updated", { detail: { key: SESSION_KEY } }));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function readCampusCareSession() {
   try {
     const sessionRaw = window.sessionStorage.getItem(SESSION_KEY);
@@ -23,15 +31,18 @@ export function writeCampusCareSession(session, rememberMe = false) {
   if (rememberMe) {
     window.localStorage.setItem(SESSION_KEY, payload);
     window.sessionStorage.removeItem(SESSION_KEY);
+    notifySessionStorageChanged();
     return;
   }
   window.sessionStorage.setItem(SESSION_KEY, payload);
   window.localStorage.removeItem(SESSION_KEY);
+  notifySessionStorageChanged();
 }
 
 export function clearCampusCareSession() {
   window.localStorage.removeItem(SESSION_KEY);
   window.sessionStorage.removeItem(SESSION_KEY);
+  notifySessionStorageChanged();
 }
 
 /** True when the active session was stored with “remember me” (localStorage). */

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
-import { readCampusCareSession, clearCampusCareSession } from "../utils/campusCareSession";
+import { readCampusCareSession, clearCampusCareSession, writeCampusCareSession } from "../utils/campusCareSession";
 import { syncCampusCareSessionFromSupabaseUser } from "../utils/campusCareAuth";
 import { devLog, devWarn } from "../utils/devLog";
 
@@ -48,6 +48,18 @@ export function useSupabaseAuthRecovery() {
         const existing = readCampusCareSession();
         if (existing?.userId === authUser.id) {
           devLog("[AUTH] Valid local session already exists");
+          if (!existing.profileAvatarDataUrl) {
+            const { data: profileRow } = await supabase
+              .from("profiles")
+              .select("avatar_data_url")
+              .eq("id", authUser.id)
+              .maybeSingle();
+            const url = profileRow?.avatar_data_url;
+            if (url && typeof url === "string" && url.startsWith("data:image")) {
+              writeCampusCareSession({ ...existing, profileAvatarDataUrl: url });
+              window.dispatchEvent(new Event("campuscare-session-updated"));
+            }
+          }
           return;
         }
 

@@ -13,6 +13,7 @@ import {
 import "./LandingPage.css";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { recordAppVisit } from "../utils/recordAppVisit";
+import { readCampusCareSession } from "../utils/campusCareSession";
 
 import campusCareLogo from "../assets/CampusCareLogo.png";
 import campusCareWordmark from "../assets/CampusCareText.png";
@@ -80,6 +81,7 @@ const benefits = [
 ];
 
 const LandingPage = () => {
+  const ccSession = readCampusCareSession();
   useEffect(() => {
     let cancelled = false;
 
@@ -153,6 +155,11 @@ const LandingPage = () => {
             </div>
           </Link>
           <nav className="lp-nav-links" aria-label="Main">
+            {ccSession?.userId ? (
+              <Link to="/staff-directory" className="lp-sign-in">
+                Staff availability
+              </Link>
+            ) : null}
             <Link to="/signin" className="lp-sign-in">
               Sign In
             </Link>

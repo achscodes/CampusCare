@@ -4,7 +4,7 @@ import { Activity, Clock, LogOut, Smile, Stethoscope, Users, Volume2, VolumeX, X
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { enrichAppointmentsWithStudentNames, mapAppointmentRow } from "../../services/hsoSupabase";
 import { logoutCampusCare } from "../../utils/campusCareAuth";
-import { readCampusCareSession } from "../../utils/campusCareSession";
+import { useLiveCampusCareSession } from "../../hooks/useLiveCampusCareSession";
 import {
   appointmentServiceLabel,
   formatQueueTicket,
@@ -96,7 +96,7 @@ function StationBoard({ variant, snapshot, title }) {
 
 export default function HealthQueueDisplayPage() {
   const navigate = useNavigate();
-  const session = useMemo(() => readCampusCareSession(), []);
+  const session = useLiveCampusCareSession();
   const [rows, setRows] = useState([]);
   const [error, setError] = useState("");
   const [clock, setClock] = useState(() => new Date());

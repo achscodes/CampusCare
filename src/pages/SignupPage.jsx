@@ -8,7 +8,7 @@ import { OFFICE_OPTIONS } from "../data/mockUsers";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { registerUser } from "../utils/authStore";
 import { formatAuthError } from "../utils/supabaseErrors";
-import { syncCampusCareSessionFromSupabaseUser } from "../utils/campusCareAuth";
+import { logoutCampusCare, syncCampusCareSessionFromSupabaseUser } from "../utils/campusCareAuth";
 import { getAuthEmailRedirectUrl } from "../utils/supabaseAuthRedirect";
 import { getHomeRouteForOffice } from "../utils/officeRoutes";
 import { resolveSignupOfficeAndRole } from "../utils/welfareAdmin";
@@ -21,7 +21,6 @@ import {
   validateStaffPassword,
 } from "../utils/signupFieldValidation";
 import { showToast } from "../utils/toast";
-import { clearCampusCareSession } from "../utils/campusCareSession";
 import { devLog, devWarn } from "../utils/devLog";
 import { HSO_SIGNUP_DESIGNATION_OPTIONS } from "../utils/hsoAccess";
 
@@ -185,8 +184,7 @@ const SignupPage = () => {
           });
           if (!sync.ok) {
             devWarn("[AUTH] Session sync failed:", sync.accountStatus);
-            await supabase.auth.signOut();
-            clearCampusCareSession();
+            await logoutCampusCare();
             setFormError(
               sync.accountStatus === "rejected"
                 ? "Your account was rejected. Contact your office administrator."

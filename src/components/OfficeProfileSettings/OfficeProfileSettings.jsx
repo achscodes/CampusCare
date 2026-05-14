@@ -2,6 +2,8 @@ import { useMemo, useRef, useState } from "react";
 import { Bell, Camera, Mail, Phone, User } from "lucide-react";
 import ProfileAvatarEditorModal from "../ProfileAvatarEditorModal/ProfileAvatarEditorModal";
 import { labelForOfficeKey, normalizeOfficeKey } from "../../constants/documentRequestAccess";
+import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
+import { devWarn } from "../../utils/devLog";
 import {
   campusCareSessionUsesPersistentStorage,
   readCampusCareSession,
@@ -134,29 +136,46 @@ export default function OfficeProfileSettings({ workflow, onProfileSaved, onAvat
     }
   };
 
-  const persistProfileAvatar = (dataUrl) => {
+  const persistProfileAvatar = async (dataUrl) => {
     const cur = readCampusCareSession();
     if (!cur) {
       setSaveMessage("Unable to save — session missing. Try signing in again.");
       return;
     }
     const trimmed = String(dataUrl || "").trim();
-    const next = { ...cur, profileAvatarDataUrl: trimmed || undefined };
+    const capped = trimmed.length > 600_000 ? trimmed.slice(0, 600_000) : trimmed;
+    const next = { ...cur, profileAvatarDataUrl: capped || undefined };
     writeCampusCareSession(next, campusCareSessionUsesPersistentStorage());
-    setAvatarDataUrl(trimmed);
-    setSaveMessage(trimmed ? "Profile photo saved." : "Profile photo removed.");
+    setAvatarDataUrl(capped);
+    setSaveMessage(capped ? "Profile photo saved." : "Profile photo removed.");
     if (typeof onAvatarSaved === "function") {
-      onAvatarSaved(trimmed || null);
+      onAvatarSaved(capped || null);
     }
-    window.setTimeout(() => setSaveMessage(null), 4000);
+
+    if (isSupabaseConfigured() && supabase && cur.userId) {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ avatar_data_url: capped || null })
+        .eq("id", cur.userId);
+      if (error) {
+        devWarn("[profile] avatar sync failed", error);
+        setSaveMessage(
+          capped
+            ? `Photo saved on this device; cloud sync failed (${error.message || "unknown error"}).`
+            : `Photo cleared on this device; cloud sync failed (${error.message || "unknown error"}).`,
+        );
+      }
+    }
+
+    window.setTimeout(() => setSaveMessage(null), 5000);
   };
 
-  const handleAvatarEditorSave = (dataUrl) => {
-    persistProfileAvatar(dataUrl);
+  const handleAvatarEditorSave = async (dataUrl) => {
+    await persistProfileAvatar(dataUrl);
   };
 
-  const handleRemoveAvatar = () => {
-    persistProfileAvatar("");
+  const handleRemoveAvatar = async () => {
+    await persistProfileAvatar("");
   };
 
   const handleSaveProfile = () => {

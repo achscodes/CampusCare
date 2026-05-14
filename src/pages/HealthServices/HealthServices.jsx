@@ -55,6 +55,7 @@ import Sidebar from "../../components/Sidebar/Sidebar";
 import OfficeHeader from "../../components/OfficeHeader/OfficeHeader";
 import StaffNotificationBell from "../../components/common/StaffNotificationBell";
 import CCModal from "../../components/common/CCModal";
+import WeeklyStaffSchedulePanel from "../../components/staffScheduling/WeeklyStaffSchedulePanel";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
 import { useDONotificationsRealtime } from "../../hooks/useDONotificationsRealtime";
 import { useRealtimeAppointments } from "../../hooks/useRealtimeAppointments";
@@ -87,10 +88,12 @@ import {
 } from "../../services/physicianChartDocuments";
 import { logoutCampusCare } from "../../utils/campusCareAuth";
 import { PROFILE_SETTINGS_PATH_HEALTH } from "../../utils/profileSettingsRoutes";
-import { readCampusCareSession } from "../../utils/campusCareSession";
+import { useLiveCampusCareSession } from "../../hooks/useLiveCampusCareSession";
 import { canCreateDocumentRequest, labelForOfficeKey } from "../../constants/documentRequestAccess";
 import { NU_PROGRAM_OPTIONS } from "../../data/nuPrograms";
 import "../DODashboard/DO.css";
+import "../Admin/Admin.css";
+import UserManagement from "../Admin/UserManagement";
 import "./HealthServices.css";
 import { sanitizeCheckinCodeInput, sanitizeDigitsOnlyInput, sanitizePersonNameInput } from "../../utils/signupFieldValidation";
 import { hsoDesignationLabel, normalizeHsoDesignation } from "../../utils/hsoAccess";
@@ -682,7 +685,7 @@ const HS_VISIT_DISPOSITIONS = [
 
 /**
  * @param {{ embedReportsOnly?: boolean }} props
- * When true, renders only Reports & Analytics (no office sidebar/header) for Super Admin embed.
+ * When true, renders only Reports & Analytics (no office sidebar/header) for welfare AdminPage embed.
  */
 function HealthServices({ embedReportsOnly = false } = {}) {
   const location = useLocation();
@@ -810,9 +813,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     </div>
   );
 
-  const session = useMemo(() => {
-    return readCampusCareSession();
-  }, []);
+  const session = useLiveCampusCareSession();
 
   useDONotificationsRealtime();
 
@@ -2948,11 +2949,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     [clinicalStaffRows],
   );
 
-  const pendingStaffApprovalRows = useMemo(
-    () => pendingApprovalRows.filter((r) => ["nurse", "physician", "dentist"].includes(String(r.designation || "").toLowerCase())),
-    [pendingApprovalRows],
-  );
-
   const staffingSummary = useMemo(() => {
     const c = (d) => approvedClinicalStaffRows.filter((r) => r.designation === d).length;
     const onDuty = approvedClinicalStaffRows.filter((r) => r.status === "on-duty").length;
@@ -2966,30 +2962,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       offDuty,
     };
   }, [approvedClinicalStaffRows]);
-
-  const approvePendingStaff = async (row) => {
-    try {
-      if (isSupabaseConfigured() && supabase) {
-        const { error } = await supabase
-          .from("profiles")
-          .update({ account_status: "approved" })
-          .eq("id", row.id)
-          .eq("office", "health");
-        if (error) throw error;
-      }
-      setAdminStaffRows((prev) =>
-        prev.map((r) =>
-          String(r.id) === String(row.id)
-            ? { ...r, accountStatus: "approved", status: "on-duty" }
-            : r,
-        ),
-      );
-      setPendingApprovalRows((prev) => prev.filter((r) => String(r.id) !== String(row.id)));
-      showToast("Staff account approved.", { variant: "success" });
-    } catch (err) {
-      showToast(err?.message || "Could not approve staff account.", { variant: "error" });
-    }
-  };
 
   const prefixedName = (r) => `${r.titlePrefix} ${r.name}`.trim();
 
@@ -4674,92 +4646,26 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     );
   };
 
-  // --- Admin Side: User Management ---
+  // --- Admin Side: User Management (shared welfare-style accounts UI) ---
   const renderUserManagement = () => (
-    <>
-      <div className="hs-stat-row">
-        <div className="hs-stat-card"><div className="hs-stat-card-top"><p className="hs-stat-value">{staffingSummary.total}</p></div><p className="hs-stat-label">Total Staff</p></div>
-        <div className="hs-stat-card"><div className="hs-stat-card-top"><p className="hs-stat-value">{staffingSummary.onDuty}</p></div><p className="hs-stat-label">On Duty</p></div>
-        <div className="hs-stat-card"><div className="hs-stat-card-top"><p className="hs-stat-value">{staffingSummary.offDuty}</p></div><p className="hs-stat-label">Off Duty</p></div>
-      </div>
-      <div className="cases-panel hs-panel-elevated">
-        <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">All Accounts</div></div>
-        <div className="cases-table-wrapper">
-          <table className="cases-table">
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
-            <tbody>
-              {approvedClinicalStaffRows.map((r) => (
-                <tr key={r.id}>
-                  <td className="cell-text">{prefixedName(r)}</td>
-                  <td className="cell-text">{r.email}</td>
-                  <td className="cell-text">{r.role}</td>
-                  <td><span className={pillClass(r.status)}>{r.status === "on-duty" ? "On-Duty" : "Off-Duty"}</span></td>
-                  <td className="cell-text">{r.lastLogin}</td>
-                  <td className="cell-text"><button type="button" className="hs-link-action">Update</button> <button type="button" className="hs-link-action">Remove</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div className="cases-panel hs-panel-elevated" style={{ marginTop: 16 }}>
-        <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">Account Approval</div></div>
-        <div className="cases-table-wrapper">
-          <table className="cases-table">
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Requested At</th><th>Action</th></tr></thead>
-            <tbody>
-              {pendingStaffApprovalRows.map((r) => (
-                <tr key={r.id}>
-                  <td className="cell-text">{r.name}</td>
-                  <td className="cell-text">{r.email}</td>
-                  <td className="cell-text">{r.role}</td>
-                  <td className="cell-text">{r.requestedAt}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="hs-btn-primary"
-                      style={{ height: 30, fontSize: 12 }}
-                      onClick={() => approvePendingStaff(r)}
-                    >
-                      Approve
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
+    <div className="hs-user-mgmt-embed">
+      <UserManagement filterOffices={["health"]} />
+    </div>
   );
 
   // --- Admin Side: Staff Scheduling ---
   const renderStaffScheduling = () => (
     <>
-      <div className="cases-panel hs-panel-elevated">
-        <div className="cases-panel-header">
-          <div className="cases-panel-title cases-panel-title--strong">Weekly Schedule</div>
-        </div>
-        <div className="cases-table-wrapper">
-          <table className="cases-table">
-            <thead><tr><th>Staff</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Shift</th></tr></thead>
-            <tbody>
-              {approvedClinicalStaffRows.map((r) => (
-                <tr key={r.id}>
-                  <td className="cell-text">{prefixedName(r)}</td>
-                  <td className="cell-text">{r.schedule.mon}</td>
-                  <td className="cell-text">{r.schedule.tue}</td>
-                  <td className="cell-text">{r.schedule.wed}</td>
-                  <td className="cell-text">{r.schedule.thu}</td>
-                  <td className="cell-text">{r.schedule.fri}</td>
-                  <td className="cell-text">{r.schedule.sat}</td>
-                  <td className="cell-text">{r.shift}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <WeeklyStaffSchedulePanel
+        supabase={supabase}
+        staffRows={approvedClinicalStaffRows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          titlePrefix: r.titlePrefix,
+          role: r.role,
+        }))}
+        mode="health"
+      />
       <div className="cases-panel hs-panel-elevated" style={{ marginTop: 16 }}>
         <div className="cases-panel-header"><div className="cases-panel-title cases-panel-title--strong">Clinic & Nursing Office Hours</div></div>
         <div className="cc-modal-body">
