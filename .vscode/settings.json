@@ -1,8 +1,0 @@
-{
-    "chat.tools.terminal.autoApprove": {
-        "/^Add-Type -AssemblyName System\\.Drawing; \\$bmp = \\[System\\.Drawing\\.Bitmap\\]::new\\('c:\\\\Users\\\\Yuna\\\\Desktop\\\\ReactNative_Projects\\\\campuscare-application\\\\assets\\\\student-model\\.png'\\); \\$points = @\\(@\\{X=0;Y=0\\},@\\{X=\\$bmp\\.Width-1;Y=0\\},@\\{X=0;Y=\\$bmp\\.Height-1\\},@\\{X=\\$bmp\\.Width-1;Y=\\$bmp\\.Height-1\\},@\\{X=\\[int\\]\\(\\$bmp\\.Width/2\\);Y=0\\},@\\{X=\\[int\\]\\(\\$bmp\\.Width/2\\);Y=\\[int\\]\\(\\$bmp\\.Height/2\\)\\}\\); \\$points \\| ForEach-Object \\{ \\$c=\\$bmp\\.GetPixel\\(\\$_\\.X,\\$_\\.Y\\); \\[PSCustomObject\\]@\\{X=\\$_\\.X;Y=\\$_\\.Y;A=\\$c\\.A;R=\\$c\\.R;G=\\$c\\.G;B=\\$c\\.B\\} \\} \\| Format-Table -AutoSize; \\$bmp\\.Dispose\\(\\)$/": {
-            "approve": true,
-            "matchCommandLine": true
-        }
-    }
-}
