@@ -1,0 +1,200 @@
+#!/bin/bash
+#
+# Supabase Authentication Debugging & Setup Guide for CampusCare
+# ============================================================
+#
+# This script and guide help you debug and fix Supabase authentication issues.
+#
+
+echo "================================================"
+echo "CampusCare Supabase Auth Debugging Guide"
+echo "================================================"
+echo ""
+
+# Step 1: Check environment variables
+echo "STEP 1: Checking environment variables..."
+echo "--------"
+
+if [ -f .env.local ]; then
+  echo "✓ .env.local file exists"
+  if grep -q "VITE_SUPABASE_URL=" .env.local; then
+    SUPABASE_URL=$(grep "VITE_SUPABASE_URL=" .env.local | cut -d'=' -f2)
+    echo "✓ VITE_SUPABASE_URL is set: $SUPABASE_URL"
+  else
+    echo "✗ VITE_SUPABASE_URL is NOT set in .env.local"
+  fi
+
+  if grep -q "VITE_SUPABASE_ANON_KEY=" .env.local; then
+    echo "✓ VITE_SUPABASE_ANON_KEY is set"
+  else
+    echo "✗ VITE_SUPABASE_ANON_KEY is NOT set in .env.local"
+  fi
+else
+  echo "✗ .env.local file does NOT exist"
+  echo "  Create it with: cp .env.example .env.local (if available) or manually add the variables"
+fi
+
+echo ""
+echo "STEP 2: Browser Console Diagnostics"
+echo "--------"
+echo "After starting the dev server (npm run dev):"
+echo "1. Open your browser's Developer Tools (F12 or right-click → Inspect)"
+echo "2. Go to the Console tab"
+echo "3. Look for messages starting with [SUPABASE] and [AUTH]"
+echo ""
+echo "SUCCESS indicators:"
+echo "  ✓ [SUPABASE] ✓ Supabase client initialized successfully"
+echo "  ✓ [AUTH] ✓ Supabase signin successful"
+echo "  ✓ [AUTH] ✓ Session synced. Office: ..., Role: ..., Status: approved"
+echo ""
+echo "FAILURE indicators:"
+echo "  ✗ [SUPABASE] ✗ Supabase not configured"
+echo "  ✗ [AUTH] ✗ Signin failed:"
+echo "  ✗ [AUTH] ✗ Profile query error:"
+echo ""
+
+echo "STEP 3: Common Issues and Solutions"
+echo "--------"
+echo ""
+echo "Issue 1: '[SUPABASE] ✗ Supabase not configured'"
+echo "Cause: VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY missing from .env.local"
+echo "Solution:"
+echo "  a) Add these to .env.local:"
+echo "     VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co"
+echo "     VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY"
+echo "  b) Restart npm run dev"
+echo "  c) Refresh browser"
+echo ""
+
+echo "Issue 2: '[AUTH] ✗ Signin failed: Invalid login credentials'"
+echo "Cause: Wrong email/password OR user not created in Supabase"
+echo "Solution:"
+echo "  a) Verify credentials are correct"
+echo "  b) Check Supabase Dashboard → Authentication → Users"
+echo "  c) Make sure user's account_status is 'approved' in profiles table"
+echo ""
+
+echo "Issue 3: '[AUTH] ✗ Profile query error:' (network error)"
+echo "Cause: Database permissions, RLS policy issue, or network connectivity"
+echo "Solution:"
+echo "  a) Check Supabase → SQL Editor for errors"
+echo "  b) Verify RLS policies on profiles table: auth.uid() = id"
+echo "  c) Run migration: supabase/migrations/20260407000000_profiles.sql"
+echo ""
+
+echo "Issue 4: '[AUTH] ⚠ Account not approved. Status: pending'"
+echo "Cause: Account requires Super Admin approval before signin"
+echo "Solution:"
+echo "  a) Sign in as Super Admin (Super Admin role auto-approved)"
+echo "  b) Go to Super Admin → Manage Users"
+echo "  c) Change user's account_status to 'approved'"
+echo "  d) User can now sign in"
+echo ""
+
+echo "Issue 5: 'Session stays empty' (blank login)"
+echo "Cause: Session recovery from Supabase not working after page reload"
+echo "Solution:"
+echo "  a) Check browser localStorage/sessionStorage in DevTools"
+echo "  b) Look for 'campuscare_session_v1' key"
+echo "  c) Verify it contains userId, email, office, role"
+echo "  d) If empty, check console for '[AUTH] → Recovering session' messages"
+echo ""
+
+echo "STEP 4: Database Setup Verification"
+echo "--------"
+echo ""
+echo "Ensure these migrations are applied in Supabase:"
+echo "  1. 20260407000000_profiles.sql     (Core profiles table + RLS)"
+echo "  2. 20260408000000_password_recovery_email_check.sql (Password reset)"
+echo "  3. Other migrations as needed for your features"
+echo ""
+echo "To apply migrations:"
+echo "  npx supabase db push"
+echo ""
+
+echo "STEP 5: Testing Authentication"
+echo "--------"
+echo ""
+echo "Test Case 1: Super Admin Signup (Auto-approved)"
+echo "  1. Navigate to /signup"
+echo "  2. Fill in form, select 'Super Admin' as role"
+echo "  3. Submit"
+echo "  Expected: Direct login to /super-admin/[office]"
+echo ""
+
+echo "Test Case 2: Staff Signup (Requires Approval)"
+echo "  1. Navigate to /signup"
+echo "  2. Fill in form, select office (e.g., 'Discipline Office')"
+echo "  3. Submit"
+echo "  Expected: Email confirmation → Pending approval → Super Admin approves → Can sign in"
+echo ""
+
+echo "Test Case 3: Password Reset"
+echo "  1. Navigate to /forgot-password"
+echo "  2. Enter registered email"
+echo "  3. Enter OTP from email (or mock OTP '12345678' in offline mode)"
+echo "  4. Set new password"
+echo "  Expected: Redirect to /signin with success message"
+echo ""
+
+echo "STEP 6: Supabase Dashboard Checks"
+echo "--------"
+echo ""
+echo "1. Authentication → Redirect URLs"
+echo "   Add these URLs (replace localhost:5173 with your domain):"
+echo "     http://localhost:5173"
+echo "     http://localhost:5173/signin"
+echo "     http://localhost:5173/forgot-password"
+echo "     https://yourdomain.com"
+echo ""
+
+echo "2. Authentication → Email Templates"
+echo "   Verify Recovery Password template uses this in email-templates/recovery-password-otp.html:"
+echo "     Verification code: {{ .Token }}"
+echo ""
+
+echo "3. Authentication → Providers"
+echo "   Ensure 'Email' provider is enabled (not disabled)"
+echo ""
+
+echo "4. SQL Editor"
+echo "   Test this query to check profiles table:"
+echo "     SELECT id, email, office, role, account_status FROM profiles LIMIT 5;"
+echo ""
+
+echo "STEP 7: Console Logs During Auth Flow"
+echo "--------"
+echo ""
+echo "Monitor these logs during signin:"
+echo "  [SUPABASE] ✓ Supabase client initialized successfully"
+echo "  [AUTH] → Attempting Supabase signin for: user@example.com"
+echo "  [AUTH] ✓ Supabase signin successful"
+echo "  [AUTH] → Auth user received: abc-123-def"
+echo "  [AUTH] → Syncing session for user: abc-123-def"
+echo "  [AUTH] ✓ Session synced. Office: discipline Role: Staff Status: approved"
+echo "  [AUTH] ✓ Session created successfully"
+echo "  [AUTH] → Navigating to: /do (or relevant dashboard)"
+echo ""
+
+echo "STEP 8: API Key Validation"
+echo "--------"
+echo ""
+echo "If you get 'No API key found' or 'apikey in header':"
+echo "  1. Go to Supabase Dashboard → Project Settings → API"
+echo "  2. Copy the 'anon' key (NOT the 'service_role' key)"
+echo "  3. Update .env.local: VITE_SUPABASE_ANON_KEY=<new-key>"
+echo "  4. Restart npm run dev"
+echo "  5. Hard refresh browser (Ctrl+Shift+R or Cmd+Shift+R)"
+echo ""
+
+echo "================================================"
+echo "Need help? Check these files:"
+echo "================================================"
+echo "  - src/lib/supabaseClient.js      (Supabase initialization)"
+echo "  - src/utils/campusCareAuth.js    (Session sync logic)"
+echo "  - src/pages/SigninPage.jsx       (Login form)"
+echo "  - src/pages/SignupPage.jsx       (Registration form)"
+echo "  - src/pages/ForgotPasswordPage.jsx (Password reset)"
+echo ""
+echo "All auth console logs start with '[AUTH]' or '[SUPABASE]'"
+echo "================================================"

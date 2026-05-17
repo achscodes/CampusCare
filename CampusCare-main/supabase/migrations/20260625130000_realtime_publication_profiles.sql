@@ -1,0 +1,15 @@
+-- Allow Realtime (postgres_changes) on public.profiles for live presence in Admin User Management.
+
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (
+       select 1
+       from pg_publication_tables
+       where pubname = 'supabase_realtime'
+         and schemaname = 'public'
+         and tablename = 'profiles'
+     ) then
+    alter publication supabase_realtime add table public.profiles;
+  end if;
+end $$;

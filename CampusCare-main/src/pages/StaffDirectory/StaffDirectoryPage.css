@@ -1,0 +1,60 @@
+.cc-staff-dir-page {
+  min-height: 100vh;
+  background: #f8fafc;
+  padding: 24px 20px 48px;
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+.cc-staff-dir-page__bar {
+  max-width: 960px;
+  margin: 0 auto 16px;
+}
+
+.cc-staff-dir-page__back {
+  display: inline-block;
+  font-size: 14px;
+  color: #2563eb;
+  text-decoration: none;
+  margin-bottom: 8px;
+}
+
+.cc-staff-dir-page__back:hover {
+  text-decoration: underline;
+}
+
+.cc-staff-dir-page__h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.cc-staff-dir-page__tabs {
+  max-width: 960px;
+  margin: 0 auto 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cc-staff-dir-page__tab {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+}
+
+.cc-staff-dir-page__tab--on {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.cc-staff-dir-page__main {
+  max-width: 960px;
+  margin: 0 auto;
+}

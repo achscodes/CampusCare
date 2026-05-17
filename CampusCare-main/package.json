@@ -1,0 +1,46 @@
+{
+  "name": "capstone",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "supabase:functions:serve": "npx supabase functions serve",
+    "supabase:functions:deploy": "npx supabase functions deploy create-staff-account",
+    "supabase:functions:deploy:password-change": "npx supabase functions deploy password-change-otp",
+    "supabase:functions:deploy:nte-notice": "npx supabase functions deploy send-discipline-nte-notice",
+    "supabase:functions:deploy:staff-login-otp": "npx supabase functions deploy staff-login-otp",
+    "supabase:functions:deploy:password-recovery": "npx supabase functions deploy password-recovery-otp"
+  },
+  "dependencies": {
+    "@react-pdf/renderer": "^4.5.1",
+    "@supabase/supabase-js": "^2.105.4",
+    "bootstrap": "^5.3.8",
+    "jspdf": "^4.2.1",
+    "lucide-react": "^0.487.0",
+    "react": "^19.2.0",
+    "react-bootstrap": "^2.10.10",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.13.0",
+    "recharts": "^2.15.0",
+    "speak-tts": "^2.0.8",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "vite": "^8.0.0-beta.13"
+  },
+  "overrides": {
+    "vite": "^8.0.0-beta.13"
+  }
+}

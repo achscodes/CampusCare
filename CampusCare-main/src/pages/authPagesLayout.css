@@ -1,0 +1,396 @@
+/* Auth split card — aligned with LandingPage palette (--lp-primary #2b76f5) */
+
+.auth-split-page {
+  --cc-primary: #2b76f5;
+  --cc-primary-hover: #1d65e0;
+  --cc-primary-dark: #2568e0;
+  --cc-primary-muted: #4f8ef7;
+  --cc-text: #0f172a;
+  --cc-muted: #64748b;
+  --cc-border: #e5e7eb;
+  --cc-page-bg: #f8fafc;
+
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+  margin: 0;
+  background: var(--cc-page-bg);
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+.auth-split-card {
+  flex: 1;
+  width: 100%;
+  max-width: none;
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(340px, 1fr);
+  background: #fff;
+  border-radius: 0;
+  overflow: hidden;
+  min-height: 100vh;
+  min-height: 100dvh;
+  box-shadow: none;
+}
+
+.auth-split-form-panel {
+  padding: clamp(28px, 4vh, 48px) clamp(28px, 4vw, 56px);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  border-right: 1px solid var(--cc-border);
+  background: #fff;
+}
+
+/* Sign-in: vertically center the title + form block between nav and card bottom */
+.auth-split-form-panel--balance .auth-split-form-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+}
+
+.auth-split-form-panel--balance .auth-split-form-body > .auth-split-title {
+  margin-top: 0;
+}
+
+@media (min-width: 901px) {
+  .auth-split-form-panel--scroll {
+    max-height: 100vh;
+    max-height: 100dvh;
+    overflow-y: auto;
+  }
+}
+
+.auth-split-form-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.auth-split-form-top {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-bottom: 4px;
+}
+
+.auth-split-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--cc-muted);
+  text-decoration: none;
+  margin: 0;
+  padding: 2px 0;
+}
+
+.auth-split-back:hover {
+  color: var(--cc-primary);
+}
+
+/* Reference: bold dark title + grey subtitle */
+.auth-split-title {
+  margin: 24px 0 10px;
+  font-size: clamp(1.625rem, 3vw, 2rem);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+  color: var(--cc-text);
+}
+
+.auth-split-subtitle {
+  margin: 0 0 24px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--cc-muted);
+  max-width: 26rem;
+}
+
+/* Right panel: solid brand blue (landing navbar family) */
+.auth-split-aside {
+  position: relative;
+  background: linear-gradient(180deg, var(--cc-primary) 0%, var(--cc-primary-dark) 100%);
+  color: #fff;
+  padding: clamp(24px, 4vh, 52px) clamp(20px, 3.5vw, 56px);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.auth-split-aside__glow {
+  position: absolute;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  filter: blur(70px);
+  top: -100px;
+  right: -60px;
+  pointer-events: none;
+}
+
+.auth-split-aside__title {
+  position: relative;
+  margin: 0 0 14px;
+  font-size: clamp(1.5rem, 2.8vw, 1.875rem);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  max-width: 22rem;
+}
+
+.auth-split-aside__subtitle {
+  position: relative;
+  margin: 0 0 20px;
+  font-size: 15px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.9);
+  max-width: 24rem;
+}
+
+.auth-split-aside__badges {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.auth-split-aside__badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.auth-split-aside__intro {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* Auto-scrolling carousel strip — full width of blue panel */
+.auth-split-aside__float-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 12px 0 8px;
+  width: 100%;
+}
+
+.auth-split-aside__marquee {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Form fields — thin borders, 8px radius */
+.auth-split-form-panel .form-group > label,
+.auth-split-form-panel .form-consent-legend {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--cc-text);
+}
+
+.auth-split-form-panel .form-input,
+.auth-split-form-panel .form-select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--cc-border);
+  border-radius: 8px;
+  background: #fff;
+  min-height: 48px;
+  padding: 12px 14px;
+  font-size: 15px;
+  color: var(--cc-text);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.auth-split-form-panel .form-input::placeholder {
+  color: #9ca3af;
+}
+
+.auth-split-form-panel .form-input:hover:not(:disabled),
+.auth-split-form-panel .form-select:hover:not(:disabled) {
+  border-color: #d1d5db;
+}
+
+.auth-split-form-panel .form-input:focus,
+.auth-split-form-panel .form-select:focus {
+  outline: none;
+  border-color: var(--cc-primary);
+  box-shadow: 0 0 0 3px rgba(43, 118, 245, 0.18);
+}
+
+.auth-split-form-panel .form-input-error,
+.auth-split-form-panel .form-select.form-input-error {
+  border-color: #f87171;
+}
+
+.auth-split-form-panel .form-input-error:focus,
+.auth-split-form-panel .form-select.form-input-error:focus {
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.15);
+}
+
+/* Eye-style visibility toggle (reference) */
+.auth-split-form-panel .cc-pw-toggle-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cc-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.auth-split-form-panel .cc-pw-toggle-btn:hover {
+  color: var(--cc-primary);
+  background: rgba(43, 118, 245, 0.08);
+}
+
+.auth-banner {
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin: 0 0 16px;
+}
+
+.auth-banner--success {
+  color: #0f766e;
+  background: #f0fdfa;
+  border: 1px solid #99f6e4;
+}
+
+.form-divider {
+  position: relative;
+  text-align: center;
+  margin: 10px 0 8px;
+}
+
+.form-divider::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--cc-border);
+}
+
+.form-divider span {
+  position: relative;
+  display: inline-block;
+  padding: 0 16px;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--cc-muted);
+}
+
+.create-account-button--with-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.auth-split-form-panel .form-inline-register {
+  text-align: center;
+  font-size: 14px;
+  color: var(--cc-muted);
+  margin: 6px 0 0;
+}
+
+.auth-split-form-panel .form-inline-register a {
+  color: var(--cc-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.auth-split-form-panel .form-inline-register a:hover {
+  text-decoration: underline;
+  color: var(--cc-primary-hover);
+}
+
+.auth-split-form-panel .link-text {
+  color: var(--cc-primary);
+}
+
+@media (max-width: 900px) {
+  .auth-split-page {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .auth-split-card {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .auth-split-form-panel {
+    min-height: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--cc-border);
+  }
+
+  .auth-split-aside {
+    min-height: auto;
+    padding: 28px 20px 36px;
+  }
+
+  .auth-split-aside__float-wrap {
+    flex: 0 1 auto;
+    align-items: stretch;
+    padding: 8px 0 0;
+  }
+
+  .auth-split-form-panel--balance .auth-split-form-body {
+    flex: 0 1 auto;
+    justify-content: flex-start;
+  }
+
+  .auth-split-form-panel--balance .auth-split-form-body > .auth-split-title {
+    margin-top: 16px;
+  }
+
+  .auth-split-form-panel {
+    padding: 28px 24px 24px;
+  }
+
+  .auth-split-title {
+    margin-top: 16px;
+  }
+}

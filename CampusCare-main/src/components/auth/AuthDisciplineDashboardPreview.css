@@ -1,0 +1,333 @@
+.auth-do-preview {
+  --do-bg: #f8fafc;
+  --do-border: #e2e8f0;
+  --do-text: #0f172a;
+  --do-muted: #64748b;
+  --do-primary: #155dfc;
+  --do-primary-hover: #1447e6;
+  --do-sidebar: #1e3a8a;
+  font-family: "Inter", sans-serif;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--do-text);
+  background: var(--do-bg);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.auth-do-preview__layout {
+  display: flex;
+  min-height: 220px;
+  max-height: min(340px, 40vh);
+}
+
+.auth-do-preview__sidebar {
+  width: 36px;
+  flex-shrink: 0;
+  background: var(--do-sidebar);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.auth-do-preview__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.auth-do-preview__header {
+  height: 36px;
+  background: #fff;
+  border-bottom: 1px solid var(--do-border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.auth-do-preview__notif {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  border: 1px solid var(--do-border);
+}
+
+.auth-do-preview__avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--do-sidebar);
+}
+
+.auth-do-preview__user {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.auth-do-preview__user-name {
+  font-weight: 500;
+  font-size: 10px;
+  color: var(--do-text);
+  white-space: nowrap;
+}
+
+.auth-do-preview__user-role {
+  font-size: 9px;
+  color: var(--do-muted);
+  white-space: nowrap;
+}
+
+.auth-do-preview__body {
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.auth-do-preview__title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.auth-do-preview__h2 {
+  margin: 0;
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 1.25;
+  color: var(--do-text);
+  letter-spacing: -0.02em;
+}
+
+.auth-do-preview__sub {
+  margin: 2px 0 0;
+  font-size: 9px;
+  color: var(--do-muted);
+  line-height: 1.2;
+}
+
+.auth-do-preview__btn-primary {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: var(--do-primary);
+  color: #fff;
+  font-weight: 500;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.auth-do-preview__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+
+.auth-do-preview__stat {
+  background: #fff;
+  border: 1px solid var(--do-border);
+  border-radius: 8px;
+  padding: 6px 7px;
+}
+
+.auth-do-preview__stat-val {
+  display: block;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.1;
+  margin-bottom: 2px;
+}
+
+.auth-do-preview__stat-val--total {
+  color: #0f172a;
+}
+
+.auth-do-preview__stat-val--new {
+  color: #9810fa;
+}
+
+.auth-do-preview__stat-val--ongoing {
+  color: #155dfc;
+}
+
+.auth-do-preview__stat-val--closed {
+  color: #00a63e;
+}
+
+.auth-do-preview__stat-lbl {
+  font-size: 8px;
+  color: var(--do-muted);
+  line-height: 1.2;
+}
+
+.auth-do-preview__panel {
+  background: #fff;
+  border: 1px solid var(--do-border);
+  border-radius: 8px;
+  overflow: hidden;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.auth-do-preview__panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 4px;
+}
+
+.auth-do-preview__panel-title {
+  font-weight: 500;
+  font-size: 10px;
+}
+
+.auth-do-preview__btn-export {
+  font-size: 8px;
+  font-weight: 500;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: #f8fafc;
+  border: 1px solid var(--do-border);
+  color: var(--do-text);
+}
+
+.auth-do-preview__notice {
+  margin: 0 8px 4px;
+  font-size: 8px;
+  color: #f54900;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.auth-do-preview__tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  background: #f1f5f9;
+  border-radius: 7px;
+  padding: 2px;
+  margin: 0 6px 4px;
+}
+
+.auth-do-preview__tab {
+  text-align: center;
+  font-size: 7px;
+  font-weight: 500;
+  padding: 3px 2px;
+  border-radius: 5px;
+  color: var(--do-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auth-do-preview__tab--on {
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.auth-do-preview__table-wrap {
+  padding: 0 6px 6px;
+  overflow: auto;
+}
+
+.auth-do-preview__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8px;
+}
+
+.auth-do-preview__table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--do-text);
+  padding: 4px 3px;
+  border-bottom: 1px solid var(--do-border);
+  white-space: nowrap;
+}
+
+.auth-do-preview__table td {
+  padding: 5px 3px;
+  border-bottom: 1px solid var(--do-border);
+  vertical-align: middle;
+}
+
+.auth-do-preview__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.auth-do-preview__mono {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.auth-do-preview__sn {
+  font-weight: 500;
+  font-size: 8px;
+  margin: 0;
+}
+
+.auth-do-preview__sid {
+  font-size: 7px;
+  color: var(--do-muted);
+  margin: 0;
+}
+
+.auth-do-preview__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-weight: 500;
+  font-size: 7px;
+  text-transform: lowercase;
+  border: 1px solid transparent;
+}
+
+.auth-do-preview__badge--ongoing {
+  background: #dbeafe;
+  color: #1447e6;
+}
+
+.auth-do-preview__badge--new {
+  background: #f3e8ff;
+  color: #8200db;
+}
+
+.auth-do-preview__badge--high {
+  background: #ffe2e2;
+  color: #c10007;
+}
+
+.auth-do-preview__badge--medium {
+  background: #ffedd4;
+  color: #ca3500;
+}
+
+@media (max-width: 900px) {
+  .auth-do-preview__layout {
+    max-height: 240px;
+  }
+
+  .auth-do-preview__stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
