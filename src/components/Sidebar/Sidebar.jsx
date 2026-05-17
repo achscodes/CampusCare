@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { LogOut } from "lucide-react";
+import { LogOut, X } from "lucide-react";
 import CCModal from "../common/CCModal";
 import { logoutCampusCare } from "../../utils/campusCareAuth";
 import { DO_NAV_ITEMS } from "./deanOfficeNav";
@@ -21,6 +21,8 @@ import "./Sidebar.css";
  * @param {string} [props.settingsPath] — when set (e.g. "/settings"), footer Settings uses Link instead of onSettingsClick
  * @param {string} [props.profileSettingsPath] — when set, single footer link "Profile & Settings" (takes precedence over profilePath/settingsPath)
  * @param {boolean} [props.hideProfileFooter] — when true, omit Profile / Settings / Profile & Settings (logout only)
+ * @param {boolean} [props.isOpen] — when false on narrow screens, hides the sidebar as a drawer
+ * @param {() => void} [props.onClose] — called when the drawer close button or overlay is clicked
  */
 function Sidebar({
   navItems,
@@ -34,6 +36,8 @@ function Sidebar({
   settingsPath,
   profileSettingsPath,
   hideProfileFooter,
+  isOpen = true,
+  onClose,
 }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -64,7 +68,11 @@ function Sidebar({
   };
 
   return (
-    <aside className="sidebar">
+    <>
+      {typeof onClose === "function" && isOpen ? (
+        <button type="button" className="sidebar-overlay" aria-label="Close sidebar" onClick={onClose} />
+      ) : null}
+      <aside className={`sidebar${isOpen ? " sidebar--open" : " sidebar--closed"}`}>
       <div className="sidebar-brand">
         <div className="sidebar-logo-fallback">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
@@ -87,6 +95,11 @@ function Sidebar({
             </>
           )}
         </div>
+        {typeof onClose === "function" ? (
+          <button type="button" className="sidebar-close-button" onClick={onClose} aria-label="Close sidebar">
+            <X size={18} strokeWidth={2} />
+          </button>
+        ) : null}
       </div>
 
       <div className="sidebar-institution">
@@ -241,7 +254,8 @@ function Sidebar({
           </div>
         </CCModal>
       )}
-    </aside>
+      </aside>
+    </>
   );
 }
 

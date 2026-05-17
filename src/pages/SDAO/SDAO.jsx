@@ -220,6 +220,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
   const navigate = useNavigate();
   const location = useLocation();
   const [activeNav, setActiveNav] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [activeModal, setActiveModal] = useState(null);
@@ -1604,9 +1605,14 @@ function SDAO({ embedDashboardOnly = false } = {}) {
             departmentTag="Scholarship Management"
             navItems={sdaoNavItems}
             activeNavId={activeNav}
-            onNavSelect={setActiveNav}
+            onNavSelect={(id) => {
+              setActiveNav(id);
+              setSidebarOpen(false);
+            }}
             onLogoutRequest={() => setLogoutOpen(true)}
             profileSettingsPath={PROFILE_SETTINGS_PATH_DEVELOPMENT}
+            isOpen={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
           />
           <div className="dashboard-main">
             <OfficeHeader
@@ -1614,6 +1620,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
               userRole={userRole}
               notifications={SDAO_NOTIFICATIONS}
               notificationSlot={<StaffNotificationBell />}
+              onMenuClick={() => setSidebarOpen(true)}
             />
             {sdaoPageMain}
           </div>

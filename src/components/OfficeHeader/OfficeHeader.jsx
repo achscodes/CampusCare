@@ -28,6 +28,7 @@ function OfficeHeader({
   avatar = defaultAvatar,
   pageTitle,
   pageSubtitle,
+  onMenuClick,
   /** When set, replaces the default notification bell (e.g. Discipline Office `DONotificationBell`). */
   notificationSlot = null,
 }) {
@@ -43,7 +44,9 @@ function OfficeHeader({
 
   return (
     <header
-      className={`dashboard-header${hasTitle ? " office-header--split office-header--portal" : ""}`}
+      className={`dashboard-header${hasTitle ? " office-header--split office-header--portal" : ""}${
+        typeof onMenuClick === "function" ? " office-header--menu" : ""
+      }`}
     >
       {hasTitle && (
         <div className="office-header-title-block">
@@ -51,6 +54,19 @@ function OfficeHeader({
           {pageSubtitle ? <p>{pageSubtitle}</p> : null}
         </div>
       )}
+
+      {typeof onMenuClick === "function" ? (
+        <button type="button" className="office-header-menu-button" onClick={onMenuClick} aria-label="Open sidebar">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path
+              d="M3.333 5h13.334M3.333 10h13.334M3.333 15h13.334"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      ) : null}
 
       <div className="office-header-actions">
         {notificationSlot ? (
