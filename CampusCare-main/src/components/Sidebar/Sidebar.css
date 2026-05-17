@@ -25,6 +25,10 @@
     /* Let the sidebar scroll independently if content is taller than viewport */
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
+    width: min(256px, 86vw);
+    height: 100dvh;
     box-shadow: none;
   }
 
@@ -66,6 +70,19 @@
 }
 
 @media (max-width: 1023px) {
+  .sidebar-brand {
+    padding: 20px 20px 14px;
+    gap: 10px;
+  }
+
+  .sidebar-institution {
+    padding: 14px 20px;
+  }
+
+  .sidebar-nav {
+    padding: 12px 0;
+  }
+
   .sidebar-hamburger {
     display: inline-flex;
     align-items: center;
@@ -270,7 +287,7 @@
 /* Larger tap targets on mobile */
 @media (max-width: 1023px) {
   .sidebar-nav-item {
-    padding: 11px 24px;
+    padding: 11px 20px;
     font-size: 15px;
   }
 }
@@ -284,6 +301,12 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+@media (max-width: 1023px) {
+  .sidebar-footer {
+    padding: 10px 0 14px;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

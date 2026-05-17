@@ -51,6 +51,7 @@ export default function AdminPage({ officeKey }) {
     officeKey === "discipline" ? "do_reports" : officeKey === "development" ? "sdao_reports" : "reports",
   );
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (!isDualOfficeShell) return;
@@ -223,7 +224,11 @@ export default function AdminPage({ officeKey }) {
 
   return (
     <div className={layoutClass}>
-      <Sidebar {...sidebarProps} />
+      <Sidebar
+        {...sidebarProps}
+        mobileOpen={mobileSidebarOpen}
+        onMobileClose={() => setMobileSidebarOpen(false)}
+      />
 
       <div className="dashboard-main">
         <OfficeHeader
@@ -235,6 +240,7 @@ export default function AdminPage({ officeKey }) {
               <img src={session.profileAvatarDataUrl} alt="" className="header-avatar-img" />
             ) : undefined
           }
+          onMenuClick={() => setMobileSidebarOpen(true)}
         />
 
         <main className={mainContentClass}>{renderMain()}</main>

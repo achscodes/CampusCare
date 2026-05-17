@@ -2620,12 +2620,6 @@
     margin-left: 0;
   }
 
-  .health-services-layout .sidebar {
-    position: relative;
-    width: 100%;
-    min-height: auto;
-  }
-
   .hs-stat-row,
   .hs-stat-row-4,
   .hs-doc-stat-row,
@@ -3918,6 +3912,554 @@
     width: 100%;
     max-width: 200px;
     margin-left: auto;
+  }
+}
+
+/* ───── COMPREHENSIVE MOBILE RESPONSIVENESS ───── */
+
+/* Tablet (768px and below) */
+@media (max-width: 768px) {
+  .hs-tab-page-title {
+    font-size: 24px;
+  }
+
+  .hs-nurse-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .hs-nurse-kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hs-nurse-queue-layout,
+  .hs-phys-queue-layout,
+  .hs-phys-main-grid,
+  .hs-phys-records-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-phys-vitals-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hs-hs-stat-row,
+  .hs-stat-row-4,
+  .hs-kpi-row-3,
+  .hs-ref-stat-row,
+  .hs-hs-doc-stat-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hs-dent-kpi-row {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-nurse-serving-box {
+    font-size: 56px;
+  }
+
+  .hs-filter-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hs-filter-card .search-bar-wrapper,
+  .hs-filter-card .hs-select {
+    width: 100%;
+  }
+
+  .hs-inter-office-header-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .hs-inter-office-header-actions button {
+    width: 100%;
+  }
+
+  .hs-appt-actions {
+    flex-direction: column;
+  }
+
+  .hs-appt-actions button {
+    width: 100%;
+  }
+
+  .hs-search {
+    max-width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .hs-tab-page-heading .page-title-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hs-tab-page-heading .page-title-row .btn-new-case {
+    width: 100%;
+  }
+
+  .hs-reports-toolbar-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hs-reports-period-wrap,
+  .hs-reports-select {
+    width: 100%;
+  }
+
+  .hs-reports-btn-pdf,
+  .hs-reports-btn-outline {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .hs-consult-row {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-hs-form-grid,
+  .hs-modal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-reports-charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-chart-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Small Tablet / Large Phone (640px and below) */
+@media (max-width: 640px) {
+  .hs-tab-page-title {
+    font-size: 20px;
+    margin-bottom: 8px;
+  }
+
+  .hs-tab-page-heading {
+    padding-bottom: 16px;
+    margin-bottom: 4px;
+  }
+
+  .hs-nurse-kpi-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .hs-nurse-now-serving .num {
+    font-size: 42px;
+  }
+
+  .hs-nurse-quick-grid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .hs-nurse-quick-grid .hs-btn-secondary {
+    height: 40px;
+  }
+
+  .hs-stat-row,
+  .hs-stat-row-4,
+  .hs-kpi-row-3,
+  .hs-ref-stat-row,
+  .hs-doc-stat-row {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-hs-stat-card {
+    padding: 16px;
+  }
+
+  .hs-stat-value {
+    font-size: 24px;
+  }
+
+  .hs-reports-kpi-value {
+    font-size: 24px;
+  }
+
+  .hs-urgent-card {
+    padding: 16px;
+  }
+
+  .hs-recent-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .hs-recent-actions {
+    width: 100%;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .hs-reports-kpi-row,
+  .hs-reports-kpi-row--physician,
+  .hs-reports-kpi-row--hso3 {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-breakdown-card {
+    padding: 14px;
+  }
+
+  .hs-breakdown-value {
+    font-size: 22px;
+  }
+
+  .hs-kpi-value {
+    font-size: 22px;
+  }
+
+  .hs-drawer {
+    width: 100% !important;
+  }
+
+  .hs-cc-modal.cc-modal--wide {
+    width: calc(100vw - 24px) !important;
+  }
+
+  .hs-btn-primary,
+  .hs-btn-secondary,
+  .hs-btn-success {
+    width: 100%;
+    justify-content: center;
+    height: 40px;
+  }
+
+  .hs-nurse-serving-box {
+    font-size: 48px;
+    min-height: 100px;
+  }
+
+  .hs-phys-active-q {
+    font-size: 36px;
+  }
+
+  .hs-dent-patient-name {
+    font-size: 18px;
+  }
+
+  .hs-nursing-quick-title {
+    font-size: 11px;
+  }
+
+  .hs-reports-breakdown-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-dent-queue-row {
+    grid-template-columns: 80px 1fr;
+    min-height: 56px;
+  }
+
+  .hs-dent-queue-wait {
+    grid-column: 1 / -1;
+    font-size: 11px;
+  }
+
+  .hs-dent-fu-row {
+    grid-template-columns: 56px 1fr;
+  }
+
+  .hs-dent-fu-datebox {
+    min-width: 48px;
+  }
+
+  .hs-dent-fu-mon {
+    font-size: 9px;
+  }
+
+  .hs-dent-fu-datebox strong {
+    font-size: 18px;
+  }
+
+  .hs-dent-appt-row {
+    grid-template-columns: 64px 1fr;
+    min-height: 48px;
+  }
+
+  .hs-dent-appt-time {
+    grid-column: 1;
+  }
+
+  .hs-dent-appt-row > :last-child {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .hs-phys-vitals-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Mobile (480px and below) */
+@media (max-width: 480px) {
+  body {
+    font-size: 13px;
+  }
+
+  .hs-tab-page-title {
+    font-size: 18px;
+  }
+
+  .hs-tab-page-subtitle {
+    font-size: 12px;
+  }
+
+  .hs-tabs {
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .hs-tab {
+    padding: 8px 0;
+    font-size: 12px;
+  }
+
+  .hs-nurse-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .hs-nurse-now-serving .num {
+    font-size: 36px;
+  }
+
+  .hs-stat-card {
+    padding: 14px;
+  }
+
+  .hs-stat-label {
+    font-size: 12px;
+  }
+
+  .hs-stat-value {
+    font-size: 20px;
+  }
+
+  .hs-nurse-serving-box {
+    font-size: 40px;
+    min-height: 88px;
+  }
+
+  .hs-nurse-serving-title {
+    font-size: 24px;
+  }
+
+  .hs-phys-active-q {
+    font-size: 32px;
+  }
+
+  .hs-dent-patient-name {
+    font-size: 16px;
+  }
+
+  .hs-dent-queue-row {
+    grid-template-columns: 70px 1fr;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .hs-dent-queue-ticket--wide strong {
+    font-size: 16px;
+  }
+
+  .hs-dent-queue-ticket strong {
+    font-size: 14px;
+  }
+
+  .hs-dent-queue-info strong {
+    font-size: 13px;
+  }
+
+  .hs-filter-card {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .hs-hs-select,
+  .hs-control,
+  .hs-filter-input {
+    height: 32px;
+    font-size: 13px;
+  }
+
+  .hs-reports-kpi-value {
+    font-size: 20px;
+  }
+
+  .hs-kpi-value,
+  .hs-breakdown-value {
+    font-size: 18px;
+  }
+
+  .hs-hs-settings-card {
+    padding: 14px;
+    max-width: 100%;
+  }
+
+  .hs-modal-field input,
+  .hs-modal-field select,
+  .hs-modal-field textarea {
+    font-size: 13px;
+    padding: 6px 8px;
+  }
+
+  .hs-hs-modal-field label {
+    font-size: 11px;
+  }
+
+  .hs-btn-primary,
+  .hs-btn-secondary,
+  .hs-btn-success {
+    height: 36px;
+    padding: 0 12px;
+    font-size: 11px;
+  }
+
+  .hs-appt-card {
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .hs-appt-main h4 {
+    font-size: 13px;
+  }
+
+  .hs-appt-line {
+    font-size: 12px;
+  }
+
+  .hs-hs-form-grid,
+  .hs-modal-grid,
+  .hs-phys-vitals-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .hs-chart-panel {
+    padding: 16px;
+  }
+
+  .hs-chart-panel h3 {
+    font-size: 14px;
+  }
+
+  .hs-dent-fu-datebox {
+    min-width: 44px;
+    padding: 6px 8px;
+  }
+
+  .hs-dent-fu-datebox strong {
+    font-size: 16px;
+  }
+
+  .hs-dent-fu-mon {
+    font-size: 8px;
+  }
+
+  .hs-dent-appt-row {
+    grid-template-columns: 56px 1fr;
+    padding: 10px 12px;
+  }
+
+  .hs-dent-appt-time {
+    font-size: 12px;
+  }
+
+  .hs-dent-quick-row {
+    padding: 12px 16px;
+    gap: 10px;
+    font-size: 13px;
+  }
+
+  .hs-dent-quick-chevron {
+    width: 20px;
+    height: 20px;
+  }
+
+  .hs-drawer {
+    width: 100% !important;
+  }
+
+  .hs-cc-modal.cc-modal--wide {
+    width: calc(100vw - 16px) !important;
+  }
+
+  .hs-hs-cc-modal .cc-modal-body {
+    padding: 12px 16px;
+  }
+
+  .hs-modal-footer,
+  .hs-drawer .hs-modal-footer {
+    padding: 12px;
+    gap: 6px;
+  }
+
+  .hs-phys-tab-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .hs-phys-tab-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .hs-phys-kpi-row,
+  .hs-phys-cert-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .hs-filter-card .search-bar-wrapper,
+  .hs-filter-card .hs-select {
+    width: 100%;
+  }
+
+  .hs-urgent-item {
+    padding: 8px 10px;
+  }
+
+  .hs-urgent-name {
+    font-size: 13px;
+  }
+
+  .hs-urgent-desc {
+    font-size: 12px;
+  }
+
+  .hs-empty-state {
+    padding: 12px 10px;
+    min-height: 88px;
+    gap: 6px;
+  }
+
+  .hs-empty-state-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .hs-empty-state-title {
+    font-size: 13px;
+  }
+
+  .hs-empty-state-description {
+    font-size: 12px;
   }
 }
 

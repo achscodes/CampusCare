@@ -617,3 +617,155 @@
   color: #334155;
   font-weight: 500;
 }
+
+  /* ───── COMPREHENSIVE MOBILE RESPONSIVENESS ───── */
+
+  /* Tablet (768px and below) */
+  @media (max-width: 768px) {
+    .hsq-display {
+      padding: clamp(10px, 1.2vw, 18px);
+    }
+
+    .hsq-display__header {
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .hsq-display__brand {
+      width: 100%;
+      gap: 10px;
+    }
+
+    .hsq-display__title {
+      font-size: 20px;
+    }
+
+    .hsq-display__header-right {
+      width: 100%;
+      justify-content: flex-start;
+      gap: 8px;
+    }
+
+    .hsq-display__clock {
+      min-width: auto;
+    }
+
+    .hsq-display__grid {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .hsq-station {
+      min-height: 360px;
+      padding: 14px;
+    }
+
+    .hsq-station__title {
+      font-size: 18px;
+    }
+
+    .hsq-station__row {
+      grid-template-columns: 60px 1fr 52px;
+      gap: 8px;
+    }
+
+    .hsq-display__recent-grid {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px 12px;
+    }
+  }
+
+  /* Mobile (640px and below) */
+  @media (max-width: 640px) {
+    .hsq-display {
+      padding: 10px;
+    }
+
+    .hsq-display__header {
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .hsq-display__logo-img {
+      width: 40px;
+      height: 40px;
+    }
+
+    .hsq-display__title {
+      font-size: 18px;
+    }
+
+    .hsq-display__time {
+      font-size: 18px;
+    }
+
+    .hsq-display__grid {
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .hsq-station {
+      min-height: 320px;
+      padding: 12px;
+    }
+
+    .hsq-station__title {
+      font-size: 16px;
+    }
+
+    .hsq-station__now-number {
+      font-size: 32px;
+    }
+
+    .hsq-station__row {
+      grid-template-columns: 50px 1fr 44px;
+      gap: 6px;
+      padding: 6px 8px;
+    }
+
+    .hsq-station__ticket-num {
+      font-size: 14px;
+    }
+
+    .hsq-display__recent-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* Small Mobile (480px and below) */
+  @media (max-width: 480px) {
+    .hsq-display {
+      padding: 8px;
+    }
+
+    .hsq-display__title {
+      font-size: 16px;
+    }
+
+    .hsq-display__time {
+      font-size: 16px;
+    }
+
+    .hsq-station {
+      min-height: 300px;
+      padding: 10px;
+    }
+
+    .hsq-station__title {
+      font-size: 14px;
+    }
+
+    .hsq-station__now-number {
+      font-size: 28px;
+    }
+
+    .hsq-station__row {
+      grid-template-columns: 44px 1fr 40px;
+      gap: 4px;
+    }
+
+    .hsq-station__ticket-num {
+      font-size: 12px;
+    }
+  }

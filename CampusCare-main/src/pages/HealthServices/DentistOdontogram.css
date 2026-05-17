@@ -222,3 +222,196 @@
   }
 }
 
+/* Tablet (768px and below) */
+@media (max-width: 768px) {
+  .hs-odont-board {
+    padding: 20px;
+  }
+
+  .hs-odont-title {
+    font-size: 18px;
+  }
+
+  .hs-odont-arch-row {
+    grid-template-columns: 14px 1fr 1px 1fr 14px;
+    gap: 4px;
+    margin-bottom: 20px;
+  }
+
+  .hs-odont-teeth {
+    gap: 3px;
+  }
+
+  .hs-odont-tooth {
+    width: 36px;
+    height: 36px;
+  }
+
+  .hs-odont-tooth-shape {
+    width: 32px;
+    height: 32px;
+  }
+
+  .hs-odont-tooth-num {
+    font-size: 11px;
+  }
+
+  .hs-odont-legend {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .hs-odont-legend-item {
+    font-size: 12px;
+    gap: 6px;
+  }
+
+  .hs-odont-legend-swatch {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+/* Mobile (640px and below) */
+@media (max-width: 640px) {
+  .hs-odont-board {
+    padding: 16px;
+    border-radius: 10px;
+  }
+
+  .hs-odont-title {
+    font-size: 16px;
+    margin-bottom: 12px;
+  }
+
+  .hs-odont-arch {
+    margin-bottom: 8px;
+  }
+
+  .hs-odont-arch-label {
+    font-size: 12px;
+  }
+
+  .hs-odont-arch-row {
+    grid-template-columns: 12px 1fr 1px 1fr 12px;
+    gap: 2px;
+    margin-bottom: 12px;
+  }
+
+  .hs-odont-teeth {
+    gap: 2px;
+  }
+
+  .hs-odont-tooth {
+    width: 32px;
+    height: 32px;
+  }
+
+  .hs-odont-tooth-shape {
+    width: 28px;
+    height: 28px;
+    border-width: 1px;
+  }
+
+  .hs-odont-tooth-num {
+    font-size: 10px;
+  }
+
+  .hs-odont-midline {
+    width: 1px;
+  }
+
+  .hs-odont-legend {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .hs-odont-legend-item {
+    font-size: 11px;
+    gap: 5px;
+  }
+
+  .hs-odont-legend-swatch {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+/* Small Mobile (480px and below) */
+@media (max-width: 480px) {
+  .hs-odont-board {
+    padding: 12px;
+  }
+
+  .hs-odont-title {
+    font-size: 14px;
+    margin-bottom: 10px;
+  }
+
+  .hs-odont-arch {
+    margin-bottom: 6px;
+  }
+
+  .hs-odont-arch-label {
+    font-size: 11px;
+    padding: 0 4px;
+  }
+
+  .hs-odont-arch-row {
+    grid-template-columns: 10px 1fr 1px 1fr 10px;
+    gap: 1px;
+    margin-bottom: 10px;
+  }
+
+  .hs-odont-teeth {
+    gap: 1px;
+  }
+
+  .hs-odont-tooth {
+    width: 28px;
+    height: 28px;
+  }
+
+  .hs-odont-tooth-shape {
+    width: 24px;
+    height: 24px;
+    border-width: 1px;
+  }
+
+  .hs-odont-tooth-num {
+    font-size: 8px;
+  }
+
+  .hs-odont-midline {
+    width: 0.5px;
+  }
+
+  .hs-odont-legend {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .hs-odont-legend-item {
+    font-size: 10px;
+    gap: 4px;
+  }
+
+  .hs-odont-legend-swatch {
+    width: 14px;
+    height: 14px;
+    border-width: 0.5px;
+  }
+
+  .hs-odont-legend-swatch--filled {
+    border-width: 0.5px;
+  }
+
+  .hs-odont-legend-swatch--pending {
+    border-width: 0.5px;
+  }
+
+  .hs-odont-legend-swatch--removed {
+    border-width: 0.5px;
+  }
+}
+

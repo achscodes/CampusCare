@@ -656,15 +656,496 @@
     margin-left: 0;
   }
 
-  .sdao-layout .sidebar {
-    position: relative;
-    width: 100%;
-    min-height: auto;
-  }
-
   .sdao-kpi-row,
   .sdao-type-stat-row {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ───── COMPREHENSIVE MOBILE RESPONSIVENESS ───── */
+
+/* Tablet (768px and below) */
+@media (max-width: 768px) {
+  .sdao-layout .dashboard-content.sdao-page {
+    padding: 18px 14px 32px;
+    gap: 18px;
+  }
+
+  .sdao-page-header {
+    flex-direction: column;
+    gap: 12px;
+    padding-bottom: 16px;
+  }
+
+  .sdao-page-header-title {
+    font-size: 24px;
+  }
+
+  .sdao-page-header-sub {
+    font-size: 14px;
+  }
+
+  .sdao-page-header-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .sdao-page-header-actions button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .sdao-kpi-row,
+  .sdao-type-stat-row,
+  .sdao-doc-stat-row,
+  .sdao-beneficiary-summary-row,
+  .sdao-metrics-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sdao-mid-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sdao-bar-row {
+    grid-template-columns: 120px 1fr 80px;
+    gap: 10px;
+  }
+
+  .sdao-bar-label {
+    font-size: 12px;
+  }
+
+  .sdao-app-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .sdao-beneficiary-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .sdao-beneficiary-col--actions {
+    justify-content: flex-start;
+  }
+
+  .sdao-profile-grid,
+  .sdao-ref-student-grid,
+  .sdao-ref-info-grid,
+  .sdao-sdao-doc-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sdao-ref-span-2 {
+    grid-column: span 1;
+  }
+
+  .sdao-filter-card {
+    flex-direction: column;
+  }
+
+  .sdao-search-bar-full,
+  .sdao-hs-select {
+    width: 100%;
+  }
+
+  .sdao-section-toolbar {
+    flex-direction: column;
+  }
+
+  .sdao-btn-primary-lg,
+  .sdao-btn-export {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .hs-filter-card .search-bar-wrapper {
+    width: 100%;
+    min-width: auto;
+  }
+}
+
+/* Small Tablet / Large Phone (640px and below) */
+@media (max-width: 640px) {
+  .sdao-page-header-title {
+    font-size: 20px;
+  }
+
+  .sdao-kpi-row,
+  .sdao-type-stat-row,
+  .sdao-doc-stat-row,
+  .sdao-metrics-row,
+  .sdao-beneficiary-summary-row {
+    grid-template-columns: 1fr;
+  }
+
+  .sdao-kpi-stat,
+  .sdao-type-stat,
+  .sdao-doc-stat {
+    padding: 16px;
+  }
+
+  .sdao-kpi-stat-value {
+    font-size: 24px;
+  }
+
+  .sdao-page-header-actions {
+    width: 100%;
+  }
+
+  .sdao-page-header-actions button {
+    width: 100%;
+    height: 40px;
+  }
+
+  .sdao-btn-primary-lg,
+  .sdao-btn-export,
+  .sdao-btn-purple {
+    width: 100%;
+    justify-content: center;
+    height: 40px;
+  }
+
+  .sdao-beneficiary-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+
+  .sdao-beneficiary-name {
+    font-size: 14px;
+  }
+
+  .sdao-section-toolbar {
+    width: 100%;
+  }
+
+  .sdao-toolbar-right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .sdao-search-filter-row {
+    flex-direction: column;
+  }
+
+  .sdao-search-bar-full,
+  .sdao-btn-filter {
+    width: 100%;
+  }
+
+  .sdao-bar-row {
+    grid-template-columns: 100px 1fr;
+    gap: 8px;
+  }
+
+  .sdao-bar-meta {
+    display: none;
+  }
+
+  .sdao-figma-modal {
+    width: calc(100vw - 24px) !important;
+  }
+
+  .sdao-figma-modal-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .sdao-figma-modal-title {
+    font-size: 16px;
+  }
+
+  .sdao-profile-hero-name {
+    font-size: 16px;
+  }
+
+  .sdao-profile-grid--3 {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .sdao-scholarship-type-value {
+    font-size: 14px;
+  }
+
+  .sdao-docs-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sdao-ref-detail-head {
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px 18px 0;
+  }
+
+  .sdao-ref-id-pill {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .sdao-timeline {
+    padding-left: 0;
+    border-left: none;
+    border-top: 2px solid #e5e7eb;
+    padding-top: 16px;
+  }
+
+  .sdao-timeline-item {
+    position: relative;
+    padding: 0 0 16px 20px;
+  }
+
+  .sdao-timeline-dot {
+    left: 0;
+    top: -16px;
+  }
+}
+
+/* Mobile (480px and below) */
+@media (max-width: 480px) {
+  body {
+    font-size: 13px;
+  }
+
+  .sdao-layout .dashboard-content.sdao-page {
+    padding: 14px 12px 24px;
+    gap: 14px;
+  }
+
+  .sdao-page-header {
+    gap: 10px;
+    padding-bottom: 12px;
+  }
+
+  .sdao-page-header-title {
+    font-size: 18px;
+  }
+
+  .sdao-page-header-sub {
+    font-size: 12px;
+  }
+
+  .sdao-page-header-actions {
+    width: 100%;
+    gap: 6px;
+  }
+
+  .sdao-page-header-actions button {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    padding: 0 8px;
+    height: 36px;
+  }
+
+  .sdao-kpi-stat,
+  .sdao-type-stat,
+  .sdao-doc-stat,
+  .sdao-metric-card {
+    padding: 14px;
+  }
+
+  .sdao-kpi-stat-value,
+  .sdao-type-stat-value,
+  .sdao-metric-value {
+    font-size: 20px;
+  }
+
+  .sdao-kpi-stat-label,
+  .sdao-type-stat-label {
+    font-size: 12px;
+    margin-right: 0;
+  }
+
+  .sdao-beneficiary-summary-value {
+    font-size: 18px;
+  }
+
+  .sdao-beneficiary-row {
+    padding: 12px 14px;
+  }
+
+  .sdao-beneficiary-name {
+    font-size: 13px;
+  }
+
+  .sdao-beneficiary-id {
+    font-size: 11px;
+  }
+
+  .sdao-btn-outline,
+  .sdao-btn-solid,
+  .sdao-btn-primary-lg {
+    min-height: 36px;
+    font-size: 12px;
+    padding: 0 12px;
+  }
+
+  .sdao-btn-outline {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .sdao-search-bar-full {
+    width: 100%;
+  }
+
+  .sdao-hs-select,
+  .sdao-btn-filter {
+    width: 100%;
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .sdao-bar-label {
+    font-size: 11px;
+  }
+
+  .sdao-profile-hero {
+    padding: 12px 14px;
+  }
+
+  .sdao-profile-hero-name {
+    font-size: 15px;
+  }
+
+  .sdao-profile-hero-id {
+    font-size: 12px;
+  }
+
+  .sdao-profile-grid,
+  .sdao-profile-grid--3,
+  .sdao-ref-student-grid,
+  .sdao-ref-info-grid {
+    grid-template-columns: 1fr;
+    gap: 10px 16px;
+  }
+
+  .sdao-dl-label {
+    font-size: 10px;
+  }
+
+  .sdao-dl-value {
+    font-size: 13px;
+  }
+
+  .sdao-docs-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .sdao-doc-tag {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .sdao-figma-modal {
+    width: calc(100vw - 16px) !important;
+  }
+
+  .sdao-figma-modal-head {
+    gap: 10px;
+    padding: 16px 16px 0;
+  }
+
+  .sdao-figma-modal-icon {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+  }
+
+  .sdao-figma-modal-title {
+    font-size: 15px;
+  }
+
+  .sdao-figma-modal-body {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  .sdao-scholarship-badge {
+    padding: 3px 8px;
+    font-size: 11px;
+  }
+
+  .sdao-pill {
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+
+  .sdao-form-section-title {
+    font-size: 13px;
+    margin: 12px 0 10px 0;
+  }
+
+  .sdao-upload-zone {
+    padding: 16px 12px;
+    font-size: 12px;
+  }
+
+  .sdao-info-callout {
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .sdao-info-callout-title {
+    font-size: 13px;
+  }
+
+  .sdao-info-callout-list {
+    font-size: 12px;
+  }
+
+  .sdao-doc-detail-footer {
+    flex-direction: column;
+  }
+
+  .sdao-ref-attach-pill {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+
+  .sdao-timeline-title {
+    font-size: 13px;
+  }
+
+  .sdao-timeline-meta {
+    font-size: 11px;
+  }
+
+  .sdao-dl-label {
+    margin-bottom: 3px;
+  }
+
+  .hs-filter-card {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .hs-filter-card .search-bar-wrapper {
+    width: 100%;
+    min-width: auto;
+  }
+
+  .hs-select,
+  .hs-control,
+  .hs-filter-input {
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .cases-table {
+    font-size: 12px;
+  }
+
+  .cases-table thead th {
+    padding: 10px 8px;
+    font-size: 10px;
+  }
+
+  .cases-table tbody tr td {
+    padding: 10px 8px;
   }
 }
 
