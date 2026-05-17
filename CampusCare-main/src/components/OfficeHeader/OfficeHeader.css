@@ -134,3 +134,25 @@
   text-transform: uppercase;
   color: #64748b;
 }
+
+/* Place the mobile hamburger on the top-left of the header */
+@media (max-width: 1023px) {
+  .dashboard-header {
+    position: sticky; /* allow absolute children to position relative to header */
+    padding-left: 64px; /* reserve space for the hamburger on all headers */
+  }
+
+  .sidebar-hamburger {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    z-index: 60;
+    background: transparent;
+    color: #334155;
+  }
+
+  /* legacy selector kept for clarity */
+  .dashboard-header.office-header--split {
+    padding-left: 64px;
+  }
+}

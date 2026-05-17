@@ -37,6 +37,8 @@ function OfficeHeader({
   notificationSlot = null,
   /** Optional; defaults to session email when available. */
   userEmail = null,
+  /** Optional; called when mobile menu/hamburger is clicked */
+  onMenuClick = undefined,
 }) {
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [items, setItems] = useState(notifications);
@@ -86,6 +88,33 @@ function OfficeHeader({
     <header
       className={`dashboard-header${hasTitle ? " office-header--split office-header--portal" : ""}`}
     >
+          <button
+            type="button"
+            className="sidebar-hamburger"
+            aria-label="Open navigation menu"
+            onClick={() => {
+              if (typeof onMenuClick === "function") {
+                onMenuClick();
+                return;
+              }
+              try {
+                const aside = document.querySelector(".sidebar");
+                const overlay = document.querySelector(".sidebar-overlay");
+                const isOpen = aside && aside.classList.contains("sidebar--open");
+                if (aside) aside.classList.toggle("sidebar--open");
+                if (overlay) overlay.classList.toggle("sidebar-overlay--visible");
+                document.body.style.overflow = isOpen ? "" : "hidden";
+              } catch (err) {
+                // silent fallback
+              }
+            }}
+          >
+            <svg width="18" height="14" viewBox="0 0 18 14" fill="none" aria-hidden>
+              <rect y="1" width="18" height="2" rx="1" fill="#334155" />
+              <rect y="6" width="18" height="2" rx="1" fill="#334155" />
+              <rect y="11" width="18" height="2" rx="1" fill="#334155" />
+            </svg>
+          </button>
       {hasTitle && (
         <div className="office-header-title-block">
           <h1>{pageTitle}</h1>

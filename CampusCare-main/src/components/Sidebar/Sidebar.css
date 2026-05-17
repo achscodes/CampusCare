@@ -1,3 +1,9 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   SIDEBAR — Desktop-first, mobile-responsive
+   Desktop  : fixed 256 px sidebar, always visible
+   ≤1023 px : sidebar hidden off-screen, slides in when .sidebar--open
+   ═══════════════════════════════════════════════════════════════════════ */
+
 .sidebar {
   width: 256px;
   min-height: 100vh;
@@ -7,10 +13,118 @@
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 100;
+  z-index: 200;
+  /* Smooth slide on mobile */
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Brand */
+/* ── Mobile: sidebar starts off-screen ─────────────────────────────── */
+@media (max-width: 1023px) {
+  .sidebar {
+    transform: translateX(-100%);
+    /* Let the sidebar scroll independently if content is taller than viewport */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    box-shadow: none;
+  }
+
+  .sidebar.sidebar--open {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(15, 23, 42, 0.35);
+  }
+}
+
+/* ── Overlay / backdrop (mobile only) ──────────────────────────────── */
+.sidebar-overlay {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 199;
+    background: rgba(15, 23, 42, 0.45);
+    /* Fade in/out */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+
+  .sidebar-overlay.sidebar-overlay--visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   HAMBURGER BUTTON  — only appears on mobile inside the top bar
+   ═══════════════════════════════════════════════════════════════════════ */
+.sidebar-hamburger {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .sidebar-hamburger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: #334155;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+
+  .sidebar-hamburger:hover {
+    background: #f1f5f9;
+  }
+
+  .sidebar-hamburger:focus-visible {
+    outline: 2px solid #155dfc;
+    outline-offset: 2px;
+  }
+}
+
+/* ── Close (×) button inside sidebar header — mobile only ─────────── */
+.sidebar-close-btn {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .sidebar-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.12);
+    color: white;
+    cursor: pointer;
+    flex-shrink: 0;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0;
+    margin-left: auto;
+    transition: background 0.15s;
+  }
+
+  .sidebar-close-btn:hover {
+    background: rgba(255, 255, 255, 0.22);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   BRAND
+   ═══════════════════════════════════════════════════════════════════════ */
 .sidebar-brand {
   display: flex;
   align-items: center;
@@ -73,7 +187,9 @@
   letter-spacing: -0.02em;
 }
 
-/* Institution */
+/* ═══════════════════════════════════════════════════════════════════════
+   INSTITUTION
+   ═══════════════════════════════════════════════════════════════════════ */
 .sidebar-institution {
   padding: 16px 24px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -100,7 +216,9 @@
   margin: 0;
 }
 
-/* Navigation */
+/* ═══════════════════════════════════════════════════════════════════════
+   NAVIGATION
+   ═══════════════════════════════════════════════════════════════════════ */
 .sidebar-nav {
   flex: 1;
   min-height: 0;
@@ -149,7 +267,17 @@
   height: 16px;
 }
 
-/* Bottom actions */
+/* Larger tap targets on mobile */
+@media (max-width: 1023px) {
+  .sidebar-nav-item {
+    padding: 11px 24px;
+    font-size: 15px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FOOTER
+   ═══════════════════════════════════════════════════════════════════════ */
 .sidebar-footer {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   padding: 12px 0;
@@ -158,7 +286,9 @@
   gap: 2px;
 }
 
-/* Logout confirmation — balanced layout inside .cc-modal */
+/* ═══════════════════════════════════════════════════════════════════════
+   LOGOUT MODAL
+   ═══════════════════════════════════════════════════════════════════════ */
 .sidebar .cc-modal:has(.sidebar-logout-modal) {
   width: min(400px, calc(100vw - 32px));
 }

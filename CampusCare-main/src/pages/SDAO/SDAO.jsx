@@ -15,7 +15,6 @@ import {
   Info,
   LayoutDashboard,
   Lock,
-  LogOut,
   Plus,
   Send,
   Settings2,
@@ -30,7 +29,6 @@ import CCModal from "../../components/common/CCModal";
 import { useDONotificationsRealtime } from "../../hooks/useDONotificationsRealtime";
 import { useLiveCampusCareSession } from "../../hooks/useLiveCampusCareSession";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
-import { logoutCampusCare } from "../../utils/campusCareAuth";
 import { canCreateDocumentRequest, labelForOfficeKey } from "../../constants/documentRequestAccess";
 import { isStudentLikeCampusRole } from "../../utils/officeSession";
 import { NU_PROGRAM_OPTIONS } from "../../data/nuPrograms";
@@ -61,6 +59,10 @@ import {
   normalizeReferralStatus,
 } from "../../utils/interOfficeWorkflow";
 import "../HealthServices/HealthServices.css";
+
+// ─── Removed: `LogOut` icon import — was only used in the duplicate logout
+//              modal that has been removed. Sidebar.jsx owns logout UX now.
+// ─── Removed: `logoutCampusCare` import — same reason.
 
 const iconProps = { size: 16, strokeWidth: 1.5 };
 
@@ -215,7 +217,12 @@ function SDAO({ embedDashboardOnly = false } = {}) {
   const location = useLocation();
   const [activeNav, setActiveNav] = useState("dashboard");
   const [search, setSearch] = useState("");
-  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // ─── Removed: `logoutOpen` and `setLogoutOpen` state.
+  //     The logout confirmation modal is now handled entirely inside Sidebar.jsx.
+  //     Sidebar renders its own CCModal when `onLogoutRequest` prop is omitted.
+
   const [activeModal, setActiveModal] = useState(null);
   const [selectedBeneficiary, setSelectedBeneficiary] = useState(null);
   const [selectedApplication, setSelectedApplication] = useState(null);
@@ -680,11 +687,8 @@ function SDAO({ embedDashboardOnly = false } = {}) {
     setActiveModal("referralDetails");
   };
 
-  const confirmLogout = async () => {
-    await logoutCampusCare();
-    setLogoutOpen(false);
-    navigate("/");
-  };
+  // ─── Removed: `confirmLogout` function.
+  //     Logout is now handled entirely by Sidebar.jsx's internal CCModal.
 
   const renderDashboard = () => {
     const totalScholars = beneficiaries.length;
@@ -1524,12 +1528,18 @@ function SDAO({ embedDashboardOnly = false } = {}) {
         <div className="sa-embed-sdao sdao-layout">{sdaoPageMain}</div>
       ) : (
         <div className="dashboard-layout sdao-layout">
+          {/*
+           * Sidebar.jsx is the single source of truth for navigation and logout.
+           * `onLogoutRequest` is intentionally omitted here so Sidebar uses its
+           * own built-in CCModal for logout confirmation — no duplicate modal needed.
+           */}
           <Sidebar
             departmentTag="Scholarship Management"
             navItems={sdaoNavItems}
             activeNavId={activeNav}
             onNavSelect={setActiveNav}
-            onLogoutRequest={() => setLogoutOpen(true)}
+            mobileOpen={mobileSidebarOpen}
+            onMobileClose={() => setMobileSidebarOpen(false)}
             profileSettingsPath={PROFILE_SETTINGS_PATH_DEVELOPMENT}
           />
           <div className="dashboard-main">
@@ -1543,11 +1553,16 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                   <img src={session.profileAvatarDataUrl} alt="" className="header-avatar-img" />
                 ) : undefined
               }
+              onMenuClick={() => setMobileSidebarOpen(true)}
             />
             {sdaoPageMain}
           </div>
         </div>
       )}
+
+      {/* ────────────────────────────────────────────────────────────
+          Feature modals — all unrelated to sidebar/logout
+          ──────────────────────────────────────────────────────────── */}
 
       <CCModal
         open={activeModal === "addBeneficiary"}
@@ -2602,31 +2617,13 @@ function SDAO({ embedDashboardOnly = false } = {}) {
         ) : null}
       </CCModal>
 
-      <CCModal open={logoutOpen} title="Logout" onClose={() => setLogoutOpen(false)} centered showHeader={false}>
-        <div className="sidebar-logout-modal">
-          <div className="sidebar-logout-body">
-            <div className="sidebar-logout-icon-wrap" aria-hidden>
-              <LogOut size={20} strokeWidth={1.75} />
-            </div>
-            <div className="sidebar-logout-copy">
-              <h2 className="sidebar-logout-title" id="sidebar-logout-heading">
-                Logout Confirmation
-              </h2>
-              <p className="sidebar-logout-text">
-                Are you sure you want to logout? Any unsaved changes will be lost.
-              </p>
-            </div>
-          </div>
-          <div className="sidebar-logout-footer">
-            <button type="button" className="sidebar-logout-btn sidebar-logout-btn--secondary" onClick={() => setLogoutOpen(false)}>
-              Cancel
-            </button>
-            <button type="button" className="sidebar-logout-btn sidebar-logout-btn--primary" onClick={confirmLogout}>
-              Yes, Logout
-            </button>
-          </div>
-        </div>
-      </CCModal>
+      {/*
+       * ── Removed: Logout CCModal ──────────────────────────────────────────
+       * The duplicate logout confirmation dialog that was here has been removed.
+       * Sidebar.jsx now owns the logout flow end-to-end via its built-in modal.
+       * No state (logoutOpen), no handler (confirmLogout), no CCModal needed here.
+       * ─────────────────────────────────────────────────────────────────────
+       */}
     </>
   );
 }
