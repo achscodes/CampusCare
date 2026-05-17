@@ -170,7 +170,7 @@ export async function loadSdaoFromSupabase(supabase) {
       .or("requesting_office.eq.development,target_office.eq.development")
       .order("created_at", { ascending: false }),
     supabase.from("sdao_referrals").select("*").order("created_at", { ascending: false }),
-    supabase.from("discipline_referrals").select("*").eq("target_office", "development").order("referral_date", { ascending: false }),
+    supabase.from("discipline_referrals").select("*").eq("target_office", "sdao").order("referral_date", { ascending: false }),
   ]);
 
   const err = bRes.error || aRes.error || cRes.error || dRes.error || rRes.error || discRes.error || null;
@@ -269,8 +269,8 @@ export async function insertSdaoReferral(supabase, form, userLabel) {
     email: form.email.trim(),
     phone: "",
     program: (form.program && form.program.trim()) || "",
-    receiving_office: form.receivingOffice.trim(),
-    referring_office: "SDAO — Student Development & Activities Office",
+    receiving_office: String(form.receivingOffice || "").trim().toLowerCase(),
+    referring_office: "sdao",
     reason: form.reason.trim(),
     development_details: form.referralNotes?.trim() || "",
     recommended_action: "",
@@ -303,6 +303,62 @@ export async function updateApplicationDisbursed(supabase, applicationId) {
     .update({
       status: "disbursed",
       disbursed_on: today,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", applicationId)
+    .select("*")
+    .single();
+}
+
+/**
+ * Send a clearance reminder to a student about pending requirements.
+ * Records the reminder action in the clearance record.
+ * @param {import("@supabase/supabase-js").SupabaseClient} supabase
+ * @param {string} clearanceId - The clearance record ID
+ */
+export async function sendClearanceReminder(supabase, clearanceId) {
+  const now = new Date().toISOString();
+  // Update the clearance record to record when the reminder was sent
+  // In a production system, this would also trigger email/SMS notification
+  return supabase
+    .from("sdao_clearance_records")
+    .update({
+      footer_message: "Reminder sent to student about pending requirements",
+      footer_variant: "warning",
+      updated_at: now,
+    })
+    .eq("id", clearanceId)
+    .select("*")
+    .single();
+}
+
+/**
+ * Approve a scholarship application for validation.
+ * @param {import("@supabase/supabase-js").SupabaseClient} supabase
+ * @param {string} applicationId - The application ID
+ */
+export async function approveScholarshipApplication(supabase, applicationId) {
+  return supabase
+    .from("sdao_scholarship_applications")
+    .update({
+      status: "validated",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", applicationId)
+    .select("*")
+    .single();
+}
+
+/**
+ * Reject a scholarship application.
+ * @param {import("@supabase/supabase-js").SupabaseClient} supabase
+ * @param {string} applicationId - The application ID
+ */
+export async function rejectScholarshipApplication(supabase, applicationId) {
+  return supabase
+    .from("sdao_scholarship_applications")
+    .update({
+      status: "declined",
       updated_at: new Date().toISOString(),
     })
     .eq("id", applicationId)

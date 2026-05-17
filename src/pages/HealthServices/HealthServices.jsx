@@ -718,6 +718,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [referralsList, setReferralsList] = useState(() => []);
   const [disciplineIncomingReferrals, setDisciplineIncomingReferrals] = useState(() => []);
+  const [sdaoIncomingReferrals, setSdaoIncomingReferrals] = useState(() => []);
   const [adminStaffRows, setAdminStaffRows] = useState(() => []);
   const [pendingApprovalRows, setPendingApprovalRows] = useState(() => []);
   const [selectedReferral, setSelectedReferral] = useState(null);
@@ -954,6 +955,17 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       setReferralsList(res.referrals);
       setDocRequestsRows(res.documents);
       setDisciplineIncomingReferrals(res.disciplineReferralsIncoming || []);
+      setSdaoIncomingReferrals(
+        (res.sdaoReferralsIncoming || []).map((r) => ({
+          id: r.id,
+          referralId: r.referenceId || r.referralId || `REF-SDAO-${r.id}`,
+          studentName: r.student || r.studentName || "",
+          studentId: r.studentId || "",
+          status: normalizeReferralStatus(r.status || "sent"),
+          date: r.date || "—",
+          raw: r.raw || null,
+        })),
+      );
       if (staffRes.ok) {
         setAdminStaffRows(staffRes.staffRows || []);
         setPendingApprovalRows(staffRes.pendingApprovals || []);
@@ -961,6 +973,38 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // Real-time subscription to incoming referrals from SDAO
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !supabase) return;
+    const channel = supabase
+      .channel("rt_sdao_referrals_hso")
+      .on("postgres_changes", { event: "*", schema: "public", table: "sdao_referrals" }, () => {
+        // Reload incoming SDAO referrals for all HSO office label variants.
+        (async () => {
+          const { data, error } = await supabase
+            .from("sdao_referrals")
+            .select("*")
+            .or("receiving_office.eq.health,receiving_office.ilike.%health%,receiving_office.ilike.%hso%")
+            .order("created_at", { ascending: false });
+          if (!error && data) {
+            setSdaoIncomingReferrals((data || []).map((r) => ({
+              id: r.id,
+              referralId: r.reference_id || `REF-SDAO-${r.id}`,
+              studentName: r.student_name || "",
+              studentId: r.student_id || "",
+              status: normalizeReferralStatus(r.status || "sent"),
+              date: r.created_at ? new Date(r.created_at).toLocaleDateString("en-US") : "—",
+              raw: r,
+            })));
+          }
+        })();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
     };
   }, []);
 
@@ -6387,6 +6431,64 @@ function HealthServices({ embedReportsOnly = false } = {}) {
           </div>
         </div>
       </div>
+
+      <div style={{ marginTop: 24 }}>
+        <div className="cases-panel hs-panel-elevated">
+          <div className="cases-panel-header">
+            <div className="cases-panel-top">
+              <div>
+                <div className="cases-panel-title cases-panel-title--strong">Incoming from SDAO</div>
+                <p className="hs-list-sub hs-list-sub--tight">
+                  Referrals requiring approval ({sdaoIncomingReferrals.length})
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="cases-table-wrapper">
+            {sdaoIncomingReferrals.length > 0 ? (
+              <table className="cases-table" style={{ fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th>Referral ID</th>
+                    <th>Student</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sdaoIncomingReferrals.map((r) => (
+                    <tr key={r.referralId}>
+                      <td className="cell-case-id" style={{ fontSize: 11 }}>{r.referralId}</td>
+                      <td>
+                        <p className="cell-student-name">{r.studentName}</p>
+                        <p className="cell-student-id" style={{ fontSize: 10 }}>{r.studentId}</p>
+                      </td>
+                      <td>
+                        <span className={pillClass(r.status)} style={{ fontSize: 11 }}>{r.status}</span>
+                      </td>
+                      <td className="cell-date" style={{ fontSize: 12 }}>{r.date}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="hs-link-action"
+                          onClick={() => setSelectedReferral({ ...r, sdaoIncoming: true })}
+                        >
+                          <Eye size={13} strokeWidth={1.5} aria-hidden />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="hs-list-sub" style={{ padding: "16px 12px", margin: 0 }}>
+                No incoming referrals from SDAO.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
     </>
   );
 
@@ -6491,7 +6593,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               </tr>
             </thead>
             <tbody>
-              {disciplineIncomingReferrals.map((r) => (
+              {[...disciplineIncomingReferrals, ...sdaoIncomingReferrals].map((r) => (
                 <tr key={r.referralId}>
                   <td className="cell-case-id">{r.referralId}</td>
                   <td>
@@ -6516,9 +6618,9 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               ))}
             </tbody>
           </table>
-          {disciplineIncomingReferrals.length === 0 ? (
+          {disciplineIncomingReferrals.length === 0 && sdaoIncomingReferrals.length === 0 ? (
             <p className="hs-list-sub" style={{ padding: "16px 12px", margin: 0 }}>
-              No incoming referrals from Discipline Office.
+              No incoming referrals from Discipline Office or SDAO.
             </p>
           ) : null}
         </div>
@@ -7977,10 +8079,12 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               <p className="hs-modal-lead">Complete referral information and tracking</p>
               <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
                 <span className="hs-pill hs-pill-scheduled">
-                  {selectedReferral.disciplineIncoming ? selectedReferral.referralId : selectedReferral.referenceId}
+                  {selectedReferral.disciplineIncoming || selectedReferral.sdaoIncoming
+                    ? selectedReferral.referralId
+                    : selectedReferral.referenceId}
                 </span>
               </div>
-              {!selectedReferral.disciplineIncoming && selectedReferral.urgent ? (
+              {!selectedReferral.disciplineIncoming && !selectedReferral.sdaoIncoming && selectedReferral.urgent ? (
                 <div className="hs-banner-warn" style={{ marginBottom: 16 }}>
                   URGENT REFERRAL — Status: {selectedReferral.status}
                 </div>
@@ -7995,7 +8099,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   <dt>Student ID</dt>
                   <dd>{selectedReferral.studentId}</dd>
                 </div>
-                {!selectedReferral.disciplineIncoming ? (
+                {!selectedReferral.disciplineIncoming && !selectedReferral.sdaoIncoming ? (
                   <>
                     <div className="hs-detail-item">
                       <dt>Email</dt>
@@ -8019,13 +8123,15 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   <dd>
                     {selectedReferral.disciplineIncoming
                       ? labelForOfficeKey(selectedReferral.referringOffice)
+                      : selectedReferral.sdaoIncoming
+                      ? "Student Development Affairs Office"
                       : selectedReferral.referringLabel || "Health Services Office"}
                   </dd>
                 </div>
                 <div className="hs-detail-item">
                   <dt>To</dt>
                   <dd>
-                    {selectedReferral.disciplineIncoming
+                    {selectedReferral.disciplineIncoming || selectedReferral.sdaoIncoming
                       ? "Health Services (HSO)"
                       : selectedReferral.office}
                   </dd>
@@ -8034,7 +8140,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   <dt>Date</dt>
                   <dd>{selectedReferral.date}</dd>
                 </div>
-                {!selectedReferral.disciplineIncoming ? (
+                {!selectedReferral.disciplineIncoming && !selectedReferral.sdaoIncoming ? (
                   <div className="hs-detail-item">
                     <dt>Created By</dt>
                     <dd>{selectedReferral.by}</dd>
@@ -8045,12 +8151,12 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   <dd>{selectedReferral.status}</dd>
                 </div>
               </dl>
-              {selectedReferral.disciplineIncoming && canReceivingOfficeReviewReferral(selectedReferral.status) ? (
+              {(selectedReferral.disciplineIncoming || selectedReferral.sdaoIncoming) && canReceivingOfficeReviewReferral(selectedReferral.status) ? (
                 <p className="hs-consult-meta" style={{ marginTop: 12 }}>
                   Approve or decline this referral for Health Services.
                 </p>
               ) : null}
-              {!selectedReferral.disciplineIncoming &&
+              {!selectedReferral.disciplineIncoming && !selectedReferral.sdaoIncoming &&
               (isReferralPendingPartnerReview(selectedReferral.status) ||
                 normalizeReferralStatus(selectedReferral.status).includes("pending referring")) ? (
                 <p className="hs-consult-meta" style={{ marginTop: 12 }}>
@@ -8059,7 +8165,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               ) : null}
               <p className="hs-modal-section-title">Reason</p>
               <p className="hs-consult-meta">{selectedReferral.reason}</p>
-              {!selectedReferral.disciplineIncoming ? (
+              {!selectedReferral.disciplineIncoming && !selectedReferral.sdaoIncoming ? (
                 <>
                   <p className="hs-modal-section-title">Health observations</p>
                   <p className="hs-consult-meta">{selectedReferral.observations}</p>
@@ -8067,7 +8173,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   <p className="hs-consult-meta">{selectedReferral.recommendedAction}</p>
                 </>
               ) : null}
-              {selectedReferral.disciplineIncoming && Array.isArray(selectedReferral.evidence) && selectedReferral.evidence.length ? (
+              {(selectedReferral.disciplineIncoming || selectedReferral.sdaoIncoming) && Array.isArray(selectedReferral.evidence) && selectedReferral.evidence.length ? (
                 <>
                   <p className="hs-modal-section-title">Attachments</p>
                   <ul style={{ margin: 0, paddingLeft: 18, color: "#334155", fontSize: 14 }}>
@@ -8077,7 +8183,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   </ul>
                 </>
               ) : null}
-              {!selectedReferral.disciplineIncoming && selectedReferral.attachments?.length ? (
+              {!selectedReferral.disciplineIncoming && !selectedReferral.sdaoIncoming && selectedReferral.attachments?.length ? (
                 <>
                   <p className="hs-modal-section-title">Attachments</p>
                   <ul style={{ margin: 0, paddingLeft: 18, color: "#334155", fontSize: 14 }}>
@@ -8087,7 +8193,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   </ul>
                 </>
               ) : null}
-              {!selectedReferral.disciplineIncoming && selectedReferral.timeline?.length ? (
+              {!selectedReferral.disciplineIncoming && !selectedReferral.sdaoIncoming && selectedReferral.timeline?.length ? (
                 <>
                   <p className="hs-modal-section-title">Timeline</p>
                   <ul style={{ margin: 0, paddingLeft: 18, color: "#334155", fontSize: 14 }}>
@@ -8104,7 +8210,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
               <button type="button" className="cc-btn-secondary hs-modal-btn-cancel" onClick={() => setSelectedReferral(null)}>
                 Close
               </button>
-              {selectedReferral.disciplineIncoming && canReceivingOfficeReviewReferral(selectedReferral.status) ? (
+              {(selectedReferral.disciplineIncoming || selectedReferral.sdaoIncoming) && canReceivingOfficeReviewReferral(selectedReferral.status) ? (
                 <>
                   <button
                     type="button"
@@ -8112,22 +8218,34 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                     onClick={async () => {
                       try {
                         if (isSupabaseConfigured() && supabase) {
+                          const tableName = selectedReferral.sdaoIncoming ? "sdao_referrals" : "discipline_referrals";
+                          const targetId = selectedReferral.sdaoIncoming ? selectedReferral.id : selectedReferral.referralId;
                           const { error } = await supabase
-                            .from("discipline_referrals")
+                            .from(tableName)
                             .update({
                               status: DISCIPLINE_REFERRAL_STATUS.DECLINED,
                               updated_at: new Date().toISOString(),
                             })
-                            .eq("id", selectedReferral.referralId);
+                            .eq("id", targetId);
                           if (error) throw error;
                         }
-                        setDisciplineIncomingReferrals((prev) =>
-                          prev.map((x) =>
-                            x.referralId === selectedReferral.referralId
-                              ? { ...x, status: DISCIPLINE_REFERRAL_STATUS.DECLINED }
-                              : x,
-                          ),
-                        );
+                        if (selectedReferral.sdaoIncoming) {
+                          setSdaoIncomingReferrals((prev) =>
+                            prev.map((x) =>
+                              String(x.id) === String(selectedReferral.id) || x.referralId === selectedReferral.referralId
+                                ? { ...x, status: DISCIPLINE_REFERRAL_STATUS.DECLINED }
+                                : x,
+                            ),
+                          );
+                        } else {
+                          setDisciplineIncomingReferrals((prev) =>
+                            prev.map((x) =>
+                              x.referralId === selectedReferral.referralId
+                                ? { ...x, status: DISCIPLINE_REFERRAL_STATUS.DECLINED }
+                                : x,
+                            ),
+                          );
+                        }
                         setSelectedReferral((prev) =>
                           prev ? { ...prev, status: DISCIPLINE_REFERRAL_STATUS.DECLINED } : null,
                         );
@@ -8145,22 +8263,34 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                     onClick={async () => {
                       try {
                         if (isSupabaseConfigured() && supabase) {
+                          const tableName = selectedReferral.sdaoIncoming ? "sdao_referrals" : "discipline_referrals";
+                          const targetId = selectedReferral.sdaoIncoming ? selectedReferral.id : selectedReferral.referralId;
                           const { error } = await supabase
-                            .from("discipline_referrals")
+                            .from(tableName)
                             .update({
                               status: DISCIPLINE_REFERRAL_STATUS.APPROVED,
                               updated_at: new Date().toISOString(),
                             })
-                            .eq("id", selectedReferral.referralId);
+                            .eq("id", targetId);
                           if (error) throw error;
                         }
-                        setDisciplineIncomingReferrals((prev) =>
-                          prev.map((x) =>
-                            x.referralId === selectedReferral.referralId
-                              ? { ...x, status: DISCIPLINE_REFERRAL_STATUS.APPROVED }
-                              : x,
-                          ),
-                        );
+                        if (selectedReferral.sdaoIncoming) {
+                          setSdaoIncomingReferrals((prev) =>
+                            prev.map((x) =>
+                              String(x.id) === String(selectedReferral.id) || x.referralId === selectedReferral.referralId
+                                ? { ...x, status: DISCIPLINE_REFERRAL_STATUS.APPROVED }
+                                : x,
+                            ),
+                          );
+                        } else {
+                          setDisciplineIncomingReferrals((prev) =>
+                            prev.map((x) =>
+                              x.referralId === selectedReferral.referralId
+                                ? { ...x, status: DISCIPLINE_REFERRAL_STATUS.APPROVED }
+                                : x,
+                            ),
+                          );
+                        }
                         setSelectedReferral((prev) =>
                           prev ? { ...prev, status: DISCIPLINE_REFERRAL_STATUS.APPROVED } : null,
                         );

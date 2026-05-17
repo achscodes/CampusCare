@@ -42,6 +42,9 @@ import {
   updateSdaoBeneficiary,
   insertSdaoReferral,
   updateApplicationDisbursed,
+  sendClearanceReminder as sendClearanceReminderToDb,
+  approveScholarshipApplication,
+  rejectScholarshipApplication,
 } from "../../services/sdaoSupabase";
 import { appendEvidenceToInterOfficeRequest } from "../../services/interOfficeDocumentEvidence";
 import { PROFILE_SETTINGS_PATH_DEVELOPMENT } from "../../utils/profileSettingsRoutes";
@@ -173,14 +176,17 @@ function clearanceBarTone(statusKey, progress) {
   return "#3b82f6";
 }
 
-function docRequestStatusLabel(status) {
+function docRequestStatusLabel(status, evidence) {
   const s = String(status).toLowerCase();
   if (s.includes("declined") || s.includes("rejected")) return "Declined";
-  if (s.includes("fulfilled")) return "Fulfilled";
-  if (s.includes("approved")) return "Approved";
-  if (s.includes("pending approval") || s === "pending") return "Pending approval";
-  if (s === "ready") return "Ready";
-  if (s === "processing") return "Processing";
+  if (s.includes("fulfilled")) return "Completed";
+  if (s.includes("approved")) {
+    const hasEvidence = Array.isArray(evidence) && evidence.length > 0;
+    return hasEvidence ? "Approved/Completed" : "Pending/Approved";
+  }
+  if (s.includes("pending approval") || s === "pending") return "Pending";
+  if (s === "ready") return "Completed";
+  if (s === "processing") return "Completed";
   return status;
 }
 
@@ -240,6 +246,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
   const [docRequests, setDocRequests] = useState([]);
   const [referralsList, setReferralsList] = useState([]);
   const [disciplineIncomingReferrals, setDisciplineIncomingReferrals] = useState([]);
+  const [hsIncomingReferrals, setHsIncomingReferrals] = useState([]);
   const [sdaoLoading, setSdaoLoading] = useState(true);
   const [sdaoError, setSdaoError] = useState(null);
   const [sdaoDocAcceptingUploadBusy, setSdaoDocAcceptingUploadBusy] = useState(false);
@@ -257,6 +264,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
         setDocRequests([]);
         setReferralsList([]);
         setDisciplineIncomingReferrals([]);
+        setHsIncomingReferrals([]);
         return;
       }
       setSdaoError(null);
@@ -273,12 +281,41 @@ function SDAO({ embedDashboardOnly = false } = {}) {
       setDocRequests(res.documentRequests);
       setReferralsList(res.referrals);
       setDisciplineIncomingReferrals(res.disciplineReferralsIncoming || []);
+      setHsIncomingReferrals(res.healthReferralsIncoming || []);
     };
   }, []);
 
   useEffect(() => {
     refreshSdao();
   }, [refreshSdao]);
+
+  // Real-time subscription to incoming referrals from DO
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !supabase) return;
+    const channel = supabase
+      .channel("rt_discipline_referrals_sdao")
+      .on("postgres_changes", { event: "*", schema: "public", table: "discipline_referrals", filter: "target_office=eq.sdao" }, () => {
+        refreshSdao();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Real-time subscription to incoming referrals from HSO
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !supabase) return;
+    const channel = supabase
+      .channel("rt_health_referrals_sdao")
+      .on("postgres_changes", { event: "*", schema: "public", table: "health_referrals", filter: "receiving_office=eq.development" }, () => {
+        refreshSdao();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const dashboardDistribution = useMemo(() => {
     const counts = {};
@@ -382,9 +419,12 @@ function SDAO({ embedDashboardOnly = false } = {}) {
   const docRequestStats = useMemo(() => {
     const total = docRequests.length;
     const pending = docRequests.filter((d) => isDocRequestPendingApproval(d.status)).length;
-    const processing = docRequests.filter((d) => isDocRequestApprovedForFulfillment(d.status)).length;
-    const received = docRequests.filter((d) => normalizeInterOfficeDocStatus(d.status) === "fulfilled").length;
-    return { total, pending, processing, received };
+    // Approved or Fulfilled = Completed
+    const completed = docRequests.filter((d) => {
+      const s = normalizeInterOfficeDocStatus(d.status);
+      return s === "approved" || s === "fulfilled";
+    }).length;
+    return { total, pending, completed };
   }, [docRequests]);
 
   const referralStats = useMemo(() => {
@@ -524,15 +564,53 @@ function SDAO({ embedDashboardOnly = false } = {}) {
     await refreshSdao();
   };
 
+  const approveApplication = async () => {
+    if (!selectedApplication || !supabase) return;
+    const { error } = await approveScholarshipApplication(supabase, selectedApplication.id);
+    if (error) {
+      showToast(error.message || "Could not approve application.", { variant: "error" });
+      return;
+    }
+    showToast("Application approved.", { variant: "success" });
+    closeFeatureModal();
+    await refreshSdao();
+  };
+
+  const rejectApplication = async () => {
+    if (!selectedApplication || !supabase) return;
+    const { error } = await rejectScholarshipApplication(supabase, selectedApplication.id);
+    if (error) {
+      showToast(error.message || "Could not reject application.", { variant: "error" });
+      return;
+    }
+    showToast("Application rejected.", { variant: "success" });
+    closeFeatureModal();
+    await refreshSdao();
+  };
+
   const openClearanceDetails = (row) => {
     setSelectedClearance(row);
     setActiveModal("clearanceDetails");
   };
 
-  const sendClearanceReminder = () => {
+  const sendClearanceReminder = async () => {
     if (!selectedClearance) return;
-    console.info("[SDAO] Placeholder reminder", { id: selectedClearance.id });
-    closeFeatureModal();
+    if (!isSupabaseConfigured() || !supabase) {
+      showToast("Supabase is not configured.", { variant: "error" });
+      return;
+    }
+    try {
+      const { error } = await sendClearanceReminderToDb(supabase, selectedClearance.id);
+      if (error) {
+        showToast(error.message || "Could not send reminder.", { variant: "error" });
+        return;
+      }
+      showToast("Reminder sent to student about pending requirements.", { variant: "success" });
+      closeFeatureModal();
+      await refreshSdao();
+    } catch (err) {
+      showToast(err?.message || "Could not send reminder.", { variant: "error" });
+    }
   };
 
   const openNewDocRequest = () => {
@@ -911,10 +989,14 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                 <span className="sdao-scholarship-badge">{r.scholarshipType}</span>
                 <span
                   className={
-                    r.scholarStatus === "probation" ? "sdao-pill sdao-pill--warn" : "sdao-pill sdao-pill--validated"
+                    r.scholarStatus === "probation"
+                      ? "sdao-pill sdao-pill--warn"
+                      : r.scholarStatus === "inactive"
+                        ? "sdao-pill sdao-pill--muted"
+                        : "sdao-pill sdao-pill--validated"
                   }
                 >
-                  {r.scholarStatus === "probation" ? "On Probation" : "Active"}
+                  {r.scholarStatus === "probation" ? "On Probation" : r.scholarStatus === "inactive" ? "Inactive" : "Active"}
                 </span>
               </div>
               <div className="sdao-beneficiary-col sdao-beneficiary-col--meta">
@@ -1158,15 +1240,10 @@ function SDAO({ embedDashboardOnly = false } = {}) {
           <p className="sdao-type-stat-label">Pending</p>
           <p className="sdao-type-stat-hint">Awaiting partner office</p>
         </div>
-        <div className="sdao-doc-stat sdao-doc-stat--uploaded">
-          <p className="sdao-type-stat-value">{docRequestStats.processing}</p>
-          <p className="sdao-type-stat-label">In progress</p>
-          <p className="sdao-type-stat-hint">Processing / uploaded</p>
-        </div>
         <div className="sdao-doc-stat sdao-doc-stat--received">
-          <p className="sdao-type-stat-value">{docRequestStats.received}</p>
+          <p className="sdao-type-stat-value">{docRequestStats.completed}</p>
           <p className="sdao-type-stat-label">Completed</p>
-          <p className="sdao-type-stat-hint">Ready / received</p>
+          <p className="sdao-type-stat-hint">Approved / fulfilled</p>
         </div>
       </div>
       <div className="hs-filter-card">
@@ -1221,7 +1298,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                     <span className={pillClass(d.priority === "Urgent" ? "pending" : "new")}>{d.priority}</span>
                   </td>
                   <td>
-                    <span className={pillClass(d.status)}>{docRequestStatusLabel(d.status)}</span>
+                    <span className={pillClass(d.status)}>{docRequestStatusLabel(d.status, d.evidence)}</span>
                   </td>
                   <td className="cell-date">{d.date}</td>
                   <td>
@@ -1369,6 +1446,61 @@ function SDAO({ embedDashboardOnly = false } = {}) {
           {disciplineIncomingReferrals.length === 0 ? (
             <p className="hs-list-sub" style={{ padding: "16px 12px", margin: 0 }}>
               No incoming referrals from Discipline Office.
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="cases-panel" style={{ marginTop: 24 }}>
+        <div className="cases-panel-header">
+          <div className="cases-panel-title">Incoming from Health Services Office ({hsIncomingReferrals.length})</div>
+          <p className="hs-list-sub" style={{ margin: "4px 0 0" }}>
+            Referrals requiring approval
+          </p>
+        </div>
+        <div className="cases-table-wrapper">
+          <table className="cases-table">
+            <thead>
+              <tr>
+                <th>Referral ID</th>
+                <th>Student</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {hsIncomingReferrals.map((r) => (
+                <tr key={r.id}>
+                  <td className="cell-case-id">{String(r.referenceId || r.id).slice(0, 24)}</td>
+                  <td>
+                    <p className="cell-student-name">{r.student}</p>
+                    <p className="cell-student-id">{r.studentId}</p>
+                  </td>
+                  <td>
+                    <span className={pillClass(r.status)}>{r.status}</span>
+                  </td>
+                  <td className="cell-date">{r.date}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="hs-link-action sdao-link-referral"
+                      onClick={() => {
+                        setSelectedReferral({ ...r, hsIncoming: true });
+                        setActiveModal("referralDetails");
+                      }}
+                    >
+                      <Eye size={14} strokeWidth={1.5} aria-hidden />
+                      View
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {hsIncomingReferrals.length === 0 ? (
+            <p className="hs-list-sub" style={{ padding: "16px 12px", margin: 0 }}>
+              No incoming referrals from Health Services Office.
             </p>
           ) : null}
         </div>
@@ -1642,10 +1774,16 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                     className={
                       selectedBeneficiary.scholarStatus === "probation"
                         ? "sdao-pill sdao-pill--warn"
-                        : "sdao-pill sdao-pill--validated"
+                        : selectedBeneficiary.scholarStatus === "inactive"
+                          ? "sdao-pill sdao-pill--muted"
+                          : "sdao-pill sdao-pill--validated"
                     }
                   >
-                    {selectedBeneficiary.scholarStatus === "probation" ? "On Probation" : "Active"}
+                    {selectedBeneficiary.scholarStatus === "probation"
+                      ? "On Probation"
+                      : selectedBeneficiary.scholarStatus === "inactive"
+                        ? "Inactive"
+                        : "Active"}
                   </span>
                 </div>
                 <div className="sdao-profile-grid">
@@ -1740,6 +1878,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                   >
                     <option value="active">Active</option>
                     <option value="probation">On Probation</option>
+                    <option value="inactive">Inactive</option>
                   </select>
                 </div>
               </div>
@@ -1847,6 +1986,20 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                   </button>
                   <button type="button" className="sdao-btn-solid" onClick={processDisbursement}>
                     Process Disbursement
+                  </button>
+                </>
+              ) : selectedApplication.status?.toLowerCase() === "pending" ? (
+                <>
+                  <button type="button" className="sdao-btn-outline" onClick={closeFeatureModal}>
+                    Close
+                  </button>
+                  <button type="button" className="sdao-btn-outline" onClick={rejectApplication}>
+                    <AlertTriangle size={16} strokeWidth={1.75} aria-hidden />
+                    Reject Application
+                  </button>
+                  <button type="button" className="sdao-btn-solid" onClick={approveApplication}>
+                    <CheckCircle2 size={16} strokeWidth={1.75} aria-hidden />
+                    Approve Application
                   </button>
                 </>
               ) : (
@@ -2004,11 +2157,33 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                     <p className="sdao-doc-ready-sub">This inter-office request was declined. No further uploads.</p>
                   </div>
                 </div>
+              ) : selectedDocRequest.status?.toLowerCase().includes("fulfilled") ? (
+                <div className="sdao-doc-ready-banner">
+                  <CheckCircle2 size={22} strokeWidth={2} aria-hidden />
+                  <div>
+                    <p className="sdao-doc-ready-title">Completed</p>
+                    <p className="sdao-doc-ready-sub">Documents have been uploaded and submitted.</p>
+                  </div>
+                </div>
+              ) : isDocRequestApprovedForFulfillment(selectedDocRequest.status) ? (
+                <div className="sdao-doc-ready-banner">
+                  <CheckCircle2 size={22} strokeWidth={2} aria-hidden />
+                  <div>
+                    <p className="sdao-doc-ready-title">
+                      {(selectedDocRequest.evidence || []).length > 0 ? "Approved/Completed" : "Pending/Approved"}
+                    </p>
+                    <p className="sdao-doc-ready-sub">
+                      {(selectedDocRequest.evidence || []).length > 0
+                        ? "File(s) have been attached."
+                        : "Request approved. You can now attach the file."}
+                    </p>
+                  </div>
+                </div>
               ) : selectedDocRequest.status === "ready" && selectedDocRequest.uploadedAt ? (
                 <div className="sdao-doc-ready-banner">
                   <CheckCircle2 size={22} strokeWidth={2} aria-hidden />
                   <div>
-                    <p className="sdao-doc-ready-title">Document Ready</p>
+                    <p className="sdao-doc-ready-title">Completed</p>
                     <p className="sdao-doc-ready-sub">Uploaded by partner office on: {selectedDocRequest.uploadedAt}</p>
                   </div>
                 </div>
@@ -2016,15 +2191,11 @@ function SDAO({ embedDashboardOnly = false } = {}) {
                 <div className="sdao-doc-pending-banner">
                   <Clock size={22} strokeWidth={2} aria-hidden />
                   <div>
-                    <p className="sdao-doc-ready-title">Request In Progress</p>
+                    <p className="sdao-doc-ready-title">Request Pending</p>
                     <p className="sdao-doc-ready-sub">
                       {selectedDocRequest.direction === "outgoing"
-                        ? isDocRequestPendingApproval(selectedDocRequest.status)
-                          ? `${labelForOfficeKey(selectedDocRequest.partnerOffice)} must approve before fulfilling this request.`
-                          : `${labelForOfficeKey(selectedDocRequest.partnerOffice)} is processing this request.`
-                        : isDocRequestPendingApproval(selectedDocRequest.status)
-                          ? `Approve this request first, then attach the file for ${labelForOfficeKey(selectedDocRequest.partnerOffice)}.`
-                          : `${labelForOfficeKey(selectedDocRequest.partnerOffice)} initiated this request — SDAO is the target office.`}
+                        ? `${labelForOfficeKey(selectedDocRequest.partnerOffice)} must approve this request.`
+                        : `Waiting for ${labelForOfficeKey(selectedDocRequest.partnerOffice)} to approve.`}
                     </p>
                   </div>
                 </div>
@@ -2565,7 +2736,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
             </button>
           </div>
         </div>
-      </CCModal>
+      </CCModal>s
     </>
   );
 }

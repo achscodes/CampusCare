@@ -41,7 +41,7 @@ function isoFromDateField(v) {
 
 /** @param {import("@supabase/supabase-js").SupabaseClient} supabase */
 export async function loadHsoFromSupabase(supabase) {
-  const [cRes, rRes, aRes, refRes, dRes, discRes] = await Promise.all([
+  const [cRes, rRes, aRes, refRes, dRes, discRes, sdaoRefRes] = await Promise.all([
     supabase.from("health_consultations").select("*").order("created_at", { ascending: false }),
     supabase.from("medical_records").select("*").order("updated_at", { ascending: false }),
     supabase.from("health_appointments").select("*").order("appointment_date", { ascending: false }),
@@ -51,11 +51,18 @@ export async function loadHsoFromSupabase(supabase) {
       .select("*")
       .or("requesting_office.eq.health,target_office.eq.health")
       .order("created_at", { ascending: false }),
+    // Query discipline referrals directly with proper filtering
     supabase.from("discipline_referrals").select("*").eq("target_office", "health").order("referral_date", { ascending: false }),
+    // Query SDAO referrals for HSO using both key and human-readable office labels.
+    supabase
+      .from("sdao_referrals")
+      .select("*")
+      .or("receiving_office.eq.health,receiving_office.ilike.%health%,receiving_office.ilike.%hso%")
+      .order("created_at", { ascending: false }),
   ]);
 
   const err =
-    cRes.error || rRes.error || aRes.error || refRes.error || dRes.error || discRes.error || null;
+    cRes.error || rRes.error || aRes.error || refRes.error || dRes.error || discRes.error || sdaoRefRes.error || null;
   if (err) {
     return {
       ok: false,
@@ -65,9 +72,37 @@ export async function loadHsoFromSupabase(supabase) {
       appointments: [],
       referrals: [],
       documents: [],
+      incomingReferrals: [],
       disciplineReferralsIncoming: [],
+      sdaoReferralsIncoming: [],
     };
   }
+
+  // Safely map referrals from both sources
+  const disciplineIncoming = (discRes.data || []).map(rowToReferral);
+  const sdaoIncoming = (sdaoRefRes.data || []).map((r) => {
+    // Map SDAO referral fields to match expected structure
+    return {
+      id: r.id,
+      referenceId: r.reference_id || `REF-SDAO-${r.id}`,
+      student: r.student_name || "",
+      studentId: r.student_id || "",
+      program: r.program || "",
+      email: r.email || "",
+      phone: r.phone || "",
+      office: r.receiving_office || "health",
+      reason: r.reason || "",
+      observations: r.development_details || "",
+      recommendedAction: r.recommended_action || "",
+      date: r.created_at ? new Date(r.created_at).toLocaleDateString("en-US") : "",
+      dateSort: r.created_at ? r.created_at.split("T")[0] : "",
+      by: r.created_by || "SDAO",
+      status: r.status || "sent",
+      urgent: false,
+      attachments: r.attachments || [],
+      timeline: r.timeline || [],
+    };
+  });
 
   return {
     ok: true,
@@ -77,7 +112,9 @@ export async function loadHsoFromSupabase(supabase) {
     appointments: (aRes.data || []).map(mapAppointmentRow),
     referrals: (refRes.data || []).map(mapReferralRow),
     documents: (dRes.data || []).map(interOfficeRowToHsoDocumentRequest),
-    disciplineReferralsIncoming: (discRes.data || []).map(rowToReferral),
+    incomingReferrals: [...disciplineIncoming, ...sdaoIncoming],
+    disciplineReferralsIncoming: disciplineIncoming,
+    sdaoReferralsIncoming: sdaoIncoming,
   };
 }
 

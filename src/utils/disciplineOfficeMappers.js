@@ -90,7 +90,7 @@ export function rowToReferral(row) {
 }
 
 export function referralToInsert(id, payload) {
-  return {
+  const row = {
     id,
     student_name: payload.studentName.trim(),
     student_id: payload.studentId.trim(),
@@ -102,6 +102,13 @@ export function referralToInsert(id, payload) {
     referring_office: String(payload.referringOffice || "discipline").toLowerCase(),
     target_office: String(payload.targetOffice || "").toLowerCase(),
   };
+
+  // Only include inter_office_document_request_id if provided
+  if (payload.interOfficeDocumentRequestId) {
+    row.inter_office_document_request_id = payload.interOfficeDocumentRequestId;
+  }
+
+  return row;
 }
 
 /** @param {Record<string, unknown>} row */

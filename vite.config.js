@@ -23,6 +23,8 @@ export default defineConfig({
       '@supabase/supabase-js',
       'lucide-react',
       'zustand',
+      'jspdf',
+      'recharts',
     ],
   },
 })

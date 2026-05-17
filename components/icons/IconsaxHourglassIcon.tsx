@@ -1,0 +1,21 @@
+import Svg, { Path } from 'react-native-svg';
+
+type Props = {
+  size?: number;
+  color?: string;
+};
+
+/** `assets/icons/iconsax-hourglass.svg`. */
+export function IconsaxHourglassIcon({ size = 20, color = '#079455' }: Props) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M15.24 2H8.76004C5.00004 2 4.71004 5.38 6.74004 7.22L17.26 16.78C19.29 18.62 19 22 15.24 22H8.76004C5.00004 22 4.71004 18.62 6.74004 16.78L17.26 7.22C19.29 5.38 19 2 15.24 2Z"
+        stroke={color}
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}

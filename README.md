@@ -1,60 +1,64 @@
 # CampusCare
 
-Student welfare management for campus offices (Health, Discipline, Student Development). Built with **React**, **Vite**, and **Supabase** (auth, Postgres, storage).
+React Native mobile app built with **Expo Router**, **HeroUI Native**, **Tamagui**, and **Supabase**.
 
-## Local development
+## Architecture
 
-1. **Node.js** 20+ recommended.
-2. Install dependencies:
+```
+app/                          # Expo Router file-based routing
+  (auth)/                     # Auth screens (login, signup)
+  (tabs)/                     # Bottom tab navigator (home, appointments, profile, etc.)
+  (settings)/                 # Settings & info screens (about, privacy, terms, etc.)
+  discipline-office/          # Discipline Office feature screens
+  health-service/             # Health Service feature screens
+  student-development-affairs/# SDA feature screens
+  referrals/                  # Referrals feature screens
 
-   ```bash
-   npm install
-   ```
+components/
+  ui/                         # Shared UI primitives (TextLinkButton, GradientText, UnderlineTabs, FileUploadDropzoneCard, etc.)
+  layout/                     # Screen shell components (ScreenNavbar, Container, etc.)
+  icons/                      # Iconsax SVG icon components
+    filled/                   # New filled icons go here
+    outline/                  # New outline icons go here
+    tabs/                     # New tab bar icons go here
+  home/                       # Home screen components
+  health-service/             # Health Service components
+  discipline-office/          # Discipline Office components
+  student-development-affairs/# SDA components
+  auth/                       # Auth flow components
+  notifications/              # Notification components
 
-3. **Environment** — copy `.env.example` to `.env.local` and add your Supabase project values (Dashboard → **Settings** → **API**).
-
-   Required variables:
-
-   - `VITE_SUPABASE_URL` — project URL  
-   - `VITE_SUPABASE_ANON_KEY` — **anon (public)** key only (never commit the `service_role` key)
-
-4. Start the app:
-
-   ```bash
-   npm run dev
-   ```
-
-5. Apply database migrations to your Supabase project (SQL Editor or [Supabase CLI](https://supabase.com/docs/guides/cli)) using the files in `supabase/migrations/`.
-
-## Production build
-
-```bash
-npm run build
-npm run preview
+lib/
+  auth/                       # Auth provider & session logic
+  health-service/             # Health service domain logic, API, types, store
+  hooks/                      # Shared custom hooks
+  notifications/              # Notification utilities
+  store/                      # Zustand global store
+  ui/                         # Global design tokens & screen gradients
+    theme.ts                  # SCHEDULE_PARTNER & shared tokens
+    screenGradients.ts        # Background gradient presets
+  routes.ts                   # Centralized route path constants
+  supabase.ts                 # Supabase client singleton
 ```
 
-Output is written to `dist/`. Deploy `dist/` to any static host (e.g. Vercel). This repo includes a `vercel.json` with SPA rewrites and baseline security headers.
+## Conventions
 
-### Deploy environment
+- **Feature-based grouping**: Co-locate components, logic, and types per feature.
+- **Route groups `()`**: Used for organization only — don't affect URLs.
+- **Re-export stubs**: Some `components/` root files are deprecated re-exports pointing to `ui/` or `layout/`. Prefer the new paths in new code.
+- **Theme tokens**: Import `SCHEDULE_PARTNER` from `@/lib/ui/theme` (not the health-service-specific file).
+- **Route constants**: Use `ROUTES` from `@/lib/routes` instead of hard-coded strings when possible.
+- **Icons**: Place new icons in `icons/filled/`, `icons/outline/`, or `icons/tabs/`. Existing icons remain at `icons/` root during migration.
 
-On your host, set the same `VITE_*` variables as **build-time** environment variables so Vite can embed the public Supabase URL and anon key in the client bundle. The anon key is designed to be public; protect data with **Row Level Security** and server-side policies in Supabase, not by hiding the anon key.
+## Tech Stack
 
-## Security and repository hygiene
-
-- **Never commit** `.env`, `.env.local`, or any file containing `service_role` keys, database passwords, or personal data.
-- `.env.local` is gitignored. Use `.env.example` as the only env template in the repo.
-- If credentials were ever committed, **rotate** them in the Supabase Dashboard (Settings → API → reset anon key if needed) and avoid pushing secrets to public remotes.
-- Demo seed accounts in migrations use placeholder `@example.edu` addresses and a documented demo password — replace with your institution’s policies before production.
-
-## Scripts
-
-| Command        | Description              |
-| -------------- | ------------------------ |
-| `npm run dev`  | Vite dev server          |
-| `npm run build`| Production bundle        |
-| `npm run preview` | Serve production build |
-| `npm run lint` | ESLint                   |
-
-## Documentation
-
-- Internal auth flow notes: `SUPABASE_AUTH_REFERENCE.md` (no real secrets — use your own `.env.local`).
+| Layer | Tool |
+|---|---|
+| Framework | React Native + Expo SDK |
+| Routing | Expo Router (file-based) |
+| UI Kit | HeroUI Native, Tamagui |
+| Styling | Uniwind (Tailwind for RN) |
+| State | Zustand |
+| Backend | Supabase (auth, database) |
+| Animations | react-native-reanimated |
+| Icons | Custom Iconsax SVG components |

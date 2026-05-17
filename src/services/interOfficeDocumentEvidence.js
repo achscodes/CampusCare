@@ -3,6 +3,8 @@
  * Requires bucket `inter-office-documents` (see migration 20260423000000_inter_office_doc_storage.sql).
  */
 
+import { INTER_OFFICE_DOC_STATUS } from "../utils/interOfficeWorkflow";
+
 const BUCKET = "inter-office-documents";
 
 /** @param {import("@supabase/supabase-js").SupabaseClient} supabase */
@@ -26,6 +28,7 @@ export async function uploadInterOfficeFileToStorage(supabase, file, requestId) 
 
 /**
  * Append an accepting-office attachment to `evidence` and set `uploaded_at`.
+ * Auto-transitions status from "Approved" to "Fulfilled" when first document is uploaded.
  * @param {import("@supabase/supabase-js").SupabaseClient} supabase
  * @param {string} requestId
  * @param {File} file
@@ -33,7 +36,7 @@ export async function uploadInterOfficeFileToStorage(supabase, file, requestId) 
 export async function appendEvidenceToInterOfficeRequest(supabase, requestId, file) {
   const { data: row, error: fetchErr } = await supabase
     .from("inter_office_document_requests")
-    .select("evidence")
+    .select("evidence, status")
     .eq("id", requestId)
     .single();
   if (fetchErr) throw fetchErr;
@@ -41,12 +44,17 @@ export async function appendEvidenceToInterOfficeRequest(supabase, requestId, fi
   const prev = Array.isArray(row?.evidence) ? row.evidence : [];
   const nextEvidence = [...prev, uploaded];
   const uploadedAt = new Date().toISOString();
+  
+  // Auto-transition to Fulfilled when first document is uploaded
+  const newStatus = prev.length === 0 ? INTER_OFFICE_DOC_STATUS.FULFILLED : row.status;
+  
   const { error: updErr } = await supabase
     .from("inter_office_document_requests")
     .update({
       evidence: nextEvidence,
       uploaded_at: uploadedAt,
       updated_at: uploadedAt,
+      status: newStatus,
     })
     .eq("id", requestId);
   if (updErr) throw updErr;

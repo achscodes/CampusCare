@@ -655,7 +655,7 @@
 /* Doc request tinted cards (match DO blue primary for SDAO) */
 .sdao-doc-stat-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 20px;
 }
