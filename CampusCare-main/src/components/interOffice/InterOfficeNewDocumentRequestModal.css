@@ -1,0 +1,40 @@
+/* Scrollable body + always-visible actions (validation errors must not hide buttons). */
+.inter-office-doc-modal {
+  width: min(560px, 100%);
+  max-height: min(92vh, 760px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.inter-office-doc-modal__form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.inter-office-doc-modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 22px 16px;
+}
+
+.inter-office-doc-modal__actions {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 22px 20px;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.inter-office-doc-modal__submit-err {
+  padding: 0 22px 12px;
+  font-size: 13px;
+  color: #b91c1c;
+  flex-shrink: 0;
+}

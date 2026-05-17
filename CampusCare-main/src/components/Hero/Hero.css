@@ -1,0 +1,125 @@
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 80px 151.5px;
+  gap: 48px;
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+  min-height: 486.5px;
+}
+
+.hero-content {
+  max-width: 592px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.badge {
+  background: #dbeafe;
+  padding: 4px 12px;
+  border-radius: 33554400px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 20px;
+  color: #155dfc;
+  display: inline-block;
+  width: fit-content;
+}
+
+.hero-content h1 {
+  font-family: 'Inter', sans-serif;
+  font-weight: 300;
+  font-size: 60px;
+  line-height: 75px;
+  color: #0f172b;
+  margin: 0;
+}
+
+.hero-content p {
+  font-family: 'Inter', sans-serif;
+  font-weight: 400;
+  font-size: 20px;
+  line-height: 32.5px;
+  color: #45556c;
+  margin: 0;
+}
+
+.hero-buttons {
+  display: flex;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.btn-primary {
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 20px;
+  color: #000000;
+  background: white;
+  border: 1px solid rgba(43, 127, 255, 0.22);
+  border-radius: 6px;
+  padding: 13px 33px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
+.btn-secondary {
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 20px;
+  color: #000000;
+  background: white;
+  border: 1px solid rgba(43, 127, 255, 0.22);
+  border-radius: 6px;
+  padding: 13px 33px;
+  cursor: pointer;
+  height: 48px;
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
+.btn-primary:hover,
+.btn-secondary:hover {
+  background: #f8fafc;
+}
+
+.arrow {
+  font-size: 16px;
+}
+
+.hero-cards {
+  max-width: 592px;
+  width: 100%;
+}
+
+.cards-container {
+  background: linear-gradient(144.26deg, #eff6ff 0%, #f8fafc 100%);
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  padding: 31.75px 31.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0px 1px 3px 0px rgba(0, 0, 0, 0.1), 0px 1px 2px 0px rgba(0, 0, 0, 0.1);
+}
+
+@media (max-width: 1200px) {
+  .hero {
+    flex-direction: column;
+    padding: 60px 40px;
+  }
+
+  .hero-content,
+  .hero-cards {
+    max-width: 100%;
+  }
+}

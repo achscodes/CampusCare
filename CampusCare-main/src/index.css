@@ -1,0 +1,18 @@
+/* Inter is loaded from index.html (non-blocking) to avoid delaying first paint */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.landing-page {
+  width: 100%;
+  overflow-x: hidden;
+}

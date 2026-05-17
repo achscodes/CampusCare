@@ -1,0 +1,44 @@
+.stats-card {
+  background: white;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  padding: 17px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 90px;
+  box-sizing: border-box;
+}
+
+.stats-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.stats-label {
+  font-family: 'Inter', sans-serif;
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 20px;
+  color: #45556c;
+  margin: 0;
+}
+
+.stats-value {
+  font-family: 'Inter', sans-serif;
+  font-weight: 300;
+  font-size: 30px;
+  line-height: 36px;
+  color: #0f172b;
+  margin: 0;
+}
+
+.stats-icon {
+  width: 32px;
+  height: 32px;
+  background: #dbeafe;
+  border-radius: 8px;
+  flex-shrink: 0;
+  /* Icon placeholder */
+}
