@@ -117,6 +117,20 @@ export function getOffenseCapsuleFill(studentCases) {
   };
 }
 
+/**
+ * Student Records progress status for DO table cards:
+ * - blank if no major offenses
+ * - pending if at least one major offense is not closed
+ * - done if all major offenses are closed
+ * @param {object[]} studentCases
+ */
+export function deriveMajorProgressStatus(studentCases) {
+  const majorCases = (studentCases || []).filter((c) => offenseCategoryForCase(c) === "major");
+  if (majorCases.length === 0) return "";
+  const hasOpenMajor = majorCases.some((c) => String(c.status || "").toLowerCase() !== "closed");
+  return hasOpenMajor ? "pending" : "done";
+}
+
 export function mergeStudentRecordsFromCases(cases, manualRecords) {
   const byStudent = new Map();
   for (const c of cases || []) {
@@ -168,6 +182,7 @@ export function mergeStudentRecordsFromCases(cases, manualRecords) {
 
     const { major: majorCases, minor: minorCases, equivalentMajorTotal } = countMajorMinorCases(group);
     const { capsuleMajorFilled, capsuleMinorFilled, capsuleSlots } = getOffenseCapsuleFill(group);
+    const recordProgressStatus = deriveMajorProgressStatus(group);
 
     let lastMs = 0;
     for (const c of group) {
@@ -231,6 +246,7 @@ export function mergeStudentRecordsFromCases(cases, manualRecords) {
       casesActive: active,
       majorCases,
       minorCases,
+      recordProgressStatus,
       equivalentMajorTotal,
       capsuleMajorFilled,
       capsuleMinorFilled,

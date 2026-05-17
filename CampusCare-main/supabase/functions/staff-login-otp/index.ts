@@ -1,3 +1,5 @@
+/// <reference path="../edge-runtime-shims.d.ts" />
+
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 
 const corsHeaders: Record<string, string> = {

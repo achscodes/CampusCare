@@ -74,7 +74,7 @@ const PAGE_META = {
     subtitle: "Manage student scholarship and benefit recipients",
   },
   scholarshipTypes: {
-    title: "Scholarship Types",
+    title: "Scholarship Applications",
     subtitle: "Review and process student scholarship and benefit applications",
   },
   clearance: {
@@ -94,7 +94,7 @@ const PAGE_META = {
 export const SDAO_NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard {...iconProps} /> },
   { id: "scholars", label: "Scholars Management", icon: <Users {...iconProps} /> },
-  { id: "scholarshipTypes", label: "Scholarship Types", icon: <Award {...iconProps} /> },
+  { id: "scholarshipTypes", label: "Scholarship Applications", icon: <Award {...iconProps} /> },
   { id: "clearance", label: "Clearance Management", icon: <ClipboardCheck {...iconProps} /> },
   { id: "docrequests", label: "Document Requests", icon: <FileText {...iconProps} /> },
   { id: "referrals", label: "Referrals", icon: <Send {...iconProps} /> },

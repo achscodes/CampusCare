@@ -4839,6 +4839,13 @@ const StandingPill = ({ category }) => {
   return <span className={`cc-pill ${cls}`}>{label}</span>;
 };
 
+const RecordProgressPill = ({ status }) => {
+  const s = String(status || "").toLowerCase();
+  if (!s) return null;
+  if (s === "done") return <span className="cc-pill sr-progress-done">Done</span>;
+  return <span className="cc-pill sr-progress-pending">Pending</span>;
+};
+
 function StudentRecordCaseDetailCard({ c }) {
   const isMajor = c.offenseCategory === "major";
   return (
@@ -4958,9 +4965,8 @@ export function StudentRecordsPage() {
   const stats = useMemo(() => {
     return {
       total: mergedRows.length,
-      good: mergedRows.filter((r) => r.category === "good_standing").length,
-      probation: mergedRows.filter((r) => r.category === "on_probation").length,
-      high: mergedRows.filter((r) => r.category === "high_risk").length,
+      done: mergedRows.filter((r) => r.recordProgressStatus === "done").length,
+      pending: mergedRows.filter((r) => r.recordProgressStatus === "pending").length,
     };
   }, [mergedRows]);
 
@@ -5016,21 +5022,15 @@ export function StudentRecordsPage() {
             </div>
             <div className="stat-card" style={{ background: "#f0fdf4", borderColor: "#bbf7d0" }}>
               <p className="stat-value" style={{ color: "#15803d" }}>
-                {stats.good}
+                {stats.done}
               </p>
-              <p className="stat-label">Good Standing</p>
+              <p className="stat-label">Done</p>
             </div>
             <div className="stat-card" style={{ background: "#fff7ed", borderColor: "#fed7aa" }}>
               <p className="stat-value" style={{ color: "#c2410c" }}>
-                {stats.probation}
+                {stats.pending}
               </p>
-              <p className="stat-label">On Probation</p>
-            </div>
-            <div className="stat-card" style={{ background: "#fef2f2", borderColor: "#fecaca" }}>
-              <p className="stat-value" style={{ color: "#b91c1c" }}>
-                {stats.high}
-              </p>
-              <p className="stat-label">High Risk</p>
+              <p className="stat-label">Pending</p>
             </div>
           </div>
 
@@ -5102,9 +5102,7 @@ export function StudentRecordsPage() {
                         />
                       </td>
                       <td>{r.lastIncident}</td>
-                      <td>
-                        <StandingPill category={r.category} />
-                      </td>
+                      <td>{r.recordProgressStatus ? <RecordProgressPill status={r.recordProgressStatus} /> : null}</td>
                       <td className="cases-table-col-action">
                         <button
                           className="cc-btn-secondary btn-view--fixed"
@@ -5162,7 +5160,23 @@ export function StudentRecordsPage() {
               </button>
             </div>
 
-            <div className="cc-modal-body">
+            <div className="cc-modal-body do-student-record-modal-body">
+              <div className="do-student-record-modal-identity">
+                <div className="do-student-record-modal-title-wrap">
+                  <p className="do-student-record-modal-name">{selectedStudent.studentName}</p>
+                  <p className="do-student-record-modal-sub">
+                    {selectedStudent.studentId} · {selectedStudent.school || "—"}
+                  </p>
+                </div>
+                <div className="do-student-record-modal-status-wrap">
+                  {selectedStudent.recordProgressStatus ? (
+                    <RecordProgressPill status={selectedStudent.recordProgressStatus} />
+                  ) : (
+                    <span className="do-student-record-no-major-status">No major offense status</span>
+                  )}
+                </div>
+              </div>
+
               <div className="cc-modal-row">
                 <div className="cc-field">
                   <div className="cc-label">Student</div>
@@ -5194,9 +5208,9 @@ export function StudentRecordsPage() {
                 </div>
               </div>
 
-              <div style={{ marginTop: 12 }}>
+              <div className="do-student-record-summary-card">
                 <div className="cc-label">Summary</div>
-                <div style={{ color: "#0f172a", fontSize: 14, marginTop: 6 }}>
+                <div className="do-student-record-summary-copy">
                   {selectedStudent.casesDisplay}. Last incident on {selectedStudent.lastIncident}.
                 </div>
                 <p className="do-student-record-counts-line">

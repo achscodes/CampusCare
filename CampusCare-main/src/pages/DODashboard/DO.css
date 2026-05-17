@@ -1444,6 +1444,19 @@
   border-color: #fecaca;
 }
 
+/* Student Records progress status (major-offense based) */
+.cc-pill.sr-progress-done {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #bbf7d0;
+}
+
+.cc-pill.sr-progress-pending {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fed7aa;
+}
+
 /* Form validation helpers (used in Dashboard / Case Management / subpages) */
 .cc-input-error {
   border-color: #f87171;
@@ -2622,6 +2635,70 @@
 /* Student record modal — detailed offense lists */
 .do-student-record-offense-block {
   margin-top: 20px;
+}
+
+.do-student-record-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.do-student-record-modal-identity {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.do-student-record-modal-title-wrap {
+  min-width: 0;
+}
+
+.do-student-record-modal-name {
+  margin: 0;
+  font-family: "Inter", sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.do-student-record-modal-sub {
+  margin: 4px 0 0;
+  font-family: "Inter", sans-serif;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.do-student-record-modal-status-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 24px;
+}
+
+.do-student-record-no-major-status {
+  font-family: "Inter", sans-serif;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.do-student-record-summary-card {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.do-student-record-summary-copy {
+  color: #0f172a;
+  font-size: 14px;
+  margin-top: 6px;
+  line-height: 1.45;
 }
 
 .do-student-record-offense-heading {
