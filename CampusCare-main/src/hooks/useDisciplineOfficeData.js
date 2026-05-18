@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { usePersistentState } from "./usePersistentState";
 import * as m from "../utils/disciplineOfficeMappers";
+import { buildCaseProgressFromEvent, formatCaseStepDateShort, rowToCase } from "../utils/disciplineCaseMapper";
 import { conferenceWindow } from "../utils/conferenceCalendar";
 import {
   interOfficeDocumentRequestToInsert,
@@ -48,6 +49,100 @@ function localRowToInterOfficeDbShape(seedItem) {
 
 function newLocalUuid() {
   return globalThis.crypto?.randomUUID?.() || `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function conferenceProgressStep(conference, statusOverride) {
+  const status = String(statusOverride || conference?.status || "").toLowerCase();
+  const date = conference?.dateLabel || "";
+  const time = conference?.timeLabel || "";
+  const location = conference?.location || "";
+  const note = [date, time, location].filter(Boolean).join(" · ");
+  if (status === "completed") {
+    return { label: "Case conference completed", date: date || undefined, note: note || undefined };
+  }
+  if (status === "cancelled") return null;
+  return { label: "Case conference scheduled", date: date || undefined, note: note || undefined };
+}
+
+async function syncCaseProgressFromConference(conference, statusOverride) {
+  if (!supabase || !conference?.caseId) return;
+  const status = String(statusOverride || conference?.status || "").toLowerCase();
+  if (status === "cancelled") return;
+  const step = conferenceProgressStep(conference, statusOverride);
+  const event = status === "completed" ? "conference_completed" : "conference_scheduled";
+  if (!step && event === "conference_scheduled") return;
+  const { data: caseRow, error } = await supabase
+    .from("discipline_cases")
+    .select("*")
+    .eq("id", conference.caseId)
+    .maybeSingle();
+  if (error || !caseRow) return;
+  const patch = buildCaseProgressFromEvent(rowToCase(caseRow), event, {
+    date: formatCaseStepDateShort(),
+    note: step?.note || (event === "conference_completed" ? "Case conference completed." : "Case conference scheduled."),
+  });
+  await supabase
+    .from("discipline_cases")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", conference.caseId);
+}
+
+function sanctionProgressStep(sanction, statusOverride) {
+  const status = String(statusOverride || sanction?.status || "").toLowerCase();
+  const sanctionType = sanction?.sanctionType || sanction?.sanction_type || "Sanction";
+  if (status.includes("approved") || status.includes("closed") || status.includes("completed")) {
+    return {
+      label: "Sanction completed",
+      date: formatCaseDateForProgress(new Date()),
+      note: `${sanctionType} compliance completed.`,
+    };
+  }
+  if (status.includes("review")) {
+    return {
+      label: "Sanction assigned",
+      date: formatCaseDateForProgress(new Date()),
+      note: `${sanctionType} is awaiting student proof or staff review.`,
+    };
+  }
+  return {
+    label: "Sanction updated",
+    date: formatCaseDateForProgress(new Date()),
+    note: `${sanctionType} status: ${status || "updated"}.`,
+  };
+}
+
+function formatCaseDateForProgress(value) {
+  try {
+    return new Date(value).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return "";
+  }
+}
+
+async function syncCaseProgressFromSanction(sanction, statusOverride) {
+  if (!supabase || !sanction?.caseId) return;
+  const { data: caseRow, error } = await supabase
+    .from("discipline_cases")
+    .select("*")
+    .eq("id", sanction.caseId)
+    .maybeSingle();
+  if (error || !caseRow) return;
+  const step = sanctionProgressStep(sanction, statusOverride);
+  const st = String(statusOverride || sanction?.status || "").toLowerCase();
+  const event =
+    st.includes("completed") || st.includes("approved") ? "sanction_issued" : "sanction_assigned";
+  const patch = buildCaseProgressFromEvent(rowToCase(caseRow), event, {
+    date: formatCaseStepDateShort(),
+    note: step?.note,
+  });
+  await supabase
+    .from("discipline_cases")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", sanction.caseId);
 }
 
 /**
@@ -359,6 +454,7 @@ export function useSanctions(seed) {
         .select()
         .single();
       if (error) throw error;
+      await syncCaseProgressFromSanction(m.rowToSanction(data));
       await refresh();
       return m.rowToSanction(data);
     },
@@ -374,9 +470,17 @@ export function useSanctions(seed) {
         return;
       }
       if (!supabase) throw new Error("Supabase is not configured.");
+      const existing = items.find((x) => String(x.sanctionId) === String(sanctionId)) || null;
       const body = { updated_at: new Date().toISOString() };
+      if (patch.caseId != null) body.case_id = String(patch.caseId).trim() || null;
       if (patch.status != null) body.status = patch.status;
       if (patch.notes != null) body.notes = String(patch.notes);
+      if (patch.description != null) body.description = String(patch.description);
+      if (patch.progress != null) body.progress = patch.progress;
+      if (patch.reviewDaysMin != null) body.review_days_min = patch.reviewDaysMin === "" ? null : Number(patch.reviewDaysMin);
+      if (patch.reviewDaysMax != null) body.review_days_max = patch.reviewDaysMax === "" ? null : Number(patch.reviewDaysMax);
+      if (patch.reviewStatusLabel != null) body.review_status_label = String(patch.reviewStatusLabel);
+      if (patch.completedHours != null) body.completed_hours = patch.completedHours === "" ? 0 : Number(patch.completedHours);
       if (patch.dueDate != null) body.due_date = String(patch.dueDate);
       if (patch.hours != null) body.hours = patch.hours === "" ? null : Number(patch.hours);
       if (patch.correspondingOffice != null) body.corresponding_office = String(patch.correspondingOffice);
@@ -388,9 +492,11 @@ export function useSanctions(seed) {
       if (patch.evidence != null) body.evidence = patch.evidence;
       const { error } = await supabase.from("discipline_sanctions").update(body).eq("id", sanctionId);
       if (error) throw error;
+      const merged = existing ? { ...existing, ...patch } : patch;
+      await syncCaseProgressFromSanction(merged, patch.status);
       await refresh();
     },
-    [useRemote, setLocal, refresh],
+    [items, useRemote, setLocal, refresh],
   );
 
   return { sanctions: items, loading, fetchError, refresh, insertSanction, updateSanction };
@@ -423,6 +529,7 @@ export function useCaseConferences(seed) {
         .select()
         .single();
       if (error) throw error;
+      await syncCaseProgressFromConference(m.rowToCaseConference(data));
       await refresh();
       return m.rowToCaseConference(data);
     },
@@ -466,6 +573,8 @@ export function useCaseConferences(seed) {
       if (patch.discussionSummary != null) dbPatch.discussion_summary = String(patch.discussionSummary).trim();
       const { error } = await supabase.from("discipline_case_conferences").update(dbPatch).eq("id", conferenceId);
       if (error) throw error;
+      const merged = existing ? { ...existing, ...patch } : patch;
+      await syncCaseProgressFromConference(merged, patch.status);
       await refresh();
     },
     [items, useRemote, setLocal, refresh],

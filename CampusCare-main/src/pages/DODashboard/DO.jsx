@@ -47,6 +47,7 @@ import {
   useStudentRecords,
 } from "../../hooks/useDisciplineOfficeData";
 import { useRealtimeDisciplineCases } from "../../hooks/useRealtimeDisciplineCases";
+import { useRealtimeIncidentReports } from "../../hooks/useRealtimeIncidentReports";
 import {
   buildMonthGrid,
   conferenceCompletionBlockedReason,
@@ -62,6 +63,7 @@ import {
 import { isStaffCampusRole } from "../../utils/officeSession";
 import { PROFILE_SETTINGS_PATH_DISCIPLINE } from "../../utils/profileSettingsRoutes";
 import { readCampusCareSession } from "../../utils/campusCareSession";
+import { getSupabaseAuthUserId } from "../../utils/campusCareAuth";
 import {
   INTER_OFFICE_DOC_STATUS,
   canReceivingOfficeUploadDoc,
@@ -77,9 +79,40 @@ import {
 import {
   formatCaseDateFromIso,
   formatCaseId,
+  isPendingCaseStudentId,
   makeNextDisciplineCaseId,
   buildCaseInsertRowFromIncident,
 } from "../../utils/disciplineCaseMapper";
+import { CaseProgressStepperPanel } from "./CaseProgressStepperPanel";
+import {
+  INCIDENT_REPORT_TABLE,
+  INCIDENT_REPORT_SELECT,
+  IR_FILTER_TABS,
+  IR_STATUS_MODAL_LABEL,
+  buildIncidentReportConvertUpdate,
+  buildIncidentReportRejectUpdate,
+  buildIncidentReportUnderReviewUpdate,
+  irCollectEmbeddedRosterHints,
+  irAttachmentsForCaseEvidence,
+  irAttachmentsList,
+  irComplainantDisplay,
+  irComplaineeDisplay,
+  irDisplayReportId,
+  irFormatDateTime,
+  irFormatFiledOn,
+  irFormatId,
+  irImpact,
+  irRejectionMessage,
+  irIncidentType,
+  irNarrative,
+  irResolveComplaineeEmail,
+  irRowSearchBlob,
+  irStatusLabel,
+  irStatusPillClass,
+  irStaffCanRejectOrConvert,
+  irStudentRosterMapAddRow,
+  irTryExtractStudentId,
+} from "../../utils/disciplineIncidentReportMapper";
 import { generateNuStudentEmail } from "../../utils/nuStudentEmail";
 import { buildDefaultNteEmailContent } from "../../services/disciplineNteNotice";
 import {
@@ -108,6 +141,14 @@ import { downloadDisciplineReportsPdf } from "../../reports/pdf/downloadDiscipli
 import { fileToEvidenceItem } from "../../utils/disciplineEvidence";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import { appendEvidenceToInterOfficeRequest } from "../../services/interOfficeDocumentEvidence";
+import {
+  formatAttachmentSize,
+  isImageMime,
+  isPdfMime,
+  checkIncidentAttachmentAccess,
+  resolveIncidentAttachmentsForView,
+  revokeIncidentAttachmentBlobUrls,
+} from "../../services/incidentReportAttachments";
 import { sendConferenceDiscussionSummaryToStudents } from "../../services/conferenceStudentNotifications";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
 import { DisciplineOfficeTopBar } from "./DisciplineOfficeTopBar";
@@ -1160,6 +1201,13 @@ export function CaseManagementPage() {
   const [activeTab, setActiveTab] = useState("all");
   const [search, setSearch] = useState("");
   const [selectedCase, setSelectedCase] = useState(null);
+  const [selectedCaseWorkflow, setSelectedCaseWorkflow] = useState({
+    loading: false,
+    nteRows: [],
+    sanctions: [],
+    proofs: [],
+    proofFiles: [],
+  });
   const [isNewCaseOpen, setIsNewCaseOpen] = useState(false);
   const [openDropdownIdCm, setOpenDropdownIdCm] = useState(null);
   const [searchField, setSearchField] = useState("all");
@@ -1190,6 +1238,10 @@ export function CaseManagementPage() {
   });
   const [newCaseEvidence, setNewCaseEvidence] = useState(null);
   const [newCaseErrors, setNewCaseErrors] = useState({});
+  const [newCaseStudentSearch, setNewCaseStudentSearch] = useState("");
+  const [newCaseStudentMatches, setNewCaseStudentMatches] = useState([]);
+  const [newCaseStudentLoading, setNewCaseStudentLoading] = useState(false);
+  const [showStudentSearchDropdown, setShowStudentSearchDropdown] = useState(false);
   const [statusNote, setStatusNote] = useState("");
   const [caseModalError, setCaseModalError] = useState(null);
   const [nteModalOpen, setNteModalOpen] = useState(false);
@@ -1203,7 +1255,13 @@ export function CaseManagementPage() {
   const [closeConfirmChecked, setCloseConfirmChecked] = useState(false);
   const [closePassword, setClosePassword] = useState("");
   const [closeCaseSubmitting, setCloseCaseSubmitting] = useState(false);
+  const [resolveStudentOpen, setResolveStudentOpen] = useState(false);
+  const [resolveStudentSearch, setResolveStudentSearch] = useState("");
+  const [resolveStudentMatches, setResolveStudentMatches] = useState([]);
+  const [resolveStudentLoading, setResolveStudentLoading] = useState(false);
+  const [caseProgressSaving, setCaseProgressSaving] = useState(false);
   const selectedMetaCm = selectedCase ? parseCaseMeta(selectedCase) : null;
+  const selectedCaseNeedsIdentity = selectedCase ? isPendingCaseStudentId(selectedCase.studentId) : false;
 
   const caseConferencesForSelected = useMemo(() => {
     if (!selectedCase) return [];
@@ -1219,6 +1277,199 @@ export function CaseManagementPage() {
   }, [selectedCase]);
 
   useEffect(() => {
+    if (!selectedCase || !isSupabaseConfigured() || !supabase) {
+      setSelectedCaseWorkflow({ loading: false, nteRows: [], sanctions: [], proofs: [], proofFiles: [] });
+      return;
+    }
+    let cancelled = false;
+    async function loadWorkflow() {
+      setSelectedCaseWorkflow((prev) => ({ ...prev, loading: true }));
+      try {
+        const [nteRes, sanctionRes] = await Promise.all([
+          supabase.from("discipline_nte").select("*").eq("case_id", selectedCase.id),
+          supabase.from("discipline_sanctions").select("*").eq("case_id", selectedCase.id),
+        ]);
+        const sanctions = sanctionRes.data || [];
+        const sanctionIds = sanctions.map((s) => s.id).filter(Boolean);
+        const proofRes = sanctionIds.length
+          ? await supabase.from("discipline_proof_submissions").select("*").in("sanction_id", sanctionIds)
+          : { data: [] };
+        const proofIds = (proofRes.data || []).map((p) => p.id).filter(Boolean);
+        const proofFileRes = proofIds.length
+          ? await supabase.from("discipline_proof_files").select("*").in("submission_id", proofIds)
+          : { data: [] };
+        if (!cancelled) {
+          const nteRows = nteRes.data || [];
+          setSelectedCaseWorkflow({
+            loading: false,
+            nteRows,
+            sanctions,
+            proofs: proofRes.data || [],
+            proofFiles: proofFileRes.data || [],
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setSelectedCaseWorkflow({ loading: false, nteRows: [], sanctions: [], proofs: [], proofFiles: [] });
+        }
+      }
+    }
+    loadWorkflow();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCase, updateCaseFields]);
+
+  const searchStudentsForNewCase = useCallback(async (searchQuery) => {
+    const q = searchQuery.trim();
+    if (!q || q.length < 2) {
+      setNewCaseStudentMatches([]);
+      return;
+    }
+    if (!isSupabaseConfigured() || !supabase) {
+      return;
+    }
+    setNewCaseStudentLoading(true);
+    try {
+      const safe = q.replace(/[%(),]/g, " ").trim();
+      const { data, error } = await supabase
+        .from("students")
+        .select("id, email, first_name, last_name, program, student_id")
+        .or(
+          `student_id.ilike.%${safe}%,email.ilike.%${safe}%,first_name.ilike.%${safe}%,last_name.ilike.%${safe}%`,
+        )
+        .limit(8);
+      if (error) throw error;
+      setNewCaseStudentMatches(data || []);
+      setShowStudentSearchDropdown(true);
+    } catch (err) {
+      console.error("Student search error:", err);
+      setNewCaseStudentMatches([]);
+    } finally {
+      setNewCaseStudentLoading(false);
+    }
+  }, []);
+
+  const selectStudentForNewCase = useCallback((student) => {
+    const fullName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
+    setNewCaseForm((prev) => ({
+      ...prev,
+      student: fullName || student.email,
+      studentId: student.student_id,
+      program: student.program || prev.program,
+    }));
+    setNewCaseStudentSearch(fullName || student.email);
+    setShowStudentSearchDropdown(false);
+    setNewCaseStudentMatches([]);
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setShowStudentSearchDropdown(false);
+    };
+    if (showStudentSearchDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showStudentSearchDropdown]);
+
+  const searchRespondentStudents = useCallback(async () => {
+    const q = resolveStudentSearch.trim();
+    if (!q || q.length < 2) {
+      setResolveStudentMatches([]);
+      return;
+    }
+    if (!isSupabaseConfigured() || !supabase) {
+      setCaseModalError("Supabase is not configured.");
+      return;
+    }
+    setResolveStudentLoading(true);
+    setCaseModalError(null);
+    try {
+      const safe = q.replace(/[%(),]/g, " ").trim();
+      const { data, error } = await supabase
+        .from("students")
+        .select("id, email, first_name, last_name, program, student_id")
+        .or(
+          `student_id.ilike.%${safe}%,email.ilike.%${safe}%,first_name.ilike.%${safe}%,last_name.ilike.%${safe}%`,
+        )
+        .limit(12);
+      if (error) throw error;
+      setResolveStudentMatches(data || []);
+    } catch (err) {
+      setCaseModalError(err?.message || "Could not search students.");
+    } finally {
+      setResolveStudentLoading(false);
+    }
+  }, [resolveStudentSearch]);
+
+  const resolveCaseRespondent = useCallback(
+    async (student) => {
+      if (!selectedCase || !student) return;
+      const fullName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
+      const patch = {
+        student_name: fullName || selectedCase.student,
+        student_id: student.student_id,
+        program: student.program || selectedCase.program || "",
+        respondent_email: student.email || selectedCase.respondentEmail || "",
+        respondent_user_id: student.id,
+      };
+      try {
+        await updateCaseFields(selectedCase.id, patch, "[Identity] Respondent linked to student record.");
+        await refreshCases();
+        setSelectedCase((prev) =>
+          prev
+            ? {
+                ...prev,
+                student: patch.student_name,
+                studentId: patch.student_id,
+                program: patch.program,
+                respondentEmail: patch.respondent_email,
+                respondentUserId: patch.respondent_user_id,
+              }
+            : prev,
+        );
+        setResolveStudentOpen(false);
+        setResolveStudentSearch("");
+        setResolveStudentMatches([]);
+        showToast("Respondent identity resolved.", { variant: "success" });
+      } catch (err) {
+        setCaseModalError(err?.message || "Could not resolve respondent identity.");
+      }
+    },
+    [selectedCase, updateCaseFields, refreshCases],
+  );
+
+  const saveCaseProgressPatch = useCallback(
+    async (patch) => {
+      if (!selectedCase) return;
+      setCaseProgressSaving(true);
+      setCaseModalError(null);
+      try {
+        await updateCaseFields(selectedCase.id, patch, "[Progress] Student-facing case progress updated.");
+        await refreshCases();
+        setSelectedCase((prev) =>
+          prev
+            ? {
+                ...prev,
+                caseSteps: patch.case_steps,
+                progressPercent: patch.progress_percent,
+                currentStepIndex: patch.current_step_index,
+              }
+            : prev,
+        );
+        showToast("Mobile case progress saved.", { variant: "success" });
+      } catch (err) {
+        setCaseModalError(err?.message || "Could not update case progress.");
+        throw err;
+      } finally {
+        setCaseProgressSaving(false);
+      }
+    },
+    [selectedCase, updateCaseFields, refreshCases],
+  );
+
+  useEffect(() => {
     if (!selectedCase || !syncOngoingStatus) return;
     const s = String(selectedCase.status || "").toLowerCase();
     if (s === "closed" || s === "escalated") return;
@@ -1226,6 +1477,14 @@ export function CaseManagementPage() {
   }, [selectedCase?.id, hasActiveScheduledConference, syncOngoingStatus, selectedCase?.status]);
 
   const openNteModal = useCallback((caseRow) => {
+    if (isPendingCaseStudentId(caseRow.studentId)) {
+      setCaseModalError(
+        "Resolve the respondent identity before sending a mobile-linked NTE. If only email is known, use email-only outside the mobile workflow.",
+      );
+      setResolveStudentOpen(true);
+      setResolveStudentSearch(caseRow.student || "");
+      return;
+    }
     const email =
       String(caseRow.respondentEmail || "").trim() ||
       generateNuStudentEmail(caseRow.student) ||
@@ -1247,6 +1506,13 @@ export function CaseManagementPage() {
     next.delete("newCase");
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const caseKey = String(searchParams.get("case") || "").trim();
+    if (!caseKey || cases.length === 0) return;
+    const found = cases.find((c) => String(c.id || "").toLowerCase() === caseKey.toLowerCase());
+    if (found) setSelectedCase(found);
+  }, [searchParams, cases]);
 
   const filtered = useMemo(() => {
     return cases.filter((c) => {
@@ -1571,82 +1837,349 @@ export function CaseManagementPage() {
             <div className="do-modal-body-scroll">
               {selectedMetaCm && (
                 <>
-                  <div className="do-case-banner">
-                    <div>
-                      <p className="do-case-banner-id">{formatCaseId(selectedCase.id)}</p>
-                      <p className="do-case-banner-type">{selectedCase.caseType}</p>
-                    </div>
-                    <div className="do-banner-badges">
+                  <div className="do-case-banner" style={{
+                    background: "linear-gradient(135deg, #1e40af 0%, #3b82f6 100%)",
+                    padding: "20px 24px",
+                    borderRadius: 12,
+                    marginBottom: 24,
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontSize: 28, fontWeight: 700, color: "#fff", margin: 0, marginBottom: 4 }}>
+                          {formatCaseId(selectedCase.id)}
+                        </p>
+                        <p style={{ fontSize: 16, color: "rgba(255,255,255,0.9)", margin: 0, marginBottom: 12 }}>
+                          {selectedCase.caseType}
+                        </p>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                          <div style={{
+                            background: "rgba(255,255,255,0.2)",
+                            padding: "6px 12px",
+                            borderRadius: 6,
+                            fontSize: 13,
+                            color: "#fff",
+                          }}>
+                            <User size={14} style={{ display: "inline-block", marginRight: 6 }} />
+                            {selectedCase.student}
+                          </div>
+                          <div style={{
+                            background: "rgba(255,255,255,0.2)",
+                            padding: "6px 12px",
+                            borderRadius: 6,
+                            fontSize: 13,
+                            color: "#fff",
+                          }}>
+                            {selectedCase.studentId}
+                          </div>
+                        </div>
+                      </div>
                       <CM_StatusBadge status={selectedCase.status} />
                     </div>
+                    {selectedCaseNeedsIdentity && (
+                      <div style={{
+                        marginTop: 16,
+                        padding: "12px 14px",
+                        borderRadius: 8,
+                        background: "rgba(253, 224, 71, 0.95)",
+                        color: "#854d0e",
+                        fontSize: 13,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 12,
+                        flexWrap: "wrap",
+                      }}>
+                        <span>⚠️ Respondent identity not verified. Resolve before enabling mobile workflows.</span>
+                        <button
+                          type="button"
+                          className="cc-btn-secondary"
+                          style={{ height: 32, fontSize: 13 }}
+                          onClick={() => {
+                            setResolveStudentOpen(true);
+                            setResolveStudentSearch(selectedCase.student || "");
+                          }}
+                        >
+                          Resolve Student
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="do-info-grid">
-                    <div className="do-info-card">
-                      <div className="do-info-card-top">
-                        <User size={18} strokeWidth={2} aria-hidden />
-                        Student Information
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 20 }}>
+                    <div className="do-info-card" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, color: "#1e40af", fontWeight: 600 }}>
+                        <User size={18} strokeWidth={2.5} />
+                        <span>Student Details</span>
                       </div>
-                      <div className="do-info-row">
-                        <p className="do-info-dt">Name</p>
-                        <p className="do-info-dd">{selectedCase.student}</p>
-                      </div>
-                      <div className="do-info-row">
-                        <p className="do-info-dt">Student ID</p>
-                        <p className="do-info-dd">{selectedCase.studentId}</p>
-                      </div>
-                      <div className="do-info-row">
-                        <p className="do-info-dt">Program</p>
-                        <p className="do-info-dd">{selectedMetaCm.program}</p>
-                      </div>
-                      <div className="do-info-row">
-                        <p className="do-info-dt">School</p>
-                        <p className="do-info-dd">{selectedMetaCm.school}</p>
-                      </div>
-                    </div>
-                    <div className="do-info-card">
-                      <div className="do-info-card-top">
-                        <FileText size={18} strokeWidth={2} aria-hidden />
-                        Case Information
-                      </div>
-                      <div className="do-info-row">
-                        <p className="do-info-dt">Offense type</p>
-                        <p className="do-info-dd">{selectedMetaCm.offenseType}</p>
-                      </div>
-                      <div className="do-info-row">
-                        <p className="do-info-dt">Filed Date</p>
-                        <p className="do-info-dd">{selectedCase.date}</p>
-                      </div>
-                      <div className="do-info-row">
-                        <p className="do-info-dt">Assigned To</p>
-                        <p className="do-info-dd">{selectedCase.officer || "—"}</p>
-                      </div>
-                      <div className="do-info-row">
-                        <p className="do-info-dt">Scheduled conferences</p>
-                        <p className="do-info-dd">{caseConferencesForSelected.length}</p>
-                      </div>
-                      <div className="do-info-row">
-                        <p className="do-info-dt">Respondent email (NTE)</p>
-                        <p className="do-info-dd">{selectedCase.respondentEmail || "—"}</p>
-                      </div>
-                      {selectedCase.nteSentAt ? (
-                        <div className="do-info-row">
-                          <p className="do-info-dt">NTE sent</p>
-                          <p className="do-info-dd">{formatCaseDateFromIso(selectedCase.nteSentAt)}</p>
+                      <div style={{ display: "grid", gap: 10, fontSize: 14 }}>
+                        <div>
+                          <div style={{ color: "#64748b", fontSize: 12, marginBottom: 2 }}>Program</div>
+                          <div style={{ fontWeight: 500 }}>{selectedMetaCm.program}</div>
                         </div>
-                      ) : null}
+                        <div>
+                          <div style={{ color: "#64748b", fontSize: 12, marginBottom: 2 }}>School</div>
+                          <div style={{ fontWeight: 500 }}>{selectedMetaCm.school}</div>
+                        </div>
+                        {selectedCase.respondentEmail && (
+                          <div>
+                            <div style={{ color: "#64748b", fontSize: 12, marginBottom: 2 }}>Email</div>
+                            <div style={{ fontWeight: 500, fontSize: 13 }}>{selectedCase.respondentEmail}</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="do-info-card" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, color: "#1e40af", fontWeight: 600 }}>
+                        <FileText size={18} strokeWidth={2.5} />
+                        <span>Case Details</span>
+                      </div>
+                      <div style={{ display: "grid", gap: 10, fontSize: 14 }}>
+                        <div>
+                          <div style={{ color: "#64748b", fontSize: 12, marginBottom: 2 }}>Offense Type</div>
+                          <div style={{ fontWeight: 500 }}>{selectedMetaCm.offenseType}</div>
+                        </div>
+                        <div>
+                          <div style={{ color: "#64748b", fontSize: 12, marginBottom: 2 }}>Filed Date</div>
+                          <div style={{ fontWeight: 500 }}>{selectedCase.date}</div>
+                        </div>
+                        <div>
+                          <div style={{ color: "#64748b", fontSize: 12, marginBottom: 2 }}>Assigned Officer</div>
+                          <div style={{ fontWeight: 500 }}>{selectedCase.officer || "—"}</div>
+                        </div>
+                        {selectedCase.nteSentAt && (
+                          <div>
+                            <div style={{ color: "#64748b", fontSize: 12, marginBottom: 2 }}>NTE Sent</div>
+                            <div style={{ fontWeight: 500 }}>{formatCaseDateFromIso(selectedCase.nteSentAt)}</div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="do-section-card">
-                    <h4>Case Description</h4>
-                    <p>{selectedMetaCm.body || "No description provided."}</p>
+                  <div className="do-section-card" style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: "#1e40af" }}>
+                      <FileText size={18} strokeWidth={2.5} />
+                      <h4 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Case Description</h4>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "#334155" }}>
+                      {selectedMetaCm.body || "No description provided."}
+                    </p>
                   </div>
 
-                  <div className="do-section-card">
-                    <h4>Evidence Submitted</h4>
+                  <div
+                    className="do-section-card do-section-card--stepper"
+                    style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, marginBottom: 20 }}
+                  >
+                    <CaseProgressStepperPanel
+                      caseRow={selectedCase}
+                      linkedNteRows={selectedCaseWorkflow.nteRows}
+                      saving={caseProgressSaving}
+                      onSave={saveCaseProgressPatch}
+                    />
+                  </div>
+
+                  <div className="do-section-card" style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: "#1e40af" }}>
+                      <ClipboardList size={18} strokeWidth={2.5} />
+                      <h4 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Evidence Submitted</h4>
+                    </div>
                     <DOEvidenceViewer evidence={selectedCase.evidence} />
                   </div>
+
+                  <div className="do-section-card" style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, color: "#1e40af" }}>
+                      <Scale size={18} strokeWidth={2.5} />
+                      <h4 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Mobile-Linked Workflow</h4>
+                    </div>
+                    {selectedCaseWorkflow.loading ? (
+                      <p style={{ color: "#64748b", margin: 0 }}>Loading linked mobile workflow…</p>
+                    ) : (
+                      <div style={{ display: "grid", gap: 20 }}>
+                        <div>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 10 }}>
+                            <strong style={{ fontSize: 14, color: "#334155" }}>📋 NTE Notices</strong>
+                            <Link 
+                              to="/nte-responses" 
+                              onClick={() => setSelectedCase(null)}
+                              style={{ fontSize: 13, color: "#2563eb", textDecoration: "none", fontWeight: 500 }}
+                            >
+                              View All →
+                            </Link>
+                          </div>
+                          {selectedCaseWorkflow.nteRows.length > 0 ? (
+                            <div className="cc-table-wrapper">
+                              <table className="cc-table">
+                                <thead>
+                                  <tr>
+                                    <th>NTE</th>
+                                    <th>Status</th>
+                                    <th>Issued</th>
+                                    <th>Responded</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {selectedCaseWorkflow.nteRows.map((n) => (
+                                    <tr key={n.id}>
+                                      <td style={{ fontWeight: 600 }}>{n.id}</td>
+                                      <td><span className={`cc-pill ${statusClass(n.status)}`}>{n.status}</span></td>
+                                      <td>{formatCaseDateFromIso(n.issued_at)}</td>
+                                      <td>{n.responded_at ? formatCaseDateFromIso(n.responded_at) : "—"}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <p style={{ color: "#64748b", margin: 0 }}>
+                              {selectedCaseNeedsIdentity ? "Resolve respondent before mobile NTE." : "No mobile NTE row yet."}
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 10 }}>
+                            <strong style={{ fontSize: 14, color: "#334155" }}>⚖️ Sanctions</strong>
+                            <Link 
+                              to="/sanctions" 
+                              onClick={() => setSelectedCase(null)}
+                              style={{ fontSize: 13, color: "#2563eb", textDecoration: "none", fontWeight: 500 }}
+                            >
+                              View All →
+                            </Link>
+                          </div>
+                          {selectedCaseWorkflow.sanctions.length > 0 ? (
+                            <div className="cc-table-wrapper">
+                              <table className="cc-table">
+                                <thead>
+                                  <tr>
+                                    <th>Sanction</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Hours</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {selectedCaseWorkflow.sanctions.map((s) => (
+                                    <tr key={s.id}>
+                                      <td style={{ fontWeight: 600 }}>{s.id}</td>
+                                      <td>{s.sanction_type || "—"}</td>
+                                      <td><span className={`cc-pill ${statusClass(s.status)}`}>{s.status}</span></td>
+                                      <td>{s.hours ? `${s.completed_hours || 0} / ${s.hours}` : "—"}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <p style={{ color: "#64748b", margin: 0 }}>
+                              {selectedCaseNeedsIdentity ? "Resolve respondent before mobile-visible sanctions." : "No sanctions linked."}
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 10 }}>
+                            <strong style={{ fontSize: 14, color: "#334155" }}>📎 Proof Submissions</strong>
+                            <Link 
+                              to="/proof-submissions" 
+                              onClick={() => setSelectedCase(null)}
+                              style={{ fontSize: 13, color: "#2563eb", textDecoration: "none", fontWeight: 500 }}
+                            >
+                              View All →
+                            </Link>
+                          </div>
+                          {selectedCaseWorkflow.proofs.length > 0 ? (
+                            <div className="cc-table-wrapper">
+                              <table className="cc-table">
+                                <thead>
+                                  <tr>
+                                    <th>Submission</th>
+                                    <th>Sanction</th>
+                                    <th>Status</th>
+                                    <th>Files</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {selectedCaseWorkflow.proofs.map((p) => {
+                                    const fileCount = selectedCaseWorkflow.proofFiles.filter((f) => String(f.submission_id) === String(p.id)).length;
+                                    return (
+                                      <tr key={p.id}>
+                                        <td style={{ fontWeight: 600 }}>{String(p.id).slice(0, 8)}</td>
+                                        <td>{p.sanction_id}</td>
+                                        <td><span className={`cc-pill ${statusClass(p.status)}`}>{p.status}</span></td>
+                                        <td>{fileCount}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <p style={{ color: "#64748b", margin: 0 }}>No proof submissions yet.</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {resolveStudentOpen ? (
+                    <div className="do-section-card">
+                      <h4>Resolve Respondent Identity</h4>
+                      <p style={{ marginTop: 0, color: "#64748b", fontSize: 14 }}>
+                        Search the student registry and link this case before enabling mobile NTE,
+                        sanctions, or proof workflows.
+                      </p>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          className="cc-input"
+                          value={resolveStudentSearch}
+                          onChange={(e) => setResolveStudentSearch(e.target.value)}
+                          placeholder="Search by name, email, or student ID"
+                        />
+                        <button
+                          className="cc-btn-secondary"
+                          type="button"
+                          disabled={resolveStudentLoading}
+                          onClick={searchRespondentStudents}
+                        >
+                          Search
+                        </button>
+                      </div>
+                      <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                        {resolveStudentMatches.map((student) => {
+                          const fullName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
+                          return (
+                            <button
+                              key={student.id}
+                              type="button"
+                              className="cc-btn-secondary"
+                              style={{
+                                height: "auto",
+                                justifyContent: "flex-start",
+                                padding: "10px 12px",
+                                textAlign: "left",
+                              }}
+                              onClick={() => resolveCaseRespondent(student)}
+                            >
+                              <span>
+                                <strong>{fullName || student.email}</strong>
+                                <br />
+                                <span style={{ color: "#64748b", fontSize: 12 }}>
+                                  {student.student_id} · {student.email} · {student.program || "No program"}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                        {!resolveStudentLoading &&
+                          resolveStudentSearch.trim().length >= 2 &&
+                          resolveStudentMatches.length === 0 ? (
+                            <div style={{ color: "#64748b", fontSize: 13 }}>No matches yet. Try another name or ID.</div>
+                          ) : null}
+                      </div>
+                    </div>
+                  ) : null}
                 </>
               )}
 
@@ -1814,6 +2347,96 @@ export function CaseManagementPage() {
                     {newCaseErrors._submit}
                   </div>
                 )}
+                <div className="do-form-cell" style={{ marginBottom: 0 }}>
+                  <label className="do-form-label" htmlFor="cm-nf-student-search">
+                    Search Student <span className="req">*</span>
+                  </label>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      id="cm-nf-student-search"
+                      className={`cc-input${newCaseErrors.student ? " cc-input-error" : ""}`}
+                      placeholder="Type student name or ID to search..."
+                      value={newCaseStudentSearch}
+                      onChange={(e) => {
+                        setNewCaseStudentSearch(e.target.value);
+                        searchStudentsForNewCase(e.target.value);
+                      }}
+                      onFocus={() => {
+                        if (newCaseStudentMatches.length > 0) {
+                          setShowStudentSearchDropdown(true);
+                        }
+                      }}
+                      autoComplete="off"
+                      aria-invalid={Boolean(newCaseErrors.student)}
+                    />
+                    {newCaseStudentLoading && (
+                      <div style={{ 
+                        position: "absolute", 
+                        right: 12, 
+                        top: "50%", 
+                        transform: "translateY(-50%)",
+                        color: "#64748b",
+                        fontSize: 13
+                      }}>
+                        Searching...
+                      </div>
+                    )}
+                    {showStudentSearchDropdown && newCaseStudentMatches.length > 0 && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "100%",
+                          left: 0,
+                          right: 0,
+                          marginTop: 4,
+                          background: "#fff",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 10,
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                          maxHeight: 240,
+                          overflowY: "auto",
+                          zIndex: 1000,
+                        }}
+                      >
+                        {newCaseStudentMatches.map((student) => {
+                          const fullName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
+                          return (
+                            <button
+                              key={student.id}
+                              type="button"
+                              style={{
+                                width: "100%",
+                                padding: "10px 12px",
+                                border: "none",
+                                background: "transparent",
+                                textAlign: "left",
+                                cursor: "pointer",
+                                borderBottom: "1px solid #f1f5f9",
+                                transition: "background 0.15s",
+                              }}
+                              onMouseEnter={(e) => (e.target.style.background = "#f8fafc")}
+                              onMouseLeave={(e) => (e.target.style.background = "transparent")}
+                              onClick={() => selectStudentForNewCase(student)}
+                            >
+                              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                                {fullName || student.email}
+                              </div>
+                              <div style={{ fontSize: 12, color: "#64748b" }}>
+                                {student.student_id} · {student.program || "No program"}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  {newCaseErrors.student && (
+                    <div className="cc-form-error" role="alert">
+                      {newCaseErrors.student}
+                    </div>
+                  )}
+                </div>
+
                 <div className="do-form-grid2">
                   <div className="do-form-cell" style={{ marginBottom: 0 }}>
                     <label className="do-form-label" htmlFor="cm-nf-student">
@@ -1821,19 +2444,12 @@ export function CaseManagementPage() {
                     </label>
                     <input
                       id="cm-nf-student"
-                      className={`cc-input${newCaseErrors.student ? " cc-input-error" : ""}`}
-                      placeholder="Enter student name"
+                      className="cc-input"
                       value={newCaseForm.student}
-                      onChange={(e) =>
-                        setNewCaseForm((p) => ({ ...p, student: sanitizePersonNameInput(e.target.value) }))
-                      }
-                      aria-invalid={Boolean(newCaseErrors.student)}
+                      readOnly
+                      style={{ background: "#f8fafc", cursor: "not-allowed" }}
+                      placeholder="Auto-filled from search"
                     />
-                    {newCaseErrors.student && (
-                      <div className="cc-form-error" role="alert">
-                        {newCaseErrors.student}
-                      </div>
-                    )}
                   </div>
                   <div className="do-form-cell" style={{ marginBottom: 0 }}>
                     <label className="do-form-label" htmlFor="cm-nf-sid">
@@ -1841,24 +2457,12 @@ export function CaseManagementPage() {
                     </label>
                     <input
                       id="cm-nf-sid"
-                      className={`cc-input${newCaseErrors.studentId ? " cc-input-error" : ""}`}
-                      placeholder="Enter Student ID"
-                      inputMode="numeric"
-                      autoComplete="off"
+                      className="cc-input"
                       value={newCaseForm.studentId}
-                      onChange={(e) =>
-                        setNewCaseForm((p) => ({
-                          ...p,
-                          studentId: sanitizeDoStudentIdInput(e.target.value),
-                        }))
-                      }
-                      aria-invalid={Boolean(newCaseErrors.studentId)}
+                      readOnly
+                      style={{ background: "#f8fafc", cursor: "not-allowed" }}
+                      placeholder="Auto-filled from search"
                     />
-                    {newCaseErrors.studentId && (
-                      <div className="cc-form-error" role="alert">
-                        {newCaseErrors.studentId}
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -2054,504 +2658,164 @@ export function CaseManagementPage() {
 // INCIDENT REPORT PAGE — paste above ConferencePill
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── Incident report status labels (modal) ───────────────────────────────────
-const IR_STATUS_MODAL_LABEL = {
-  submitted:         "Pending Review",
-  under_review:      "Under Review",
-  escalated:         "Escalated",
-  rejected:          "Rejected",
-  converted_to_case: "Converted to Case",
-};
+const IR_TABS = IR_FILTER_TABS.map((tab) => ({
+  ...tab,
+  count:
+    tab.key === "all"
+      ? (rows) => rows.length
+      : (rows) => rows.filter((r) => r.status === tab.key).length,
+}));
 
-const IR_TABS = [
-  { key: "all", label: "All Reports", count: (rows) => rows.length },
-  { key: "submitted", label: "Submitted", count: (rows) => rows.filter((r) => r.status === "submitted").length },
-  { key: "under_review", label: "Under Review", count: (rows) => rows.filter((r) => r.status === "under_review").length },
-  { key: "escalated", label: "Escalated", count: (rows) => rows.filter((r) => r.status === "escalated").length },
-  { key: "rejected", label: "Rejected", count: (rows) => rows.filter((r) => r.status === "rejected").length },
-  {
-    key: "converted_to_case",
-    label: "Converted to Case",
-    count: (rows) => rows.filter((r) => r.status === "converted_to_case").length,
-  },
-];
-
-function irFormatDate(raw) {
-  if (!raw) return "—";
-  try {
-    return new Date(raw).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  } catch { return raw; }
+function IrIncidentStatusPill({ status }) {
+  return (
+    <span className={`cc-pill ${irStatusPillClass(status)}`}>{irStatusLabel(status)}</span>
+  );
 }
 
-function irFormatTime(raw) {
-  if (!raw) return "—";
-  try {
-    return new Date(raw).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  } catch { return raw; }
-}
+function IrIncidentAttachmentsViewer({ report }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const itemsRef = useRef([]);
 
-/** Incident / filing line e.g. "May 12, 2026 10:30 AM" */
-function irFormatDateTime(raw) {
-  if (!raw) return "—";
-  try {
-    const d = new Date(raw);
-    const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-    const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    return `${date} ${time}`;
-  } catch {
-    return raw;
-  }
-}
+  const attachmentMeta = useMemo(() => irAttachmentsList(report), [report]);
 
-/** Shown in modal as "Filed On" */
-function irFormatFiledOn(raw) {
-  return irFormatDateTime(raw);
-}
+  const loadUrls = useCallback(async () => {
+    revokeIncidentAttachmentBlobUrls(itemsRef.current);
+    itemsRef.current = [];
 
-function irFormatId(raw) {
-  if (!raw) return "—";
-  const s = String(raw).toUpperCase();
-  return /^IR-/.test(s) ? s : `IR-${s}`;
-}
-
-/** Display form for tables and modals (e.g. #IR-2026-001). */
-function irDisplayReportId(raw) {
-  const id = irFormatId(raw);
-  if (id === "—") return "—";
-  return `#${id}`;
-}
-
-function irParseParties(parties) {
-  if (!parties) return [];
-  try {
-    const arr = Array.isArray(parties) ? parties : JSON.parse(parties);
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
-}
-
-function irLooksLikeUuid(s) {
-  if (s == null || typeof s !== "string") return false;
-  const t = s.trim().toLowerCase();
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(t);
-}
-
-/**
- * Collect student roster lookup hints from incident rows (columns + embedded `involved_parties`).
- * Used to batch-load `public.students` so complainant names resolve when only JSON carries ids.
- */
-function irCollectEmbeddedRosterHints(reports) {
-  const uuids = new Set();
-  const sids = new Set();
-  const emails = new Set();
-  for (const r of reports || []) {
-    if (r?.complainant_id != null && String(r.complainant_id).trim()) {
-      uuids.add(String(r.complainant_id).trim().toLowerCase());
+    if (attachmentMeta.length === 0) {
+      setItems([]);
+      setLoadError(null);
+      setLoading(false);
+      return;
     }
-    const subSid = r?.submitter_student_id ?? r?.submitterStudentId;
-    if (subSid != null && String(subSid).trim()) {
-      sids.add(String(subSid).trim());
+    if (!isSupabaseConfigured) {
+      setItems([]);
+      setLoadError("Supabase is not configured; cannot load attachments.");
+      setLoading(false);
+      return;
     }
-    const arr = irParseParties(r?.involved_parties);
-    for (const p of arr) {
-      if (typeof p !== "object" || !p) continue;
-      const sid =
-        p.student_id ??
-        p.studentId ??
-        p.school_id ??
-        p.reporter_student_id ??
-        p.studentNumber ??
-        p.enrollment_id ??
-        p.enrollmentId;
-      if (sid != null && String(sid).trim()) sids.add(String(sid).trim());
-      const em = p.email ?? p.school_email;
-      if (em != null && String(em).trim()) emails.add(String(em).trim().toLowerCase());
-      for (const key of [
-        "user_id",
-        "profile_id",
-        "student_uuid",
-        "students_id",
-        "reporter_id",
-        "reporterId",
-        "complainant_id",
-        "complainee_id",
-        "complainantId",
-        "complaineeId",
-      ]) {
-        const v = p[key];
-        if (v != null && irLooksLikeUuid(String(v))) uuids.add(String(v).trim().toLowerCase());
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const { items: resolved, sessionError } = await resolveIncidentAttachmentsForView(
+        supabase,
+        irAttachmentsList(report),
+      );
+      if (sessionError) {
+        setItems([]);
+        setLoadError(sessionError);
+        return;
       }
+      itemsRef.current = resolved;
+      setItems(resolved);
+    } catch (err) {
+      setItems([]);
+      setLoadError(err?.message || "Could not load attachments.");
+    } finally {
+      setLoading(false);
     }
-  }
-  return { uuids: [...uuids], sids: [...sids], emails: [...emails] };
-}
+  }, [attachmentMeta, report?.id]);
 
-/** Resolve a party object to a roster display name using preloaded `nameByKey`. */
-function irPartyObjectRosterName(p, nameByKey) {
-  if (typeof p !== "object" || !p || typeof nameByKey !== "object") return null;
-  const sid =
-    p.student_id ??
-    p.studentId ??
-    p.school_id ??
-    p.reporter_student_id ??
-    p.studentNumber ??
-    p.enrollment_id ??
-    p.enrollmentId;
-  if (sid != null && String(sid).trim()) {
-    const k = `sid:${String(sid).trim()}`;
-    if (nameByKey[k]) return nameByKey[k];
-  }
-  const em = p.email ?? p.school_email;
-  if (em != null && String(em).trim()) {
-    const k = `email:${String(em).trim().toLowerCase()}`;
-    if (nameByKey[k]) return nameByKey[k];
-  }
-  for (const key of [
-    "user_id",
-    "profile_id",
-    "student_uuid",
-    "students_id",
-    "reporter_id",
-    "reporterId",
-    "complainant_id",
-    "complainee_id",
-    "complainantId",
-    "complaineeId",
-  ]) {
-    const v = p[key];
-    if (v != null && irLooksLikeUuid(String(v))) {
-      const k = `uuid:${String(v).trim().toLowerCase()}`;
-      if (nameByKey[k]) return nameByKey[k];
-    }
-  }
-  return null;
-}
+  useEffect(() => {
+    loadUrls();
+    return () => revokeIncidentAttachmentBlobUrls(itemsRef.current);
+  }, [loadUrls]);
 
-/** Non-roster text from a party entry (string or object). Returns "" if nothing usable. */
-function irPartyTextDisplayName(p) {
-  if (typeof p === "string") {
-    const t = p.trim();
-    return t || "";
-  }
-  if (typeof p !== "object" || !p) return "";
-  const n =
-    p.name ??
-    p.full_name ??
-    p.fullName ??
-    p.student ??
-    p.displayName ??
-    p.email ??
-    p.id;
-  return n != null && String(n).trim() ? String(n).trim() : "";
-}
-
-/** Pull complainant / complainee / witness from `involved_parties` when roles exist; otherwise best-effort. */
-function irPartyLabels(report) {
-  const out = { complainant: "—", complainee: "—", witness: "—" };
-  const arr = irParseParties(report?.involved_parties);
-  if (arr.length === 0) return out;
-
-  const nameOf = (p) => {
-    const t = irPartyTextDisplayName(p);
-    return t || "—";
-  };
-  const roleOf = (p) => String(p?.role || p?.type || "").toLowerCase();
-
-  const pickFirst = (matchers) => {
-    for (const p of arr) {
-      const role = roleOf(p);
-      if (matchers.some((m) => role.includes(m))) return nameOf(p);
-    }
-    return "—";
-  };
-
-  out.complainant = pickFirst([
-    "complainant",
-    "reporter",
-    "reporting",
-    "reported_by",
-    "submitter",
-    "author",
-    "filing",
-    "plaintiff",
-  ]);
-  out.complainee = pickFirst(["complainee", "accused", "respondent", "subject", "alleged", "student"]);
-  out.witness = pickFirst(["witness"]);
-
-  if (out.complainant === "—" && out.complainee === "—" && out.witness === "—") {
-    if (arr.every((p) => typeof p === "string")) {
-      out.complainant = nameOf(arr[0]);
-      out.complainee = arr[1] != null ? nameOf(arr[1]) : "—";
-      out.witness = arr[2] != null ? nameOf(arr[2]) : "—";
-    } else {
-      out.complainant = nameOf(arr[0]);
-      if (arr[1]) out.complainee = nameOf(arr[1]);
-      if (arr[2]) out.witness = nameOf(arr[2]);
-    }
-  }
-  return out;
-}
-
-/** Display name from `public.students` row (full_name or first + last). */
-function rosterStudentDisplayName(row) {
-  if (!row) return "—";
-  const full = row.full_name != null && String(row.full_name).trim();
-  if (full) return String(row.full_name).trim();
-  const fn = [row.first_name, row.last_name].filter(Boolean).join(" ").trim();
-  return fn || "—";
-}
-
-/** Index one roster row by `students.id` and `students.student_id` for incident lookups. */
-function irStudentRosterMapAddRow(map, row) {
-  if (!row || typeof map !== "object") return;
-  const name = rosterStudentDisplayName(row);
-  if (row.id != null && String(row.id).trim()) {
-    map[`uuid:${String(row.id).trim().toLowerCase()}`] = name;
-  }
-  if (row.student_id != null && String(row.student_id).trim()) {
-    map[`sid:${String(row.student_id).trim()}`] = name;
-  }
-  if (row.email != null && String(row.email).trim()) {
-    map[`email:${String(row.email).trim().toLowerCase()}`] = name;
-  }
-}
-
-/**
- * Who filed / complainant label: DB snapshot (`filer_display_name`), then roster via `complainant_id`,
- * then embedded `involved_parties` hints.
- * @param {Record<string, string>} nameByKey keys `uuid:<lowercase id>`, `sid:<student_id>`, or `email:<lower>`
- */
-function irComplainantDisplay(report, nameByKey = {}) {
-  const snap =
-    report?.filer_display_name ??
-    report?.filerDisplayName ??
-    report?.filer_name ??
-    report?.submitted_by_name;
-  if (snap != null && String(snap).trim()) return String(snap).trim();
-
-  const direct =
-    report?.complainant_name ??
-    report?.reporter_name ??
-    report?.submitter_name;
-  if (direct != null && String(direct).trim()) return String(direct).trim();
-
-  const subSid = report?.submitter_student_id ?? report?.submitterStudentId;
-  if (subSid != null && String(subSid).trim()) {
-    const k = `sid:${String(subSid).trim()}`;
-    if (nameByKey[k]) return nameByKey[k];
+  if (attachmentMeta.length === 0) {
+    return <p style={{ margin: 0, color: "#64748b" }}>No attachments submitted.</p>;
   }
 
-  const cid = report?.complainant_id != null ? String(report.complainant_id).trim().toLowerCase() : "";
-  if (cid) {
-    const k = `uuid:${cid}`;
-    if (nameByKey[k]) return nameByKey[k];
-    return `Not in roster (${report.complainant_id})`;
+  if (loading) {
+    return <p style={{ margin: 0, color: "#64748b" }}>Loading attachments…</p>;
   }
 
-  const arr = irParseParties(report?.involved_parties);
-  const complainantRoles = [
-    "complainant",
-    "reporter",
-    "reporting",
-    "reported_by",
-    "submitter",
-    "author",
-    "filing",
-    "plaintiff",
-  ];
-  for (const p of arr) {
-    if (typeof p !== "object" || !p) continue;
-    const role = String(p.role || p.type || "").toLowerCase();
-    if (!complainantRoles.some((m) => role.includes(m))) continue;
-    const rn = irPartyObjectRosterName(p, nameByKey);
-    if (rn) return rn;
-  }
-  if (arr.length > 0 && typeof arr[0] === "object" && arr[0]) {
-    const rn0 = irPartyObjectRosterName(arr[0], nameByKey);
-    if (rn0) return rn0;
-    const tx0 = irPartyTextDisplayName(arr[0]);
-    if (tx0) return tx0;
+  if (loadError && items.length === 0) {
+    return (
+      <div>
+        <p className="cc-form-error" role="alert" style={{ marginBottom: 8 }}>
+          {loadError}
+        </p>
+        <button type="button" className="cc-btn-secondary" style={{ height: 32 }} onClick={loadUrls}>
+          Retry
+        </button>
+      </div>
+    );
   }
 
-  return irPartyLabels(report).complainant;
-}
+  return (
+    <div className="ir-attachment-viewer">
+      {items.map((item) => {
+        const sizeLabel = formatAttachmentSize(item.sizeBytes);
+        const showImage = Boolean(item.viewUrl) && isImageMime(item.mimeType, item.fileName);
+        const isPdf = isPdfMime(item.mimeType, item.fileName);
 
-/**
- * Complainee / respondent display: roster match on party ids, then second party when order is [reporter, accused].
- */
-function irComplaineeDisplay(report, nameByKey = {}) {
-  const arr = irParseParties(report?.involved_parties);
-  const specific = ["complainee", "accused", "respondent", "subject", "alleged", "defendant"];
-  for (const p of arr) {
-    if (typeof p !== "object" || !p) continue;
-    const role = String(p.role || p.type || "").toLowerCase();
-    if (!specific.some((m) => role.includes(m))) continue;
-    const rn = irPartyObjectRosterName(p, nameByKey);
-    if (rn) return rn;
-    const tx = irPartyTextDisplayName(p);
-    if (tx) return tx;
-  }
-  if (arr.length >= 2 && typeof arr[1] === "object" && arr[1]) {
-    const rn1 = irPartyObjectRosterName(arr[1], nameByKey);
-    if (rn1) return rn1;
-    const tx1 = irPartyTextDisplayName(arr[1]);
-    if (tx1) return tx1;
-  }
-  return irPartyLabels(report).complainee;
-}
+        return (
+          <article key={item.key} className="ir-attachment-card">
+            <div className="ir-attachment-card__head">
+              <FileText size={18} strokeWidth={2} aria-hidden className="ir-attachment-card__icon" />
+              <div className="ir-attachment-card__meta">
+                <div className="ir-attachment-card__name">{item.fileName}</div>
+                {(item.mimeType || sizeLabel) && (
+                  <div className="ir-attachment-card__sub">
+                    {[item.mimeType, sizeLabel].filter(Boolean).join(" · ")}
+                  </div>
+                )}
+              </div>
+            </div>
 
-/** Resolve respondent email for NTE: party email, roster lookup, or generated NU address. */
-async function irResolveComplaineeEmail(report, nameByKey, studentName) {
-  const arr = irParseParties(report?.involved_parties);
-  const roles = ["complainee", "accused", "respondent", "subject", "alleged", "defendant"];
-  let party = null;
-  for (const p of arr) {
-    if (typeof p !== "object" || !p) continue;
-    const role = String(p.role || p.type || "").toLowerCase();
-    if (roles.some((m) => role.includes(m))) {
-      party = p;
-      break;
-    }
-  }
-  if (!party && arr.length >= 2 && typeof arr[1] === "object") party = arr[1];
+            {item.urlError && (
+              <p className="ir-attachment-card__error" role="alert">
+                {item.urlError}
+              </p>
+            )}
 
-  const direct = party?.email ?? party?.school_email;
-  if (direct != null && String(direct).trim()) return String(direct).trim();
+            {showImage ? (
+              <a
+                href={item.viewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ir-attachment-card__preview-link"
+              >
+                <img
+                  src={item.viewUrl}
+                  alt={item.fileName}
+                  className="ir-attachment-card__image"
+                />
+              </a>
+            ) : null}
 
-  const sid = party?.student_id ?? party?.studentId ?? party?.school_id;
-  if (sid != null && String(sid).trim() && supabase) {
-    const { data } = await supabase
-      .from("students")
-      .select("email")
-      .eq("student_id", String(sid).trim())
-      .maybeSingle();
-    if (data?.email) return String(data.email).trim();
-  }
+            {isPdf && item.viewUrl ? (
+              <iframe
+                title={item.fileName}
+                src={item.viewUrl}
+                className="ir-attachment-card__pdf"
+              />
+            ) : null}
 
-  const uuid = party?.user_id ?? party?.complainee_id ?? party?.complaineeId;
-  if (uuid != null && irLooksLikeUuid(String(uuid)) && supabase) {
-    const { data } = await supabase.from("students").select("email").eq("id", String(uuid).trim()).maybeSingle();
-    if (data?.email) return String(data.email).trim();
-  }
-
-  const name = String(studentName || irComplaineeDisplay(report, nameByKey) || "").trim();
-  if (name && name !== "—") return generateNuStudentEmail(name) || "";
-  return "";
-}
-
-/** Comma-separated witness names when multiple have role "witness". */
-function irWitnessesDisplay(report, nameByKey = {}) {
-  const arr = irParseParties(report?.involved_parties);
-  const names = [];
-  for (const p of arr) {
-    const role = String(p?.role || p?.type || "").toLowerCase();
-    if (!role.includes("witness")) continue;
-    if (typeof p === "string") {
-      const t = p.trim();
-      if (t) names.push(t);
-    } else {
-      const rn = irPartyObjectRosterName(p, nameByKey);
-      if (rn) names.push(rn);
-      else {
-        const tx = irPartyTextDisplayName(p);
-        if (tx) names.push(tx);
-      }
-    }
-  }
-  if (names.length) return names.join(", ");
-  const fb = irPartyLabels(report).witness;
-  return fb === "—" ? "—" : fb;
-}
-
-function irTryExtractStudentId(report) {
-  const arr = irParseParties(report?.involved_parties);
-  for (const p of arr) {
-    if (typeof p !== "object" || !p) continue;
-    const role = String(p?.role || p?.type || "").toLowerCase();
-    if (!role.includes("complainee") && !role.includes("accused") && !role.includes("respondent") && !role.includes("student")) {
-      continue;
-    }
-    const raw = p.studentId ?? p.student_id ?? p.school_id ?? "";
-    const s = String(raw).trim();
-    if (s.length >= 4) return s;
-  }
-  for (const p of arr) {
-    if (typeof p !== "object" || !p) continue;
-    const raw = p.studentId ?? p.student_id ?? p.school_id ?? "";
-    const s = String(raw).trim();
-    if (s.length >= 4) return s;
-  }
-  return "";
-}
-
-function irIncidentType(report) {
-  return report?.incident_type || report?.subject || "—";
-}
-
-function irStatement(report) {
-  const s = report?.statement_of_incident ?? report?.description;
-  return s != null && String(s).trim() ? String(s).trim() : "—";
-}
-
-function irEvidenceSummary(report) {
-  const raw = report?.evidence ?? report?.evidences ?? report?.attachments;
-  if (raw == null) return "—";
-  if (Array.isArray(raw)) {
-    if (raw.length === 0) return "—";
-    const n = raw.length;
-    return n === 1 ? "1 item" : `${n} items`;
-  }
-  if (typeof raw === "string" && raw.trim()) return raw.trim();
-  return "—";
-}
-
-/** Lines for modal display (name / URL / string). */
-function irEvidenceLines(report) {
-  const raw = report?.evidence ?? report?.evidences ?? report?.attachments;
-  if (raw == null) return [];
-  if (Array.isArray(raw)) {
-    return raw.map((item, i) => {
-      if (item == null) return { key: i, text: "—" };
-      if (typeof item === "string") return { key: i, text: item.trim() || "—" };
-      const name =
-        item.name || item.filename || item.file_name || item.title || item.label;
-      const url = item.url || item.href || item.path;
-      if (name && url) return { key: i, text: `${name} (${url})` };
-      if (name) return { key: i, text: String(name) };
-      if (url) return { key: i, text: String(url) };
-      try {
-        return { key: i, text: JSON.stringify(item) };
-      } catch {
-        return { key: i, text: String(item) };
-      }
-    });
-  }
-  if (typeof raw === "string" && raw.trim()) return [{ key: 0, text: raw.trim() }];
-  return [];
-}
-
-function irRowSearchBlob(report, nameByKey = {}) {
-  const complainant = irComplainantDisplay(report, nameByKey);
-  const complainee = irComplaineeDisplay(report, nameByKey);
-  const witness = irWitnessesDisplay(report, nameByKey);
-  return [
-    report?.id,
-    irFormatId(report?.id),
-    irIncidentType(report),
-    report?.location,
-    irStatement(report),
-    irEvidenceSummary(report),
-    complainant,
-    complainee,
-    witness,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+            {item.viewUrl ? (
+              <a
+                href={item.viewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ir-attachment-card__open"
+              >
+                {showImage ? "Open full size" : isPdf ? "Open PDF in new tab" : "Open or download file"}
+              </a>
+            ) : !item.urlError ? (
+              <span className="ir-attachment-card__muted">Preview unavailable.</span>
+            ) : null}
+          </article>
+        );
+      })}
+    </div>
+  );
 }
 
 export function IncidentReportPage() {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [irReports, setIrReports]           = useState([]);
   const [irLoading, setIrLoading]           = useState(true);
   const [irError, setIrError]               = useState(null);
@@ -2576,14 +2840,36 @@ export function IncidentReportPage() {
   const [irRejectError, setIrRejectError] = useState(null);
   /** Lookup keys: `uuid:<students.id>`, `sid:<students.student_id>` → display name. */
   const [irStudentNames, setIrStudentNames] = useState({});
+  const [irStaffAccess, setIrStaffAccess] = useState({ checked: false, ok: true, message: null });
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setIrStaffAccess({ checked: true, ok: false, message: "Supabase is not configured." });
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const access = await checkIncidentAttachmentAccess(supabase);
+      if (!cancelled) {
+        setIrStaffAccess({
+          checked: true,
+          ok: access.ok,
+          message: access.ok ? null : access.message,
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const fetchIrReports = useCallback(async () => {
     setIrLoading(true);
     setIrError(null);
     try {
       const { data, error } = await supabase
-        .from("discipline_incident_reports")
-        .select("*")
+        .from(INCIDENT_REPORT_TABLE)
+        .select(INCIDENT_REPORT_SELECT)
         .order("created_at", { ascending: false });
       if (error) throw error;
       const reports = data || [];
@@ -2632,15 +2918,47 @@ export function IncidentReportPage() {
 
   useEffect(() => { fetchIrReports(); }, [fetchIrReports]);
 
+  const handleIncidentReportsRealtime = useCallback(
+    (payload) => {
+      if (payload.eventType === "INSERT") {
+        const row = payload.new || {};
+        const idLabel =
+          row.id != null ? irDisplayReportId(String(row.id)) : "New report";
+        showToast(`New incident report from student app: ${idLabel}`, {
+          variant: "info",
+          duration: 10000,
+        });
+        if (String(row.status || "").toLowerCase() === "submitted") {
+          setIrActiveTab("submitted");
+        }
+      }
+      fetchIrReports();
+    },
+    [fetchIrReports],
+  );
+
+  useRealtimeIncidentReports(handleIncidentReportsRealtime);
+
+  useEffect(() => {
+    const reportKey = String(searchParams.get("report") || "").trim();
+    if (!reportKey || irReports.length === 0) return;
+    const found = irReports.find((r) => {
+      const id = String(r.id || "");
+      return id === reportKey || irFormatId(r.id).toLowerCase() === reportKey.toLowerCase();
+    });
+    if (found) setIrSelected(found);
+  }, [searchParams, irReports]);
+
   useEffect(() => {
     setIrDetailActionError(null);
   }, [irSelected]);
 
   const irStats = useMemo(() => ({
-    total:        irReports.length,
-    submitted:    irReports.filter((r) => r.status === "submitted").length,
+    total: irReports.length,
+    submitted: irReports.filter((r) => r.status === "submitted").length,
     under_review: irReports.filter((r) => r.status === "under_review").length,
-    escalated:    irReports.filter((r) => r.status === "escalated").length,
+    rejected: irReports.filter((r) => r.status === "rejected").length,
+    converted_to_case: irReports.filter((r) => r.status === "converted_to_case").length,
   }), [irReports]);
 
   const irFiltered = useMemo(() => {
@@ -2650,20 +2968,23 @@ export function IncidentReportPage() {
       const q = irSearch.toLowerCase();
       const complainantDisp = irComplainantDisplay(r, irStudentNames);
       const complaineeDisp = irComplaineeDisplay(r, irStudentNames);
-      const witnessDisp = irWitnessesDisplay(r, irStudentNames);
       const matchesSearch = (() => {
         if (!q) return true;
         const id = String(r.id || "").toLowerCase();
-        const subject = String(r.subject || "").toLowerCase();
+        const narrative = String(r.narrative || "").toLowerCase();
         const incidentType = String(irIncidentType(r) || "").toLowerCase();
         const location = String(r.location || "").toLowerCase();
         const blob = irRowSearchBlob(r, irStudentNames);
+        const statusLabel = irStatusLabel(r.status).toLowerCase();
+        const reporterSid = String(r.reporter_student_id || "").toLowerCase();
         if (irSearchField === "reportId") return id.includes(q) || irFormatId(r.id).toLowerCase().includes(q);
-        if (irSearchField === "subject") return subject.includes(q) || incidentType.includes(q);
+        if (irSearchField === "status") return statusLabel.includes(q) || String(r.status || "").toLowerCase().includes(q);
+        if (irSearchField === "incidentType") return narrative.includes(q) || incidentType.includes(q);
         if (irSearchField === "location") return location.includes(q);
-        if (irSearchField === "complainant") return complainantDisp.toLowerCase().includes(q);
-        if (irSearchField === "complainee") return complaineeDisp.toLowerCase().includes(q);
-        if (irSearchField === "witness") return witnessDisp.toLowerCase().includes(q);
+        if (irSearchField === "reporter") {
+          return complainantDisp.toLowerCase().includes(q) || reporterSid.includes(q);
+        }
+        if (irSearchField === "involved") return complaineeDisp.toLowerCase().includes(q);
         return blob.includes(q);
       })();
 
@@ -2671,15 +2992,17 @@ export function IncidentReportPage() {
     });
   }, [irReports, irActiveTab, irSearch, irSearchField, irStudentNames]);
 
-  const irDetailEvidenceLines = useMemo(
-    () => (irSelected ? irEvidenceLines(irSelected) : []),
-    [irSelected],
-  );
-
   const handleIrDetailConvert = useCallback(async () => {
-    if (!irSelected) return;
+    if (!irSelected || !irStaffCanRejectOrConvert(irSelected.status)) return;
     setIrDetailActionError(null);
     try {
+      const reviewedBy = await getSupabaseAuthUserId();
+      if (!reviewedBy) {
+        setIrDetailActionError(
+          "Your sign-in session is missing. Sign out and sign in again (password + email code) before converting.",
+        );
+        return;
+      }
       const { data: existingCases, error: fetchErr } = await supabase
         .from("discipline_cases")
         .select("id");
@@ -2687,10 +3010,8 @@ export function IncidentReportPage() {
 
       const caseId = makeNextDisciplineCaseId(existingCases || []);
       const complaineeDisp = irComplaineeDisplay(irSelected, irStudentNames);
-      const witness = irWitnessesDisplay(irSelected, irStudentNames);
-      const stmt = irStatement(irSelected);
-      const rawEv = irSelected.evidence ?? irSelected.evidences ?? irSelected.attachments ?? [];
-      const evidence = Array.isArray(rawEv) ? rawEv : [];
+      const stmt = irNarrative(irSelected);
+      const evidence = irAttachmentsForCaseEvidence(irSelected);
 
       const studentName =
         complaineeDisp && complaineeDisp !== "—"
@@ -2702,7 +3023,12 @@ export function IncidentReportPage() {
         `PENDING-IR-${String(irSelected.id).replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || "UNKNOWN"}`;
 
       const itype = irIncidentType(irSelected);
-      const caseType = CASE_TYPE_OPTIONS.includes(itype) ? itype : "Code of Conduct Violation";
+      const caseType =
+        itype !== "—" && CASE_TYPE_OPTIONS.includes(itype)
+          ? itype
+          : itype !== "—"
+            ? itype
+            : "Code of Conduct Violation";
 
       const workflowNote =
         "Created from an incident report; continue classification and investigation in case management as needed.";
@@ -2711,11 +3037,11 @@ export function IncidentReportPage() {
         `Source incident report: ${irDisplayReportId(irSelected.id)}`,
         `Complainant: ${irComplainantDisplay(irSelected, irStudentNames)}`,
         `Respondent (complainee): ${complaineeDisp}`,
-        witness && witness !== "—" ? `Witness(es): ${witness}` : "",
         irSelected.location ? `Location: ${irSelected.location}` : "",
         `Incident date/time: ${irFormatDateTime(irSelected.incident_at)}`,
+        irImpact(irSelected) !== "—" ? `Impact: ${irImpact(irSelected)}` : "",
         "",
-        "Statement of incident:",
+        "Narrative:",
         stmt,
         "",
         workflowNote,
@@ -2723,7 +3049,16 @@ export function IncidentReportPage() {
         .filter(Boolean)
         .join("\n");
 
-      const respondentEmail = await irResolveComplaineeEmail(irSelected, irStudentNames, studentName);
+      const emailFromParties = await irResolveComplaineeEmail(
+        irSelected,
+        irStudentNames,
+        studentName,
+        supabase,
+      );
+      const respondentEmail =
+        emailFromParties ||
+        (studentName && studentName !== "—" ? generateNuStudentEmail(studentName) : "") ||
+        "";
 
       const row = buildCaseInsertRowFromIncident(caseId, {
         studentName,
@@ -2741,12 +3076,10 @@ export function IncidentReportPage() {
       const { error: insErr } = await supabase.from("discipline_cases").insert(row);
       if (insErr) throw insErr;
 
+      const convertPatch = buildIncidentReportConvertUpdate(caseId, reviewedBy);
       const { error: updErr } = await supabase
-        .from("discipline_incident_reports")
-        .update({
-          status: "converted_to_case",
-          converted_case_id: caseId,
-        })
+        .from(INCIDENT_REPORT_TABLE)
+        .update(convertPatch)
         .eq("id", irSelected.id);
 
       if (updErr) {
@@ -2757,25 +3090,32 @@ export function IncidentReportPage() {
       await fetchIrReports();
       showToast(`Case ${caseId} created and linked to this report.`, { variant: "success" });
       setIrSelected(null);
+      navigate(`/case-management?case=${encodeURIComponent(caseId)}`);
     } catch (err) {
       setIrDetailActionError(err?.message || "Could not convert this report.");
     }
-  }, [irSelected, fetchIrReports, irStudentNames]);
+  }, [irSelected, fetchIrReports, irStudentNames, navigate]);
 
   const handleIrMarkUnderReview = useCallback(async () => {
     if (!irSelected || irSelected.status !== "submitted") return;
     setIrDetailActionError(null);
     try {
+      const reviewedBy = await getSupabaseAuthUserId();
+      if (!reviewedBy) {
+        setIrDetailActionError(
+          "Your sign-in session is missing. Sign out and sign in again (password + email code).",
+        );
+        return;
+      }
+      const underReviewPatch = buildIncidentReportUnderReviewUpdate(reviewedBy);
       const { error } = await supabase
-        .from("discipline_incident_reports")
-        .update({ status: "under_review", reviewed_at: new Date().toISOString() })
+        .from(INCIDENT_REPORT_TABLE)
+        .update(underReviewPatch)
         .eq("id", irSelected.id);
       if (error) throw error;
       await fetchIrReports();
       setIrSelected((prev) =>
-        prev && String(prev.id) === String(irSelected.id)
-          ? { ...prev, status: "under_review", reviewed_at: new Date().toISOString() }
-          : prev,
+        prev && String(prev.id) === String(irSelected.id) ? { ...prev, ...underReviewPatch } : prev,
       );
       showToast("Report marked as under review.", { variant: "success" });
     } catch (err) {
@@ -2806,6 +3146,24 @@ export function IncidentReportPage() {
         <main className="dashboard-content do-office-shell">
 
           {/* ── Error / loading banner ── */}
+          {irStaffAccess.checked && !irStaffAccess.ok && (
+            <div
+              role="alert"
+              style={{
+                marginBottom: 16,
+                padding: "12px 14px",
+                borderRadius: 10,
+                background: "#fffbeb",
+                border: "1px solid #fde68a",
+                color: "#92400e",
+                fontSize: 14,
+              }}
+            >
+              {irStaffAccess.message ||
+                "Sign in with an approved Discipline Office account to review reports and open attachments."}
+            </div>
+          )}
+
           {(irError || (irLoading && irReports.length === 0)) && (
             <div
               role="status"
@@ -2856,8 +3214,12 @@ export function IncidentReportPage() {
               <p className="stat-label">Under Review</p>
             </div>
             <div className="stat-card">
-              <p className="stat-value high">{irStats.escalated}</p>
-              <p className="stat-label">Escalated</p>
+              <p className="stat-value ongoing">{irStats.converted_to_case}</p>
+              <p className="stat-label">Converted</p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-value high">{irStats.rejected}</p>
+              <p className="stat-label">Rejected</p>
             </div>
           </div>
 
@@ -2893,11 +3255,11 @@ export function IncidentReportPage() {
                 >
                   <option value="all">All Fields</option>
                   <option value="reportId">Report ID</option>
-                  <option value="subject">Incident Type</option>
+                  <option value="status">Status</option>
+                  <option value="reporter">Reporter</option>
+                  <option value="involved">Involved party</option>
+                  <option value="incidentType">Incident type</option>
                   <option value="location">Location</option>
-                  <option value="complainant">Complainant</option>
-                  <option value="complainee">Complainee</option>
-                  <option value="witness">Witness</option>
                 </select>
                 <div className="search-bar-wrapper" style={{ flex: 1, marginBottom: 0 }}>
                   <span className="search-icon" aria-hidden="true">
@@ -2911,11 +3273,11 @@ export function IncidentReportPage() {
                     className="search-input"
                     placeholder={
                       irSearchField === "reportId" ? "Search by report ID…" :
-                      irSearchField === "subject"  ? "Search by incident type…"   :
-                      irSearchField === "location" ? "Search by location…"  :
-                      irSearchField === "complainant" ? "Search by complainant…" :
-                      irSearchField === "complainee" ? "Search by complainee…" :
-                      irSearchField === "witness" ? "Search by witness…" :
+                      irSearchField === "status" ? "Search by status…" :
+                      irSearchField === "reporter" ? "Search by reporter…" :
+                      irSearchField === "involved" ? "Search by involved party…" :
+                      irSearchField === "incidentType" ? "Search by incident type…" :
+                      irSearchField === "location" ? "Search by location…" :
                       "Search reports…"
                     }
                     value={irSearch}
@@ -2958,21 +3320,30 @@ export function IncidentReportPage() {
                 <thead>
                   <tr>
                     <th>Report ID</th>
-                    <th>Complainee</th>
-                    <th>Incident Type</th>
-                    <th>Incident Date &amp; Time</th>
+                    <th>Status</th>
+                    <th>Reporter</th>
+                    <th>Involved</th>
+                    <th>Incident type</th>
+                    <th>Incident date</th>
                     <th>Location</th>
                     <th className="cases-table-col-action ir-incident-table-actions-head">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {irFiltered.map((r) => {
-                    const complaineeDisp = irComplaineeDisplay(r, irStudentNames);
+                    const reporterDisp = irComplainantDisplay(r, irStudentNames);
+                    const involvedDisp = irComplaineeDisplay(r, irStudentNames);
                     return (
                       <tr key={r.id}>
                         <td className="cell-case-id">{irDisplayReportId(r.id)}</td>
-                        <td className="cell-text ir-cell-ellipsis" title={complaineeDisp}>
-                          {complaineeDisp}
+                        <td>
+                          <IrIncidentStatusPill status={r.status} />
+                        </td>
+                        <td className="cell-text ir-cell-ellipsis" title={reporterDisp}>
+                          {reporterDisp}
+                        </td>
+                        <td className="cell-text ir-cell-ellipsis" title={involvedDisp}>
+                          {involvedDisp}
                         </td>
                         <td className="cell-text ir-cell-ellipsis" title={irIncidentType(r)}>
                           {irIncidentType(r)}
@@ -3001,7 +3372,7 @@ export function IncidentReportPage() {
                   })}
                   {irFiltered.length === 0 && (
                     <tr>
-                      <td colSpan={6} style={{ textAlign: "center", color: "#64748b", padding: "32px 8px", fontFamily: "'Inter', sans-serif" }}>
+                      <td colSpan={8} style={{ textAlign: "center", color: "#64748b", padding: "32px 8px", fontFamily: "'Inter', sans-serif" }}>
                         {irLoading ? "Loading…" : "No incident reports found."}
                       </td>
                     </tr>
@@ -3080,10 +3451,29 @@ export function IncidentReportPage() {
                     <dt>Location</dt>
                     <dd>{irSelected.location || "—"}</dd>
                   </div>
+                  {irSelected.reviewed_at && (
+                    <div>
+                      <dt>Reviewed at</dt>
+                      <dd>{irFormatDateTime(irSelected.reviewed_at)}</dd>
+                    </div>
+                  )}
+                  {irSelected.reporter_student_id && String(irSelected.reporter_student_id).trim() && (
+                    <div>
+                      <dt>Reporter student ID</dt>
+                      <dd>{irSelected.reporter_student_id}</dd>
+                    </div>
+                  )}
                   {irSelected.converted_case_id && (
                     <div>
                       <dt>Linked discipline case</dt>
-                      <dd>{formatCaseId(irSelected.converted_case_id)}</dd>
+                      <dd>
+                        <Link
+                          to={`/case-management?case=${encodeURIComponent(irSelected.converted_case_id)}`}
+                          onClick={() => setIrSelected(null)}
+                        >
+                          {formatCaseId(irSelected.converted_case_id)}
+                        </Link>
+                      </dd>
                     </div>
                   )}
                 </dl>
@@ -3095,47 +3485,57 @@ export function IncidentReportPage() {
                 </h3>
                 <dl className="ir-detail-dl ir-detail-dl--stacked">
                   <div>
-                    <dt>Complainee</dt>
+                    <dt>Involved party</dt>
                     <dd>{irComplaineeDisplay(irSelected, irStudentNames)}</dd>
                   </div>
                   <div>
-                    <dt>Complainant</dt>
+                    <dt>Reporter</dt>
                     <dd>{irComplainantDisplay(irSelected, irStudentNames)}</dd>
-                  </div>
-                  <div>
-                    <dt>Witness(es)</dt>
-                    <dd>{irWitnessesDisplay(irSelected, irStudentNames)}</dd>
                   </div>
                 </dl>
               </section>
 
-              <section className="ir-detail-section" aria-labelledby="ir-detail-statement">
-                <h3 id="ir-detail-statement" className="ir-detail-section-title">
-                  Statement of Incident
+              <section className="ir-detail-section" aria-labelledby="ir-detail-narrative">
+                <h3 id="ir-detail-narrative" className="ir-detail-section-title">
+                  Narrative
                 </h3>
                 <div className="ir-detail-prose">
-                  {irStatement(irSelected) !== "—" ? (
-                    <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{irStatement(irSelected)}</p>
+                  {irNarrative(irSelected) !== "—" ? (
+                    <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{irNarrative(irSelected)}</p>
                   ) : (
                     <p style={{ margin: 0, color: "#64748b" }}>—</p>
                   )}
                 </div>
               </section>
-
-              <section className="ir-detail-section" aria-labelledby="ir-detail-evidence">
-                <h3 id="ir-detail-evidence" className="ir-detail-section-title">
-                  Supporting Evidences
+              {irImpact(irSelected) !== "—" && (
+                <section className="ir-detail-section" aria-labelledby="ir-detail-impact">
+                  <h3 id="ir-detail-impact" className="ir-detail-section-title">
+                    Impact (from student)
+                  </h3>
+                  <div className="ir-detail-prose">
+                    <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{irImpact(irSelected)}</p>
+                  </div>
+                </section>
+              )}
+              {irSelected?.status === "rejected" && irRejectionMessage(irSelected) !== "—" && (
+                <section className="ir-detail-section" aria-labelledby="ir-detail-rejection">
+                  <h3 id="ir-detail-rejection" className="ir-detail-section-title">
+                    Rejection message (for student email)
+                  </h3>
+                  <p className="ir-detail-hint" style={{ margin: "0 0 8px", color: "#64748b", fontSize: 13 }}>
+                    Not shown in the incident table. Use for email to the student when that is enabled.
+                  </p>
+                  <div className="ir-detail-prose">
+                    <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{irRejectionMessage(irSelected)}</p>
+                  </div>
+                </section>
+              )}
+              <section className="ir-detail-section" aria-labelledby="ir-detail-attachments">
+                <h3 id="ir-detail-attachments" className="ir-detail-section-title">
+                  Attachments
                 </h3>
                 <div className="ir-detail-prose">
-                  {irDetailEvidenceLines.length === 0 ? (
-                    <p style={{ margin: 0, color: "#64748b" }}>—</p>
-                  ) : (
-                    <ul className="ir-detail-evidence-list">
-                      {irDetailEvidenceLines.map((row) => (
-                        <li key={row.key}>{row.text}</li>
-                      ))}
-                    </ul>
-                  )}
+                  <IrIncidentAttachmentsViewer report={irSelected} />
                 </div>
               </section>
 
@@ -3158,16 +3558,15 @@ export function IncidentReportPage() {
                 <button
                   className="cc-btn-primary ir-detail-btn-with-icon"
                   type="button"
-                  disabled={
-                    irSelected.status === "converted_to_case" ||
-                    irSelected.status === "rejected"
-                  }
+                  disabled={!irStaffCanRejectOrConvert(irSelected.status)}
                   title={
-                    irSelected.status === "converted_to_case"
-                      ? "This report is already converted to a case."
-                      : irSelected.status === "rejected"
-                        ? "This report has been rejected."
-                        : undefined
+                    !irStaffCanRejectOrConvert(irSelected.status)
+                      ? irSelected.status === "converted_to_case"
+                        ? "This report is already converted to a case."
+                        : irSelected.status === "rejected"
+                          ? "This report has been rejected."
+                          : "This report cannot be converted."
+                      : undefined
                   }
                   onClick={handleIrDetailConvert}
                 >
@@ -3177,16 +3576,15 @@ export function IncidentReportPage() {
                 <button
                   className="cc-btn-secondary ir-detail-btn-with-icon ir-detail-btn-reject"
                   type="button"
-                  disabled={
-                    irSelected.status === "rejected" ||
-                    irSelected.status === "converted_to_case"
-                  }
+                  disabled={!irStaffCanRejectOrConvert(irSelected.status)}
                   title={
-                    irSelected.status === "rejected"
-                      ? "This report has already been rejected."
-                      : irSelected.status === "converted_to_case"
-                        ? "Converted reports cannot be rejected from here."
-                        : undefined
+                    !irStaffCanRejectOrConvert(irSelected.status)
+                      ? irSelected.status === "rejected"
+                        ? "This report has already been rejected."
+                        : irSelected.status === "converted_to_case"
+                          ? "Converted reports cannot be rejected from here."
+                          : "This report cannot be rejected."
+                      : undefined
                   }
                   onClick={() => {
                     const row = irSelected;
@@ -3241,8 +3639,8 @@ export function IncidentReportPage() {
                     Reason for Rejection Modal
                   </h2>
                   <p className="do-modal-sub">
-                    Please provide a clear justification for rejecting this report. This explanation will be sent
-                    directly to the complainant to inform them why the case will not proceed.
+                    Please provide a clear justification. This message is saved for the student (email when enabled) and
+                    is not shown in the incident report table.
                   </p>
                 </div>
               </div>
@@ -3356,7 +3754,7 @@ export function IncidentReportPage() {
               <div className="cc-field">
                 <div className="cc-label">Detailed Explanation (Mandatory)</div>
                 <p className="ir-reject-hint">
-                  Write a specific note here. This is the exact text the complainant will receive.
+                  Saved as the student rejection message (for email when enabled). Not shown in the incident report table.
                 </p>
                 <textarea
                   className="cc-textarea"
@@ -3394,6 +3792,13 @@ export function IncidentReportPage() {
                   setIrRejectError(null);
                   setIrRejectSaving(true);
                   try {
+                    const reviewedBy = await getSupabaseAuthUserId();
+                    if (!reviewedBy) {
+                      setIrRejectError(
+                        "Your sign-in session is missing. Sign out and sign in again (password + email code).",
+                      );
+                      return;
+                    }
                     const quickLines = [];
                     if (irRejectCommon.duplicate) {
                       quickLines.push("Duplicate: This incident has already been reported.");
@@ -3415,27 +3820,18 @@ export function IncidentReportPage() {
                     if (irRejectCommon.others && irRejectOtherSpec.trim()) {
                       quickLines.push(`Others: ${irRejectOtherSpec.trim()}`);
                     }
-                    const quickBlock =
-                      quickLines.length > 0
-                        ? `Common reasons selected:\n${quickLines.map((l) => `• ${l}`).join("\n")}`
-                        : "Common reasons selected: (none)";
-                    const stamp = new Date().toISOString();
-                    const appended = `---\nRejection (${stamp})\n${quickBlock}\n\nMessage to complainant:\n${detail}`;
-                    const prior = String(irRejectTarget.staff_notes || "").trim();
-                    const staff_notes = prior ? `${prior}\n\n${appended}` : appended;
+                    const rejectPatch = buildIncidentReportRejectUpdate({ quickLines, detail }, reviewedBy);
+                    const rejectId = irRejectTarget.id;
 
                     const { error } = await supabase
-                      .from("discipline_incident_reports")
-                      .update({
-                        status: "rejected",
-                        staff_notes,
-                        complainant_notified_at: new Date().toISOString(),
-                      })
-                      .eq("id", irRejectTarget.id);
+                      .from(INCIDENT_REPORT_TABLE)
+                      .update(rejectPatch)
+                      .eq("id", rejectId);
                     if (error) throw error;
                     await fetchIrReports();
                     showToast("Report rejected and archived.", { variant: "success" });
                     setIrRejectTarget(null);
+                    setIrActiveTab("rejected");
                   } catch (err) {
                     setIrRejectError(err?.message || "Could not reject this report. Try again.");
                   } finally {
@@ -3479,6 +3875,8 @@ export function CaseConferencePage() {
   const [completionSummaryDraft, setCompletionSummaryDraft] = useState("");
   const [completionSaving, setCompletionSaving] = useState(false);
   const [completionFormError, setCompletionFormError] = useState("");
+  const [conferenceSearch, setConferenceSearch] = useState("");
+  const [conferenceStatusFilter, setConferenceStatusFilter] = useState("all");
 
   const {
     conferences,
@@ -3702,6 +4100,27 @@ export function CaseConferencePage() {
     });
   }, [conferences]);
 
+  const filteredConferenceList = useMemo(() => {
+    const q = conferenceSearch.trim().toLowerCase();
+    return conferenceList.filter((c) => {
+      const status = effectiveConferenceStatus(c);
+      const matchesStatus = conferenceStatusFilter === "all" || status === conferenceStatusFilter;
+      const haystack = [
+        c.conferenceId,
+        c.caseId,
+        c.studentName,
+        c.studentId,
+        c.caseTitle,
+        c.location,
+        c.presidingOfficer,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return matchesStatus && (!q || haystack.includes(q));
+    });
+  }, [conferenceList, conferenceSearch, conferenceStatusFilter]);
+
   const calendarCells = useMemo(() => buildMonthGrid(viewMonth), [viewMonth]);
 
   const activeEvents = useMemo(() => {
@@ -3830,6 +4249,84 @@ export function CaseConferencePage() {
               <p className="stat-label">Cancelled</p>
             </div>
           </div>
+
+          <section className="cc-card" style={{ marginTop: 24, marginBottom: 24 }}>
+            <div className="cc-card-header">
+              <div className="cc-search-row">
+                <div className="cc-search">
+                  <div style={{ fontFamily: "Inter, sans-serif", fontWeight: 500, color: "#0f172a", fontSize: 14, marginBottom: 8 }}>
+                    Search hearings
+                  </div>
+                  <input
+                    value={conferenceSearch}
+                    onChange={(e) => setConferenceSearch(e.target.value)}
+                    placeholder="Search by case, student, title, officer, or room..."
+                  />
+                </div>
+                <div style={{ width: 220 }}>
+                  <div style={{ fontFamily: "Inter, sans-serif", fontWeight: 500, color: "#0f172a", fontSize: 14, marginBottom: 8 }}>
+                    Status
+                  </div>
+                  <select
+                    className="cc-input"
+                    value={conferenceStatusFilter}
+                    onChange={(e) => setConferenceStatusFilter(e.target.value)}
+                  >
+                    <option value="all">All conferences</option>
+                    <option value="scheduled">Scheduled</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="cc-table-wrapper">
+              <table className="cc-table">
+                <thead>
+                  <tr>
+                    <th>Case</th>
+                    <th>Student</th>
+                    <th>Schedule</th>
+                    <th>Location</th>
+                    <th>Status</th>
+                    <th className="cases-table-col-action">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredConferenceList.map((c) => (
+                    <tr key={c.conferenceId}>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{formatCaseId(c.caseId)}</div>
+                        <div style={{ color: "#64748b", fontSize: 12 }}>{c.caseTitle}</div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{c.studentName || "—"}</div>
+                        <div style={{ color: "#64748b", fontSize: 12 }}>{c.studentId || "—"}</div>
+                      </td>
+                      <td>
+                        <div>{c.dateLabel}</div>
+                        <div style={{ color: "#64748b", fontSize: 12 }}>{c.timeLabel}</div>
+                      </td>
+                      <td>{c.location || "—"}</td>
+                      <td><ConferencePill conference={c} /></td>
+                      <td className="cases-table-col-action">
+                        <button className="cc-btn-secondary btn-view--fixed" type="button" onClick={() => setSelectedConference(c)}>
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredConferenceList.length === 0 && !dataLoading ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
+                        No conferences found.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </section>
 
           <div className="cc-two-column">
             <section className="cc-col-main cc-card">
@@ -5288,6 +5785,7 @@ const statusColor = (status) => {
 };
 
 export function DocumentRequestsPage() {
+  const [docSearchParams] = useSearchParams();
   const { requests, loading, fetchError, refresh, insertRequest, updateRequest } =
     useDocumentRequests(DO_DOCUMENT_REQUESTS_SEED);
   const [search, setSearch] = useState("");
@@ -5300,6 +5798,16 @@ export function DocumentRequestsPage() {
   const session = useMemo(() => {
     return readCampusCareSession();
   }, []);
+
+  useEffect(() => {
+    const key = String(docSearchParams.get("request") || "").trim();
+    if (!key || requests.length === 0) return;
+    const found = requests.find((r) => {
+      const id = String(r.requestId || r.id || "");
+      return id === key || id.toLowerCase() === key.toLowerCase();
+    });
+    if (found) setSelectedRequest(found);
+  }, [docSearchParams, requests]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -5838,6 +6346,7 @@ function referralDepartmentMetaForIncoming(referringOfficeKey) {
 }
 
 export function ReferralsPage() {
+  const [refSearchParams] = useSearchParams();
   const {
     referrals,
     loading,
@@ -5861,6 +6370,16 @@ export function ReferralsPage() {
   const [partnerHealthReferrals, setPartnerHealthReferrals] = useState([]);
   const [partnerSdaoReferrals, setPartnerSdaoReferrals] = useState([]);
   const [selectedPartnerReferral, setSelectedPartnerReferral] = useState(null);
+
+  useEffect(() => {
+    const key = String(refSearchParams.get("referral") || "").trim();
+    if (!key || referrals.length === 0) return;
+    const found = referrals.find((r) => {
+      const id = String(r.id || r.referralId || "");
+      return id === key || id.toLowerCase() === key.toLowerCase();
+    });
+    if (found) setSelected(found);
+  }, [refSearchParams, referrals]);
 
   useEffect(() => {
     if (!isSupabaseConfigured() || !supabase) return undefined;
@@ -6716,6 +7235,7 @@ export function SanctionsPage() {
   }, [isNewOpen]);
 
   const [form, setForm] = useState({
+    caseId: "",
     studentId: "",
     sanctionType: "",
     notes: "",
@@ -6729,6 +7249,18 @@ export function SanctionsPage() {
   const [errors, setErrors] = useState({});
 
   const sanctionStudentPreview = useMemo(() => {
+    const selectedCase = cases.find((c) => String(c.id) === String(form.caseId));
+    if (selectedCase) {
+      const meta = parseCaseMeta(selectedCase);
+      return {
+        caseId: selectedCase.id,
+        studentName: selectedCase.student,
+        studentId: selectedCase.studentId,
+        program: meta.program,
+        school: meta.school,
+        offensesSummary: `${selectedCase.caseType} (${selectedCase.status})`,
+      };
+    }
     const sidDigits = studentIdDigitsOnly(form.studentId);
     if (sidDigits.length < 10) return null;
     const matches = cases.filter((c) => studentIdDigitsOnly(c.studentId) === sidDigits);
@@ -6745,12 +7277,13 @@ export function SanctionsPage() {
       .join("; ");
     return {
       studentName: last.student,
+      caseId: last.id,
       studentId: last.studentId,
       program: meta.program,
       school: meta.school,
       offensesSummary,
     };
-  }, [form.studentId, cases]);
+  }, [form.caseId, form.studentId, cases]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -6759,6 +7292,7 @@ export function SanctionsPage() {
       return (
         i.studentName.toLowerCase().includes(q) ||
         i.studentId.toLowerCase().includes(q) ||
+        String(i.caseId || "").toLowerCase().includes(q) ||
         i.sanctionId.toLowerCase().includes(q) ||
         i.sanctionType.toLowerCase().includes(q)
       );
@@ -6807,6 +7341,7 @@ export function SanctionsPage() {
               type="button"
               onClick={() => {
                 setForm({
+                  caseId: "",
                   studentId: "",
                   sanctionType: "",
                   notes: "",
@@ -6849,6 +7384,7 @@ export function SanctionsPage() {
                     <th>Sanction ID</th>
                     <th>Student</th>
                     <th>Sanction Type</th>
+                    <th>Case</th>
                     <th>Hours</th>
                     <th>Status</th>
                     <th>Due Date</th>
@@ -6864,6 +7400,13 @@ export function SanctionsPage() {
                         <div style={{ color: "#64748b", fontSize: 12 }}>{i.studentId}</div>
                       </td>
                       <td>{i.sanctionType}</td>
+                      <td>
+                        {i.caseId ? (
+                          <Link to={`/case-management?case=${encodeURIComponent(i.caseId)}`}>{i.caseId}</Link>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                       <td>{i.hours != null && i.hours !== "" ? i.hours : "—"}</td>
                       <td>
                         <span className={`cc-pill ${statusClass(i.status)}`}>{i.status}</span>
@@ -6878,7 +7421,7 @@ export function SanctionsPage() {
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
+                      <td colSpan={8} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
                         No sanctions found.
                       </td>
                     </tr>
@@ -6931,11 +7474,22 @@ export function SanctionsPage() {
                 <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>{selected.sanctionType}</div>
               </div>
 
+              <div style={{ marginTop: 12 }}>
+                <div className="cc-label">Linked case</div>
+                <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>
+                  {selected.caseId ? (
+                    <Link to={`/case-management?case=${encodeURIComponent(selected.caseId)}`}>{selected.caseId}</Link>
+                  ) : (
+                    "—"
+                  )}
+                </div>
+              </div>
+
               <div className="cc-modal-row" style={{ marginTop: 12 }}>
                 <div className="cc-field">
                   <div className="cc-label">Hours</div>
                   <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>
-                    {selected.hours != null && selected.hours !== "" ? selected.hours : "—"}
+                    {selected.hours != null && selected.hours !== "" ? `${selected.completedHours || 0} / ${selected.hours}` : "—"}
                   </div>
                 </div>
                 <div className="cc-field">
@@ -7029,6 +7583,7 @@ export function SanctionsPage() {
                 else if (!sanctionStudentPreview) {
                   nextErrors.studentId = "No student found with this ID in case records.";
                 }
+                if (!sanctionStudentPreview?.caseId) nextErrors.caseId = "Link this sanction to a discipline case.";
                 if (!form.sanctionType) nextErrors.sanctionType = "Sanction Type is required.";
                 if (!sanctionFiledDateLabel) nextErrors.dueDate = "Sanction date could not be set. Close and try again.";
                 if (form.sanctionType === "Community Service") {
@@ -7063,11 +7618,13 @@ export function SanctionsPage() {
                 try {
                   const isCs = form.sanctionType === "Community Service";
                   const newItem = await insertSanction({
+                    caseId: sanctionStudentPreview.caseId,
                     studentName: sanctionStudentPreview.studentName.trim(),
                     studentId: sid,
                     sanctionType: form.sanctionType,
                     status: "In Review",
                     dueDate: sanctionFiledDateLabel,
+                    description: form.notes.trim(),
                     notes: form.notes.trim(),
                     hours: isCs ? form.hours.trim() : "",
                     correspondingOffice: isCs ? form.correspondingOffice : "",
@@ -7085,6 +7642,7 @@ export function SanctionsPage() {
                   setErrors({});
                   setEvidenceFile(null);
                   setForm({
+                    caseId: "",
                     studentId: "",
                     sanctionType: "",
                     notes: "",
@@ -7103,6 +7661,32 @@ export function SanctionsPage() {
             >
               <div className="cc-modal-body">
                 <div className="cc-field">
+                  <div className="cc-label">Linked Case</div>
+                  <select
+                    className={`cc-input${errors.caseId ? " cc-input-error" : ""}`}
+                    value={form.caseId}
+                    onChange={(e) => {
+                      const caseId = e.target.value;
+                      const selectedCase = cases.find((c) => String(c.id) === String(caseId));
+                      setForm((p) => ({
+                        ...p,
+                        caseId,
+                        studentId: selectedCase ? sanitizeDoStudentIdInput(selectedCase.studentId) : p.studentId,
+                      }));
+                    }}
+                    aria-invalid={Boolean(errors.caseId)}
+                  >
+                    <option value="">Select a case for mobile proof tracking</option>
+                    {cases.map((c) => (
+                      <option value={c.id} key={c.id}>
+                        {c.id} - {c.student} ({c.caseType})
+                      </option>
+                    ))}
+                  </select>
+                  {errors.caseId && <div className="cc-form-error" role="alert">{errors.caseId}</div>}
+                </div>
+
+                <div className="cc-field">
                   <div className="cc-label">Student ID</div>
                   <input
                     className={`cc-input${errors.studentId ? " cc-input-error" : ""}`}
@@ -7111,7 +7695,7 @@ export function SanctionsPage() {
                     autoComplete="off"
                     value={form.studentId}
                     onChange={(e) =>
-                      setForm((p) => ({ ...p, studentId: sanitizeDoStudentIdInput(e.target.value) }))
+                      setForm((p) => ({ ...p, caseId: "", studentId: sanitizeDoStudentIdInput(e.target.value) }))
                     }
                     aria-invalid={Boolean(errors.studentId)}
                   />
@@ -7133,6 +7717,9 @@ export function SanctionsPage() {
                     <div style={{ fontWeight: 600, color: "#0f172a" }}>{sanctionStudentPreview.studentName}</div>
                     <div style={{ fontSize: 13, color: "#475569", marginTop: 4 }}>
                       Program: {sanctionStudentPreview.program} · School: {sanctionStudentPreview.school}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#475569", marginTop: 6 }}>
+                      Linked case: {sanctionStudentPreview.caseId}
                     </div>
                     <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>
                       Offenses: {sanctionStudentPreview.offensesSummary}

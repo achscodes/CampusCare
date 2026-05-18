@@ -4,6 +4,8 @@ import { PRIORITY_OPTIONS, STATUS_OPTIONS } from "../data/mockCases";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import {
   buildCaseInsertRow,
+  buildCaseProgressFromEvent,
+  formatCaseStepDateShort,
   normalizeCaseStatus,
   rowToCase,
 } from "../utils/disciplineCaseMapper";
@@ -234,6 +236,13 @@ export function useCases(initialCases = []) {
       const summary = String(closureSummary || "").trim();
       if (!summary) throw new Error("Closure summary is required.");
       const stamp = new Date().toISOString();
+      const current = (useRemote ? remoteCases : localCases).find((c) => c.id === caseId);
+      const progressPatch = current
+        ? buildCaseProgressFromEvent(current, "sanction_issued", {
+            date: formatCaseStepDateShort(stamp),
+            note: summary,
+          })
+        : {};
       await updateCaseFields(
         caseId,
         {
@@ -241,11 +250,12 @@ export function useCases(initialCases = []) {
           closure_summary: summary,
           closed_at: stamp,
           closed_by_user_id: closedByUserId || null,
+          ...progressPatch,
         },
         `[Case closed] ${summary}`,
       );
     },
-    [updateCaseFields],
+    [updateCaseFields, useRemote, remoteCases, localCases],
   );
 
   const syncOngoingStatus = useCallback(
