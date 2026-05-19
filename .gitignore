@@ -1,2 +1,6 @@
 .vercel
 node_modules
+.env
+.env.local
+.env.*.local
+CampusCare-main/Untitled
