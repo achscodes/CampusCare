@@ -124,6 +124,41 @@ export const DO_NAV_ITEMS = [
     ),
   },
   {
+    label: "Proof Submissions",
+    path: "/proof-submissions",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path
+          d="M13.333 4.667L7.333 10.667 4.667 8"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M14 8A6 6 0 112 8a6 6 0 0112 0z"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+      </svg>
+    ),
+  },
+  {
+    label: "NTE Responses",
+    path: "/nte-responses",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path
+          d="M3.333 2h9.334C13.403 2 14 2.597 14 3.333v9.334c0 .736-.597 1.333-1.333 1.333H3.333A1.333 1.333 0 012 12.667V3.333C2 2.597 2.597 2 3.333 2z"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+        <path d="M4.667 5.333h6.666M4.667 8h6.666M4.667 10.667H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     label: "Reports & Analytics",
     path: "/reports",
     icon: (

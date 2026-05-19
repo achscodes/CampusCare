@@ -146,6 +146,31 @@ function defaultNteBodies(caseId: string, studentName: string) {
   return { subject, text, html };
 }
 
+function isPendingStudentId(studentId: string): boolean {
+  return /^PENDING-IR-/i.test(String(studentId || "").trim());
+}
+
+function defaultNteDeadline(issuedAt: Date): string {
+  const d = new Date(issuedAt);
+  d.setDate(d.getDate() + 5);
+  return d.toISOString();
+}
+
+function upsertStep(stepsRaw: unknown, label: string, date: string, note?: string) {
+  const steps = Array.isArray(stepsRaw)
+    ? stepsRaw.filter((s) => s && typeof s === "object").map((s) => ({ ...(s as Record<string, unknown>) }))
+    : [];
+  const step = { label, date, ...(note ? { note } : {}) };
+  const idx = steps.findIndex((s) => String(s.label || "") === label);
+  if (idx >= 0) steps[idx] = { ...steps[idx], ...step };
+  else steps.push(step);
+  return {
+    case_steps: steps,
+    current_step_index: Math.max(0, steps.length - 1),
+    progress_percent: Math.max(20, Math.min(90, steps.length * 12)),
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -177,7 +202,7 @@ Deno.serve(async (req) => {
     const admin = createClient(supabaseUrl, serviceKey);
     const { data: caseRow, error: caseErr } = await admin
       .from("discipline_cases")
-      .select("id, student_name, status")
+      .select("id, student_id, student_name, case_type, description, status, respondent_email, case_steps")
       .eq("id", caseId)
       .maybeSingle();
     if (caseErr) return json({ ok: false, error: caseErr.message }, 500);
@@ -257,7 +282,58 @@ Deno.serve(async (req) => {
     const { error: updErr } = await admin.from("discipline_cases").update(updatePayload).eq("id", caseId);
     if (updErr) return json({ ok: false, error: updErr.message }, 500);
 
-    return json({ ok: true, sentTo: toEmail, nteSentAt: now });
+    let nteId = "";
+    let mobileLinked = false;
+    const studentId = String(caseRow.student_id || "").trim();
+    if (studentId && !isPendingStudentId(studentId)) {
+      nteId = `NTE-${caseId}`;
+      const { data: existingNte, error: existingNteErr } = await admin
+        .from("discipline_nte")
+        .select("id, status")
+        .eq("id", nteId)
+        .maybeSingle();
+      if (existingNteErr) return json({ ok: false, error: existingNteErr.message }, 500);
+
+      const existingStatus = String(existingNte?.status || "").toLowerCase();
+      const nextStatus =
+        existingStatus === "responded" || existingStatus === "escalated"
+          ? existingStatus
+          : "pending_response";
+
+      const baseNtePayload: Record<string, unknown> = {
+        student_id: studentId,
+        case_type: String(caseRow.case_type || "Discipline Case"),
+        description: textBody,
+        deadline_at: defaultNteDeadline(new Date(now)),
+        case_id: caseId,
+        updated_at: now,
+        escalation_reason: "",
+      };
+
+      const nteWrite = existingNte
+        ? admin
+            .from("discipline_nte")
+            .update({
+              ...baseNtePayload,
+              ...(nextStatus === "pending_response" ? { status: nextStatus, issued_at: now } : {}),
+            })
+            .eq("id", nteId)
+        : admin
+            .from("discipline_nte")
+            .insert({
+              id: nteId,
+              ...baseNtePayload,
+              issued_at: now,
+              status: nextStatus,
+              response_attachments: [],
+            });
+
+      const { error: nteErr } = await nteWrite;
+      if (nteErr) return json({ ok: false, error: nteErr.message }, 500);
+      mobileLinked = true;
+    }
+
+    return json({ ok: true, sentTo: toEmail, nteSentAt: now, mobileLinked, nteId });
   } catch (e) {
     return json({ ok: false, error: e instanceof Error ? e.message : "Unexpected error." }, 500);
   }

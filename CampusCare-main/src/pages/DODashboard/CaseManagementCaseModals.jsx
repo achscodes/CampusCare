@@ -1,6 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Minus, X, Send, Eye, Paperclip } from "lucide-react";
-import { formatCaseId } from "../../utils/disciplineCaseMapper";
+import {
+  buildCaseProgressFromEvent,
+  formatCaseId,
+  formatCaseStepDateShort,
+  rowToCase,
+} from "../../utils/disciplineCaseMapper";
 import { readCampusCareSession } from "../../utils/campusCareSession";
 import { supabase } from "../../lib/supabaseClient";
 import {
@@ -233,7 +238,7 @@ export function CaseManagementNteModal({
         filename,
         content,
       }));
-      await sendDisciplineNteNotice({
+      const result = await sendDisciplineNteNotice({
         caseId: selectedCase.id,
         toEmail: nteToEmail.trim(),
         subject: nteSubject.trim() || content.subject,
@@ -241,10 +246,31 @@ export function CaseManagementNteModal({
         textBody: bodyText,
         attachments: attachments.length ? attachments : undefined,
       });
+      if (supabase) {
+        const { data: caseRow } = await supabase
+          .from("discipline_cases")
+          .select("*")
+          .eq("id", selectedCase.id)
+          .maybeSingle();
+        if (caseRow) {
+          const progressPatch = buildCaseProgressFromEvent(rowToCase(caseRow), "nte_sent", {
+            date: formatCaseStepDateShort(),
+          });
+          await supabase
+            .from("discipline_cases")
+            .update({ ...progressPatch, updated_at: new Date().toISOString() })
+            .eq("id", selectedCase.id);
+        }
+      }
       await refreshCases();
       setNteModalOpen(false);
       setSelectedCase(null);
-      showToast("NTE notice sent. Case marked as Pending.", { variant: "success" });
+      showToast(
+        result?.mobileLinked
+          ? "NTE notice sent and linked to the student mobile app."
+          : "NTE notice sent by email only.",
+        { variant: "success" },
+      );
     } catch (err) {
       setCaseModalError(err?.message || "Could not send NTE notice.");
     } finally {

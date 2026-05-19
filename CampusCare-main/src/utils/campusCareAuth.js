@@ -1,8 +1,26 @@
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { isWelfareAdminSession } from "./welfareAdmin";
-import { clearCampusCareSession, writeCampusCareSession } from "./campusCareSession";
+import { clearCampusCareSession, readCampusCareSession, writeCampusCareSession } from "./campusCareSession";
 import { devLog, devWarn } from "./devLog";
 import { isHsoAdminSession, normalizeHsoDesignation } from "./hsoAccess";
+
+/**
+ * Supabase Auth user id (`auth.users.id`) for RLS columns such as `reviewed_by`.
+ * Falls back to `campuscare_session_v1.userId` when it matches the same id.
+ */
+export async function getSupabaseAuthUserId() {
+  if (!isSupabaseConfigured() || !supabase) {
+    return readCampusCareSession()?.userId ?? null;
+  }
+  try {
+    const { data } = await supabase.auth.getUser();
+    const uid = data?.user?.id ?? null;
+    if (uid) return uid;
+  } catch {
+    /* fall through */
+  }
+  return readCampusCareSession()?.userId ?? null;
+}
 
 export async function logoutCampusCare() {
   if (isSupabaseConfigured() && supabase) {

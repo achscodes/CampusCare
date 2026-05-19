@@ -3,6 +3,7 @@ import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { useDONotificationStore } from "../stores/doNotificationStore";
 import { readCampusCareSession } from "../utils/campusCareSession";
 import { formatCaseId } from "../utils/disciplineCaseMapper";
+import { irDisplayReportId } from "../utils/disciplineIncidentReportMapper";
 import { normalizeOfficeKey, officeKeyFromInterOfficeLabel } from "../constants/documentRequestAccess";
 import { normalizeHsoDesignation } from "../utils/hsoAccess";
 import {
@@ -22,8 +23,9 @@ function mapNotificationRow(row) {
   };
 }
 
-async function pushImportant(userId, title, body, category = "workflow") {
+async function pushImportant(userId, title, body, category = "workflow", opts = {}) {
   if (!userId || !isSupabaseConfigured() || !supabase) return;
+  const path = opts.path ? String(opts.path) : null;
   const { data, error } = await supabase
     .from("notifications")
     .insert({
@@ -37,10 +39,18 @@ async function pushImportant(userId, title, body, category = "workflow") {
 
   if (error || !data) {
     const id = `rt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    useDONotificationStore.getState().prependNotification({ id, title, body, createdAt: new Date().toLocaleString(), unread: true });
+    useDONotificationStore.getState().prependNotification({
+      id,
+      title,
+      body,
+      path,
+      createdAt: new Date().toLocaleString(),
+      unread: true,
+    });
     return;
   }
-  useDONotificationStore.getState().upsertNotification(mapNotificationRow(data));
+  const row = mapNotificationRow(data);
+  useDONotificationStore.getState().upsertNotification(path ? { ...row, path } : row);
 }
 
 function myOfficeKey() {
@@ -141,6 +151,38 @@ export function useDONotificationsRealtime() {
       .channel(`campus_staff_notifications_${office || "anon"}`)
       .on(
         "postgres_changes",
+        { event: "INSERT", schema: "public", table: "discipline_incident_reports" },
+        (payload) => {
+          if (office !== "discipline") return;
+          if (!canViewNotificationCategory("workflow", office, hsoDesignation)) return;
+          const row = payload.new || {};
+          const reportId = row.id != null ? String(row.id) : "";
+          const label = reportId ? irDisplayReportId(reportId) : "Incident report";
+          const type =
+            row.incident_type != null && String(row.incident_type).trim()
+              ? String(row.incident_type).trim()
+              : "";
+          void pushImportant(
+            myUserId,
+            "New incident report (student app)",
+            [
+              label,
+              type,
+              "Submitted from mobile — open Incident Report to review.",
+            ]
+              .filter(Boolean)
+              .join(" · "),
+            "workflow",
+            {
+              path: reportId
+                ? `/incident-report?report=${encodeURIComponent(reportId)}`
+                : "/incident-report",
+            },
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "discipline_cases" },
         (payload) => {
           if (office && office !== "discipline") return;
@@ -154,16 +196,22 @@ export function useDONotificationsRealtime() {
             if (!canViewNotificationCategory("workflow", office, hsoDesignation)) return;
             void pushImportant(
               myUserId,
-              fromStudent ? "Student submitted a report" : "New disciplinary case",
+              fromStudent ? "Student filed a discipline case (app)" : "New disciplinary case",
               [
                 st && `Student: ${st}`,
                 `Case ${idLabel}`,
                 fromStudent
-                  ? "Incident or disciplinary case filed from the student app — review in Case Management."
+                  ? "Filed from the student app — open Case Management to review."
                   : "A new case was filed.",
               ]
                 .filter(Boolean)
                 .join(" · "),
+              "workflow",
+              {
+                path: idRaw
+                  ? `/case-management?case=${encodeURIComponent(idRaw)}`
+                  : "/case-management",
+              },
             );
           } else if (payload.eventType === "UPDATE") {
             const oldRow = payload.old || {};
@@ -194,6 +242,11 @@ export function useDONotificationsRealtime() {
               "New document request",
               `${labelForDoc(row)} A partner office asked your office to fulfill a document request.`,
               category,
+              {
+                path: row?.id
+                  ? `/document-requests?request=${encodeURIComponent(String(row.id))}`
+                  : "/document-requests",
+              },
             );
           }
         },
@@ -231,7 +284,17 @@ export function useDONotificationsRealtime() {
           const category = office === "health" ? "hso:admin" : "workflow";
           if (!canViewNotificationCategory(category, office, hsoDesignation)) return;
           const nm = row?.student_name ? String(row.student_name) : "Student";
-          void pushImportant(myUserId, "New discipline referral", `${nm} — a new referral was created.`, category);
+          void pushImportant(
+            myUserId,
+            "New discipline referral",
+            `${nm} — a new referral was created.`,
+            category,
+            {
+              path: row?.id
+                ? `/referrals?referral=${encodeURIComponent(String(row.id))}`
+                : "/referrals",
+            },
+          );
         },
       )
       .on(

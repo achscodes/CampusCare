@@ -49,6 +49,12 @@ const ReportsPage = lazy(() =>
 const SanctionsPage = lazy(() =>
   import("./pages/DODashboard/DO").then((m) => ({ default: m.SanctionsPage }))
 );
+const ProofSubmissionsPage = lazy(() =>
+  import("./pages/DODashboard/DisciplineMobileReviewPages").then((m) => ({ default: m.ProofSubmissionsPage }))
+);
+const NTEResponseInboxPage = lazy(() =>
+  import("./pages/DODashboard/DisciplineMobileReviewPages").then((m) => ({ default: m.NTEResponseInboxPage }))
+);
 const StudentRecordsPage = lazy(() =>
   import("./pages/DODashboard/DO").then((m) => ({ default: m.StudentRecordsPage }))
 );
@@ -209,6 +215,9 @@ function App() {
             <Route path="/document-requests" element={<RequireOffice office="discipline"><DocumentRequestsPage /></RequireOffice>} />
             <Route path="/referrals" element={<RequireOffice office="discipline"><ReferralsPage /></RequireOffice>} />
             <Route path="/sanctions" element={<RequireOffice office="discipline"><SanctionsPage /></RequireOffice>} />
+            <Route path="/proof-submissions" element={<RequireOffice office="discipline"><ProofSubmissionsPage /></RequireOffice>} />
+            <Route path="/nte-responses" element={<RequireOffice office="discipline"><NTEResponseInboxPage /></RequireOffice>} />
+            <Route path="/nte" element={<RequireOffice office="discipline"><Navigate to="/nte-responses" replace /></RequireOffice>} />
             <Route path="/reports" element={<RequireOffice office="discipline"><ReportsPage /></RequireOffice>} />
             <Route path="/do/profile-settings" element={<RequireOffice office="discipline"><ModuleProfileSettingsRoute variant="do" /></RequireOffice>} />
             <Route path="/sdao/profile-settings" element={<RequireOffice office="development"><ModuleProfileSettingsRoute variant="sdao" /></RequireOffice>} />

@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useDONotificationStore } from "../../stores/doNotificationStore";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import { usePresenceOptional } from "../../context/PresenceContext";
 
 /** Shared notification bell for DO, HSO, and SDAO headers (same store + UI). */
 export default function StaffNotificationBell() {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const presence = usePresenceOptional();
   const dnd = presence?.status === "do_not_disturb";
@@ -12,11 +14,17 @@ export default function StaffNotificationBell() {
   const markRead = useDONotificationStore((s) => s.markNotificationRead);
   const markAllRead = useDONotificationStore((s) => s.markAllNotificationsRead);
 
-  const handleRead = async (id, unread) => {
+  const handleRead = async (notification, unread) => {
+    const id = notification.id;
     if (unread && isSupabaseConfigured() && supabase) {
       await supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("id", id);
     }
     markRead(id);
+    const path = notification.path ? String(notification.path).trim() : "";
+    if (path.startsWith("/")) {
+      setOpen(false);
+      navigate(path);
+    }
   };
 
   const handleMarkAllRead = async () => {
@@ -108,7 +116,7 @@ export default function StaffNotificationBell() {
                     cursor: "pointer",
                     border: n.unread ? "1px solid #e9d5ff" : "1px solid transparent",
                   }}
-                  onClick={() => handleRead(n.id, n.unread)}
+                  onClick={() => handleRead(n, n.unread)}
                 >
                   <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>{n.title}</div>
                   <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>{n.body}</div>
