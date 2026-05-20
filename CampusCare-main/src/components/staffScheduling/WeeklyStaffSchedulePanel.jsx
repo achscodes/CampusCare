@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clock, SquarePen } from "lucide-react";
 import CCModal from "../common/CCModal";
 import { showToast } from "../../utils/toast";
@@ -10,6 +10,11 @@ import {
   normalizeTimeForDb,
   sumWeeklyHours,
 } from "../../utils/staffWeeklySchedule";
+import {
+  fetchStaffAvailabilityRows,
+  replaceStaffAvailabilityForProfile,
+  resolveStaffAvailabilitySchema,
+} from "../../utils/staffAvailabilityQuery";
 import "./WeeklyStaffSchedulePanel.css";
 
 const TABLES = { health: "health_staff_availability", welfare: "welfare_staff_availability" };
@@ -48,6 +53,7 @@ export default function WeeklyStaffSchedulePanel({ supabase, staffRows, mode = "
   const [editingStaff, setEditingStaff] = useState(null);
   const [draft, setDraft] = useState(() => defaultDraftWeek());
   const [saveBusy, setSaveBusy] = useState(false);
+  const schemaRef = useRef(null);
 
   const reload = useCallback(async () => {
     if (!supabase) {
@@ -62,24 +68,28 @@ export default function WeeklyStaffSchedulePanel({ supabase, staffRows, mode = "
     }
     setLoading(true);
     setLoadError(null);
-    const { data, error } = await supabase
-      .from(tableName)
-      .select("profile_id, day_of_week, is_working, start_time, end_time")
-      .in("profile_id", ids);
-    setLoading(false);
-    if (error) {
-      setLoadError(error.message || "Could not load schedules.");
+    try {
+      const { data, error, schema } = await fetchStaffAvailabilityRows(supabase, tableName, ids);
+      if (error) {
+        setLoadError(error.message || "Could not load schedules.");
+        setAvailabilityMap({});
+        return;
+      }
+      schemaRef.current = schema;
+      const next = {};
+      for (const row of data || []) {
+        const pid = String(row.profile_id);
+        const dow = Number(row.day_of_week);
+        if (!next[pid]) next[pid] = {};
+        next[pid][dow] = row;
+      }
+      setAvailabilityMap(next);
+    } catch (err) {
+      setLoadError(err?.message || "Could not load schedules.");
       setAvailabilityMap({});
-      return;
+    } finally {
+      setLoading(false);
     }
-    const next = {};
-    for (const row of data || []) {
-      const pid = String(row.profile_id);
-      const dow = Number(row.day_of_week);
-      if (!next[pid]) next[pid] = {};
-      next[pid][dow] = row;
-    }
-    setAvailabilityMap(next);
   }, [supabase, staffRows, tableName]);
 
   useEffect(() => {
@@ -135,21 +145,17 @@ export default function WeeklyStaffSchedulePanel({ supabase, staffRows, mode = "
         return;
       }
       toInsert.push({
-        profile_id: pid,
         day_of_week: d,
-        is_working: true,
         start_time: st,
         end_time: en,
       });
     }
     setSaveBusy(true);
     try {
-      const { error: delErr } = await supabase.from(tableName).delete().eq("profile_id", pid);
-      if (delErr) throw delErr;
-      if (toInsert.length) {
-        const { error: insErr } = await supabase.from(tableName).insert(toInsert);
-        if (insErr) throw insErr;
-      }
+      const schema = schemaRef.current || (await resolveStaffAvailabilitySchema(supabase, tableName));
+      schemaRef.current = schema;
+      const { error } = await replaceStaffAvailabilityForProfile(supabase, tableName, pid, toInsert, schema);
+      if (error) throw error;
       showToast("Schedule saved.", { variant: "success" });
       setEditingStaff(null);
       await reload();

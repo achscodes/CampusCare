@@ -123,6 +123,19 @@ import {
   isReferralPendingPartnerReview,
   normalizeReferralStatus,
 } from "../../utils/interOfficeWorkflow";
+import {
+  HSO_ANALYTICS_SCHOOLS as PHYSICIAN_ANALYTICS_SCHOOLS,
+  HSO_ANALYTICS_SCHOOL_COLORS as PHYSICIAN_ANALYTICS_SCHOOL_COLORS,
+  appointmentDateInRange as appointmentDateInPhysicianAnalyticsRange,
+  buildPeakHoursSeries,
+  buildSchoolVisitCounts,
+  consultationDateInRange as consultationDateInPhysicianAnalyticsRange,
+  hsoAnalyticsPeriodRange,
+  hsoReportsPeriodRange,
+  isTodayIsoDate,
+  resolvePeakHourLabel,
+  rosterProgramFieldsForStudent,
+} from "../../utils/hsoAnalyticsUtils";
 
 /** Next ticket uses max(queue_number) from today only so old appointments do not inflate the counter. */
 function maxQueueNumberForToday(appointmentsList, nurseVisitors) {
@@ -415,14 +428,6 @@ function latestPrescriptionSnapshot(studentId, consultationRows, recRow) {
   return best;
 }
 
-const PHYSICIAN_ANALYTICS_SCHOOLS = ["SECA", "SASE", "SBMA"];
-
-const PHYSICIAN_ANALYTICS_SCHOOL_COLORS = {
-  SECA: "#2563eb",
-  SASE: "#10b981",
-  SBMA: "#f59e0b",
-};
-
 const HSO_ANALYTICS_MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const HSO_ANALYTICS_PIE_COLORS = [
@@ -447,66 +452,6 @@ function peakMonthSeriesForYearFromConsultations(consultsFilteredForPeriod, year
     counts[d.getMonth()] += 1;
   });
   return HSO_ANALYTICS_MONTH_SHORT.map((month, i) => ({ month, total: counts[i] }));
-}
-
-function hsoAnalyticsPeriodRange(period) {
-  const end = new Date();
-  end.setHours(23, 59, 59, 999);
-  let start;
-  if (period === "today") {
-    start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-  } else if (period === "month") {
-    start = new Date(end.getFullYear(), end.getMonth(), 1);
-  } else {
-    start = new Date(end.getFullYear(), 0, 1);
-  }
-  return { start, end };
-}
-
-function appointmentDateInPhysicianAnalyticsRange(a, start, end) {
-  if (!a?.dateSort) return false;
-  const d = new Date(`${a.dateSort}T12:00:00`);
-  return !Number.isNaN(d.getTime()) && d >= start && d <= end;
-}
-
-function consultationDateInPhysicianAnalyticsRange(c, start, end) {
-  const raw = c?.consultationCreatedAt;
-  if (!raw) return false;
-  const d = new Date(raw);
-  return !Number.isNaN(d.getTime()) && d >= start && d <= end;
-}
-
-function schoolBucketFromProgram(program) {
-  const p = String(program || "").toUpperCase();
-  for (const s of PHYSICIAN_ANALYTICS_SCHOOLS) {
-    if (p.includes(s)) return s;
-  }
-  return null;
-}
-
-function physicianPeakHourSeriesFromAppointments(appts) {
-  const labels = ["8a", "9a", "10a", "11a", "12p", "1p", "2p", "3p", "4p", "5p"];
-  const slots = new Map(labels.map((l) => [l, 0]));
-  const toLabel = (time) => {
-    const raw = String(time || "").trim();
-    if (!raw) return null;
-    const m24 = raw.match(/^([01]?\d|2[0-3]):([0-5]\d)/);
-    if (m24) {
-      let h = Number(m24[1]);
-      const mer = h >= 12 ? "p" : "a";
-      h = h % 12 || 12;
-      return `${h}${mer}`;
-    }
-    const m12 = raw.toLowerCase().match(/^([1-9]|1[0-2])(?::([0-5]\d))?\s*([ap])m?$/);
-    if (m12) return `${m12[1]}${m12[3]}`;
-    return null;
-  };
-  appts.forEach((a) => {
-    const lbl = toLabel(a.time);
-    if (!lbl || !slots.has(lbl)) return;
-    slots.set(lbl, (slots.get(lbl) || 0) + 1);
-  });
-  return labels.map((hour) => ({ hour, total: slots.get(hour) || 0 }));
 }
 
 function hsoAnalyticsPeriodLabel(period) {
@@ -935,12 +880,20 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       setHealthRecordsRows(records);
       setAppointmentsList(appointments);
       try {
-        const { data: studs, error: studErr } = await supabase.from("students").select("student_id, program");
-        if (!studErr && studs?.length) {
+        let studRes = await supabase.from("students").select("student_id, program, course");
+        if (studRes.error && String(studRes.error.message || "").toLowerCase().includes("course")) {
+          studRes = await supabase.from("students").select("student_id, program");
+        }
+        if (!studRes.error && studRes.data?.length) {
           const m = new Map();
-          studs.forEach((s) => {
+          studRes.data.forEach((s) => {
             const id = normalizeStudentIdMatch(s.student_id);
-            if (id) m.set(id, String(s.program ?? "").trim());
+            if (id) {
+              m.set(id, {
+                program: String(s.program ?? "").trim(),
+                course: String(s.course ?? "").trim(),
+              });
+            }
           });
           setStudentProgramsByStudentId(m);
         }
@@ -2443,9 +2396,13 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     }
 
     const rows = [...m.values()].map((row) => {
-      const progFromStudent = studentProgramsByStudentId.get(normalizeStudentIdMatch(row.studentId));
+      const rosterEntry = studentProgramsByStudentId.get(normalizeStudentIdMatch(row.studentId));
       const program =
-        (progFromStudent && String(progFromStudent).trim()) || String(row.program || "").trim() || "—";
+        (typeof rosterEntry === "object"
+          ? rosterEntry?.program
+          : rosterEntry && String(rosterEntry).trim()) ||
+        String(row.program || "").trim() ||
+        "—";
       const lastVisit =
         row.lastVisitMs > 0
           ? new Date(row.lastVisitMs).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })
@@ -3333,30 +3290,67 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     return out;
   }, [appointmentsList]);
 
-  const peakHoursSeries = useMemo(() => {
-    const labels = ["8a", "9a", "10a", "11a", "12p", "1p", "2p", "3p", "4p", "5p"];
-    const slots = new Map(labels.map((l) => [l, 0]));
-    const toLabel = (time) => {
-      const raw = String(time || "").trim();
-      if (!raw) return null;
-      const m24 = raw.match(/^([01]?\d|2[0-3]):([0-5]\d)/);
-      if (m24) {
-        let h = Number(m24[1]);
-        const mer = h >= 12 ? "p" : "a";
-        h = h % 12 || 12;
-        return `${h}${mer}`;
-      }
-      const m12 = raw.toLowerCase().match(/^([1-9]|1[0-2])(?::([0-5]\d))?\s*([ap])m?$/);
-      if (m12) return `${m12[1]}${m12[3]}`;
-      return null;
-    };
+  const peakHoursTodaySeries = useMemo(() => {
+    const labels = [];
     appointmentsList.forEach((a) => {
-      const lbl = toLabel(a.time);
-      if (!lbl || !slots.has(lbl)) return;
-      slots.set(lbl, (slots.get(lbl) || 0) + 1);
+      if (!isTodayIsoDate(a.dateSort)) return;
+      if (!a.checkedInAt && !a.queueNumber && !a.consultationStartedAt) return;
+      const lbl = resolvePeakHourLabel({
+        time: a.time,
+        checkedInAt: a.checkedInAt,
+        consultationStartedAt: a.consultationStartedAt,
+      });
+      if (lbl) labels.push(lbl);
     });
-    return labels.map((hour) => ({ hour, total: slots.get(hour) || 0 }));
-  }, [appointmentsList]);
+    consultationRows.forEach((c) => {
+      if (!c.consultationCreatedAt || !isTodayIsoDate(String(c.consultationCreatedAt).slice(0, 10))) return;
+      const lbl = resolvePeakHourLabel({ time: c.time, createdAt: c.consultationCreatedAt });
+      if (lbl) labels.push(lbl);
+    });
+    return buildPeakHoursSeries(labels);
+  }, [appointmentsList, consultationRows]);
+
+  const peakHoursReportsSeries = useMemo(() => {
+    const { start, end } = hsoReportsPeriodRange(reportsTimeFilter);
+    const labels = [];
+    appointmentsList.forEach((a) => {
+      if (!appointmentDateInPhysicianAnalyticsRange(a, start, end)) return;
+      if (!a.checkedInAt && !a.queueNumber && !a.consultationStartedAt) return;
+      const lbl = resolvePeakHourLabel({
+        time: a.time,
+        checkedInAt: a.checkedInAt,
+        consultationStartedAt: a.consultationStartedAt,
+      });
+      if (lbl) labels.push(lbl);
+    });
+    consultationRows.forEach((c) => {
+      if (!consultationDateInPhysicianAnalyticsRange(c, start, end)) return;
+      const lbl = resolvePeakHourLabel({ time: c.time, createdAt: c.consultationCreatedAt });
+      if (lbl) labels.push(lbl);
+    });
+    return buildPeakHoursSeries(labels);
+  }, [appointmentsList, consultationRows, reportsTimeFilter]);
+
+  const peakHoursAnalyticsSeries = useMemo(() => {
+    const { start, end } = hsoAnalyticsPeriodRange(hsoAnalyticsPeriod);
+    const labels = [];
+    appointmentsList.forEach((a) => {
+      if (!appointmentDateInPhysicianAnalyticsRange(a, start, end)) return;
+      if (!a.checkedInAt && !a.queueNumber && !a.consultationStartedAt) return;
+      const lbl = resolvePeakHourLabel({
+        time: a.time,
+        checkedInAt: a.checkedInAt,
+        consultationStartedAt: a.consultationStartedAt,
+      });
+      if (lbl) labels.push(lbl);
+    });
+    consultationRows.forEach((c) => {
+      if (!consultationDateInPhysicianAnalyticsRange(c, start, end)) return;
+      const lbl = resolvePeakHourLabel({ time: c.time, createdAt: c.consultationCreatedAt });
+      if (lbl) labels.push(lbl);
+    });
+    return buildPeakHoursSeries(labels);
+  }, [appointmentsList, consultationRows, hsoAnalyticsPeriod]);
 
   const topComplaints = useMemo(() => {
     const tally = new Map();
@@ -3379,23 +3373,20 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       healthRecordsRows.map((r) => [normalizeStudentIdMatch(r.studentId), r]),
     );
 
-    const programForSid = (sid) => {
-      const k = normalizeStudentIdMatch(sid);
-      const fromStudent = studentProgramsByStudentId.get(k);
-      if (fromStudent) return fromStudent;
-      return String(recordByStudent.get(k)?.program || "").trim();
-    };
+    const programForSid = (sid) =>
+      rosterProgramFieldsForStudent(
+        studentProgramsByStudentId,
+        normalizeStudentIdMatch(sid),
+        recordByStudent,
+      );
 
-    const schoolCounts = { SECA: 0, SASE: 0, SBMA: 0 };
+    const schoolCounts = buildSchoolVisitCounts(appts, consults, (sid) => programForSid(sid));
     const programVisitTally = new Map();
 
     let certCount = 0;
     for (const c of consults) {
-      const prog = programForSid(c.studentId);
-      const bucket = schoolBucketFromProgram(prog);
-      if (bucket) schoolCounts[bucket] += 1;
-
-      const pk = prog || "Unknown";
+      const fields = programForSid(c.studentId);
+      const pk = fields.program || fields.course || "Unknown";
       programVisitTally.set(pk, (programVisitTally.get(pk) || 0) + 1);
 
       const cert = String(c.certReason || c.certificateReason || "").trim();
@@ -3458,7 +3449,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       ["Month", "HSO visits (consultations in period)"],
       ...d.peakMonthSeries.map((r) => [r.month, String(r.total)]),
       [],
-      ["School", "Consultations"],
+      ["School", "Visits"],
       ...PHYSICIAN_ANALYTICS_SCHOOLS.map((s) => [s, String(d.schoolCounts[s])]),
       [],
       ["Program (students.program)", "Consultations"],
@@ -4108,7 +4099,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
             <div className="do-panel-body" style={{ padding: "18px 22px" }}>
               <div style={{ width: "100%", height: 220 }}>
                 <ResponsiveContainer>
-                  <BarChart data={peakHoursSeries}>
+                  <BarChart data={peakHoursTodaySeries}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="hour" />
                     <YAxis />
@@ -4557,6 +4548,26 @@ function HealthServices({ embedReportsOnly = false } = {}) {
 
         <div className="do-panel" style={{ marginBottom: 20 }}>
           <div className="do-panel-header">
+            <h2 className="do-panel-title">Peak hours</h2>
+          </div>
+          <div className="do-panel-body" style={{ padding: "16px 20px 24px" }}>
+            <p className="hs-stat-meta" style={{ marginTop: 0 }}>
+              Check-ins and consultations in {hsoAnalyticsPeriodLabel(hsoAnalyticsPeriod).toLowerCase()}, bucketed by hour of arrival or consult start.
+            </p>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={peakHoursAnalyticsSeries} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="hour" tick={{ fontSize: 12 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Bar dataKey="total" fill="#2563eb" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="do-panel" style={{ marginBottom: 20 }}>
+          <div className="do-panel-header">
             <h2 className="do-panel-title">Peak month</h2>
           </div>
           <div className="do-panel-body" style={{ padding: "16px 20px 24px" }}>
@@ -4605,7 +4616,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
-                <p className="hs-stat-meta">No SECA / SASE / SBMA matches in student program text for this period.</p>
+                <p className="hs-stat-meta">No SECA / SASE / SBMA matches in student program or course for this period.</p>
               )}
             </div>
           </div>
@@ -6582,7 +6593,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
           <div className="do-panel-header"><h2 className="do-panel-title">Peak Hours</h2></div>
           <div className="do-panel-body" style={{ padding: "16px 20px" }}>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={peakHoursSeries}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="hour" /><YAxis /><Tooltip /><Bar dataKey="total" fill="#3b82f6" radius={[6, 6, 0, 0]} /></BarChart>
+              <BarChart data={peakHoursReportsSeries}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="hour" /><YAxis /><Tooltip /><Bar dataKey="total" fill="#3b82f6" radius={[6, 6, 0, 0]} /></BarChart>
             </ResponsiveContainer>
           </div>
         </div>
