@@ -58,8 +58,7 @@ import CCModal from "../../components/common/CCModal";
 import WeeklyStaffSchedulePanel from "../../components/staffScheduling/WeeklyStaffSchedulePanel";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
 import { useDONotificationsRealtime } from "../../hooks/useDONotificationsRealtime";
-import { useRealtimeAppointments } from "../../hooks/useRealtimeAppointments";
-import { useRealtimeMedicalRecords } from "../../hooks/useRealtimeMedicalRecords";
+import { useRealtimeHsoData } from "../../hooks/useRealtimeHsoData";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import {
   loadHsoFromSupabase,
@@ -817,21 +816,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
   const session = useLiveCampusCareSession();
 
   useDONotificationsRealtime();
-
-  // Realtime update handlers
-  const handleAppointmentsUpdate = useCallback((payload) => {
-    console.log('Appointments updated, consider refetching...');
-    // TODO: Implement refetch or state update for appointments
-  }, []);
-
-  const handleRecordsUpdate = useCallback((payload) => {
-    console.log('Medical records updated, consider refetching...');
-    // TODO: Implement refetch or state update for medical records
-  }, []);
-
-  // Use Realtime hooks
-  useRealtimeAppointments(handleAppointmentsUpdate);
-  useRealtimeMedicalRecords(handleRecordsUpdate);
   const canInterOfficeDocRequest = canCreateDocumentRequest(session?.office);
   const userDesignation = normalizeHsoDesignation(session?.designation);
   const isNurseUser = userDesignation === "nurse";
@@ -915,20 +899,22 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     if (embedReportsOnly && activeNav !== "reports") setActiveNav("reports");
   }, [embedReportsOnly, activeNav]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!isSupabaseConfigured() || !supabase) return;
-      const { data: authData } = await supabase.auth.getSession();
-      if (!authData?.session) return;
+  const hsoLoadingRef = useRef(false);
+  const reloadHsoData = useCallback(async ({ silent = false } = {}) => {
+    if (!isSupabaseConfigured() || !supabase) return;
+    if (hsoLoadingRef.current) return;
+    const { data: authData } = await supabase.auth.getSession();
+    if (!authData?.session) return;
+    hsoLoadingRef.current = true;
+    if (!silent) {
       setHsoLoading(true);
       setHsoLoadError(null);
+    }
+    try {
       const [res, staffRes] = await Promise.all([
         loadHsoFromSupabase(supabase),
         loadHsoStaffFromSupabase(supabase),
       ]);
-      if (cancelled) return;
-      setHsoLoading(false);
       if (!res.ok) {
         setHsoLoadError(res.error?.message || "Could not load Health Services data from Supabase.");
         return;
@@ -945,7 +931,6 @@ function HealthServices({ embedReportsOnly = false } = {}) {
       } catch (enrichErr) {
         console.warn("[HealthServices] roster name enrich failed", enrichErr);
       }
-      if (cancelled) return;
       setConsultationRows(consultations);
       setHealthRecordsRows(records);
       setAppointmentsList(appointments);
@@ -970,11 +955,19 @@ function HealthServices({ embedReportsOnly = false } = {}) {
         setAdminStaffRows(staffRes.staffRows || []);
         setPendingApprovalRows(staffRes.pendingApprovals || []);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } finally {
+      hsoLoadingRef.current = false;
+      if (!silent) setHsoLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void reloadHsoData();
+  }, [reloadHsoData]);
+
+  useRealtimeHsoData(() => {
+    void reloadHsoData({ silent: true });
+  });
 
   const confirmLogout = async () => {
     setLogoutOpen(false);
@@ -1658,7 +1651,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     setActiveNurseSessionId(nextRow.id);
     setNurseTriageForm({ ...INITIAL_NURSE_TRIAGE });
     const announceLine = buildStationAnnouncement("nurse", nextRow.queueNumber);
-    if (announceLine) void speakQueueAnnouncement(announceLine, { repeats: 3 });
+    if (announceLine) void speakQueueAnnouncement(announceLine, { repeats: 2 });
 
     let advancedOk = true;
     if (nextRow.source === "student") {
@@ -1773,7 +1766,7 @@ function HealthServices({ embedReportsOnly = false } = {}) {
     const pq = String(appt.providerQueue ?? appt.designation ?? "").toLowerCase();
     const stationKey = pq === "dentist" ? "dentist" : "physician";
     const providerLine = buildStationAnnouncement(stationKey, appt.queueNumber);
-    if (providerLine) void speakQueueAnnouncement(providerLine, { repeats: 3 });
+    if (providerLine) void speakQueueAnnouncement(providerLine, { repeats: 2 });
 
     const ok = await persistAppointmentWorkflow(appt.id, {
       workflow_status: HSO_WORKFLOW_STATUS.PROVIDER_IN_PROGRESS,

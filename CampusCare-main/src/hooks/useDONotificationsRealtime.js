@@ -139,7 +139,7 @@ export function useDONotificationsRealtime() {
         .order("created_at", { ascending: false })
         .limit(50);
       if (cancelled || !data) return;
-      useDONotificationStore.getState().setNotifications(
+      useDONotificationStore.getState().mergeNotifications(
         data
           .filter((r) => canViewNotificationCategory(r.category, office, hsoDesignation))
           .map(mapNotificationRow),
@@ -215,15 +215,20 @@ export function useDONotificationsRealtime() {
             );
           } else if (payload.eventType === "UPDATE") {
             const oldRow = payload.old || {};
-            const prev = String(oldRow.status || "").toLowerCase();
-            const next = String(row?.status || "").toLowerCase();
-            if (prev === next) return;
-            if (!["pending", "ongoing", "closed"].includes(next)) return;
+            const prev = String(oldRow.status || "").trim().toLowerCase();
+            const next = String(row?.status || "").trim().toLowerCase();
+            if (!next || prev === next) return;
             if (!canViewNotificationCategory("workflow", office, hsoDesignation)) return;
             void pushImportant(
               myUserId,
               "Case status updated",
-              [st && `Student: ${st}`, `Case ${idLabel}`, `Status: ${next || "updated"}.`].filter(Boolean).join(" · "),
+              [st && `Student: ${st}`, `Case ${idLabel}`, `Status: ${titleCaseStatus(next)}.`].filter(Boolean).join(" · "),
+              "workflow",
+              {
+                path: idRaw
+                  ? `/case-management?case=${encodeURIComponent(idRaw)}`
+                  : "/case-management",
+              },
             );
           }
         },
@@ -260,18 +265,36 @@ export function useDONotificationsRealtime() {
           if (!involvedInDocRequest(newRow, office)) return;
           const prev = normalizeInterOfficeDocStatus(oldRow.status);
           const next = normalizeInterOfficeDocStatus(newRow.status);
-          if (prev === next) return;
+          if (!next || prev === next) return;
           const category = office === "health" ? "hso:admin" : "workflow";
           if (!canViewNotificationCategory(category, office, hsoDesignation)) return;
+          const path = newRow?.id
+            ? `/document-requests?request=${encodeURIComponent(String(newRow.id))}`
+            : "/document-requests";
           if (isDocRequestApprovedForFulfillment(newRow.status)) {
             void pushImportant(
               myUserId,
               "Document request approved",
               `${labelForDoc(newRow)} Status: Approved. The receiving office may attach the file.`,
               category,
+              { path },
             );
           } else if (isDocRequestDeclined(newRow.status)) {
-            void pushImportant(myUserId, "Document request declined", `${labelForDoc(newRow)} Status: Declined.`, category);
+            void pushImportant(
+              myUserId,
+              "Document request declined",
+              `${labelForDoc(newRow)} Status: Declined.`,
+              category,
+              { path },
+            );
+          } else {
+            void pushImportant(
+              myUserId,
+              "Document request status updated",
+              `${labelForDoc(newRow)} Status: ${titleCaseStatus(newRow.status)}.`,
+              category,
+              { path },
+            );
           }
         },
       )
@@ -304,15 +327,27 @@ export function useDONotificationsRealtime() {
           const oldRow = payload.old || {};
           const newRow = payload.new || {};
           if (!involvedInDisciplineReferral(newRow, office)) return;
-          const prev = String(oldRow.status || "").toLowerCase();
-          const next = String(newRow.status || "").toLowerCase();
-          if (prev === next) return;
+          const prev = String(oldRow.status || "").trim().toLowerCase();
+          const next = String(newRow.status || "").trim().toLowerCase();
+          if (!next || prev === next) return;
           const category = office === "health" ? "hso:admin" : "workflow";
           if (!canViewNotificationCategory(category, office, hsoDesignation)) return;
+          const nm = newRow?.student_name || "Student";
+          const path = newRow?.id
+            ? `/referrals?referral=${encodeURIComponent(String(newRow.id))}`
+            : "/referrals";
           if (next.includes("approved")) {
-            void pushImportant(myUserId, "Referral approved", `${newRow?.student_name || "Student"} — referral was approved.`, category);
+            void pushImportant(myUserId, "Referral approved", `${nm} — referral was approved.`, category, { path });
           } else if (next.includes("declined") || next.includes("rejected")) {
-            void pushImportant(myUserId, "Referral declined", `${newRow?.student_name || "Student"} — referral was declined.`, category);
+            void pushImportant(myUserId, "Referral declined", `${nm} — referral was declined.`, category, { path });
+          } else {
+            void pushImportant(
+              myUserId,
+              "Referral status updated",
+              `${nm} — status: ${titleCaseStatus(next)}.`,
+              category,
+              { path },
+            );
           }
         },
       )
@@ -323,15 +358,23 @@ export function useDONotificationsRealtime() {
           const oldRow = payload.old || {};
           const newRow = payload.new || {};
           if (!involvedInLabeledReferral(newRow, office)) return;
-          const prev = String(oldRow.status || "").toLowerCase();
-          const next = String(newRow.status || "").toLowerCase();
-          if (prev === next) return;
+          const prev = String(oldRow.status || "").trim().toLowerCase();
+          const next = String(newRow.status || "").trim().toLowerCase();
+          if (!next || prev === next) return;
           const category = office === "health" ? "hso:admin" : "workflow";
           if (!canViewNotificationCategory(category, office, hsoDesignation)) return;
+          const nm = newRow?.student_name || "Student";
           if (next.includes("approved") || next.includes("accepted") || next.includes("completed")) {
-            void pushImportant(myUserId, "Referral approved", `${newRow?.student_name || "Student"} — referral status updated.`, category);
+            void pushImportant(myUserId, "Referral approved", `${nm} — referral status updated.`, category);
           } else if (next.includes("declined") || next.includes("rejected")) {
-            void pushImportant(myUserId, "Referral declined", `${newRow?.student_name || "Student"} — referral was declined.`, category);
+            void pushImportant(myUserId, "Referral declined", `${nm} — referral was declined.`, category);
+          } else {
+            void pushImportant(
+              myUserId,
+              "Referral status updated",
+              `${nm} — status: ${titleCaseStatus(next)}.`,
+              category,
+            );
           }
         },
       )
@@ -342,16 +385,50 @@ export function useDONotificationsRealtime() {
           const oldRow = payload.old || {};
           const newRow = payload.new || {};
           if (!involvedInLabeledReferral(newRow, office)) return;
-          const prev = String(oldRow.status || "").toLowerCase();
-          const next = String(newRow.status || "").toLowerCase();
-          if (prev === next) return;
+          const prev = String(oldRow.status || "").trim().toLowerCase();
+          const next = String(newRow.status || "").trim().toLowerCase();
+          if (!next || prev === next) return;
           const category = office === "health" ? "hso:admin" : "workflow";
           if (!canViewNotificationCategory(category, office, hsoDesignation)) return;
+          const nm = newRow?.student_name || "Student";
           if (next.includes("approved") || next.includes("completed")) {
-            void pushImportant(myUserId, "Referral approved", `${newRow?.student_name || "Student"} — referral status updated.`, category);
+            void pushImportant(myUserId, "Referral approved", `${nm} — referral status updated.`, category);
           } else if (next.includes("declined") || next.includes("rejected")) {
-            void pushImportant(myUserId, "Referral declined", `${newRow?.student_name || "Student"} — referral was declined.`, category);
+            void pushImportant(myUserId, "Referral declined", `${nm} — referral was declined.`, category);
+          } else {
+            void pushImportant(
+              myUserId,
+              "Referral status updated",
+              `${nm} — status: ${titleCaseStatus(next)}.`,
+              category,
+            );
           }
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "discipline_incident_reports" },
+        (payload) => {
+          if (office !== "discipline") return;
+          if (!canViewNotificationCategory("workflow", office, hsoDesignation)) return;
+          const oldRow = payload.old || {};
+          const newRow = payload.new || {};
+          const prev = String(oldRow.status || "").trim().toLowerCase();
+          const next = String(newRow.status || "").trim().toLowerCase();
+          if (!next || prev === next) return;
+          const reportId = newRow?.id != null ? String(newRow.id) : "";
+          const label = reportId ? irDisplayReportId(reportId) : "Incident report";
+          void pushImportant(
+            myUserId,
+            "Incident report status updated",
+            `${label} · Status: ${titleCaseStatus(next)}.`,
+            "workflow",
+            {
+              path: reportId
+                ? `/incident-report?report=${encodeURIComponent(reportId)}`
+                : "/incident-report",
+            },
+          );
         },
       )
       .on(
@@ -378,4 +455,13 @@ function labelForDoc(row) {
   const id = row?.id ? String(row.id) : "Request";
   const doc = row?.document_type ? String(row.document_type) : "document";
   return `${id} — ${doc}.`;
+}
+
+function titleCaseStatus(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "updated";
+  return raw
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }

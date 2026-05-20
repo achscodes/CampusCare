@@ -85,14 +85,6 @@ const LEGACY_CASE_STEP_LABEL_ALIASES = {
   "Sanction updated": MOBILE_CASE_PROGRESS_LABELS.sanctionIssued,
 };
 
-function findLegacyCaseStep(canonicalLabel, incoming) {
-  for (const row of incoming) {
-    if (row.label === canonicalLabel) return row;
-    if (LEGACY_CASE_STEP_LABEL_ALIASES[row.label] === canonicalLabel) return row;
-  }
-  return null;
-}
-
 function formatCaseStepDate(raw = new Date()) {
   return formatCaseDateFromIso(raw) || formatCaseDateFromIso(new Date());
 }
@@ -125,25 +117,98 @@ export function normalizeCaseSteps(steps) {
     : [];
 }
 
-/** Ensures five mobile stepper slots; merges legacy labels and preserves staff-edited titles. */
+function statusPrecedence(status) {
+  if (status === "completed") return 2;
+  if (status === "in_progress") return 1;
+  return 0;
+}
+
+function mergeStepSources(sources) {
+  let mergedStatus = "pending";
+  let mergedDate;
+  let mergedNote;
+  for (const src of sources) {
+    if (!src) continue;
+    const s = normalizeStepStatus(src.status);
+    if (statusPrecedence(s) > statusPrecedence(mergedStatus)) mergedStatus = s;
+    const d = src.date ? String(src.date).trim() : "";
+    if (d) mergedDate = d;
+    const n = src.note ? String(src.note).trim() : "";
+    if (n) mergedNote = n;
+  }
+  return { status: mergedStatus, date: mergedDate, note: mergedNote };
+}
+
+/**
+ * Ensures the canonical five mobile stepper slots. Folds legacy aliases (e.g.
+ * "Case conference scheduled" / "Case conference completed" → "Case Conference")
+ * and de-duplicates rows that converge on the same canonical label, merging
+ * their status (completed > in_progress > pending) and latest date/note.
+ */
 export function ensureCanonicalCaseSteps(steps) {
   const incoming = normalizeCaseSteps(steps);
+  // Each canonical slot collects every incoming row that resolves to it.
+  /** @type {Array<typeof incoming[number]>[]} */
+  const bucketsBySlot = MOBILE_CASE_PROGRESS_TEMPLATE.map(() => []);
+  const claimedRows = new Set();
+
+  // Pass 1 — positional match: row at index `i` claims slot `i` unless its label
+  // resolves elsewhere (e.g. its label is another slot's canonical).
+  incoming.forEach((row, index) => {
+    if (index >= MOBILE_CASE_PROGRESS_TEMPLATE.length) return;
+    const aliasCanonical = LEGACY_CASE_STEP_LABEL_ALIASES[row.label];
+    const aliasIdx = aliasCanonical ? MOBILE_CASE_PROGRESS_TEMPLATE.indexOf(aliasCanonical) : -1;
+    if (aliasIdx >= 0 && aliasIdx !== index) return; // resolve via alias in pass 2
+    const directIdx = MOBILE_CASE_PROGRESS_TEMPLATE.indexOf(row.label);
+    if (directIdx >= 0 && directIdx !== index) return; // belongs to a different canonical slot
+    bucketsBySlot[index].push(row);
+    claimedRows.add(row);
+  });
+
+  // Pass 2 — alias / direct-canonical match for any rows not yet claimed.
+  incoming.forEach((row) => {
+    if (claimedRows.has(row)) return;
+    const aliasCanonical = LEGACY_CASE_STEP_LABEL_ALIASES[row.label];
+    if (aliasCanonical) {
+      const idx = MOBILE_CASE_PROGRESS_TEMPLATE.indexOf(aliasCanonical);
+      if (idx >= 0) {
+        bucketsBySlot[idx].push(row);
+        claimedRows.add(row);
+        return;
+      }
+    }
+    const directIdx = MOBILE_CASE_PROGRESS_TEMPLATE.indexOf(row.label);
+    if (directIdx >= 0) {
+      bucketsBySlot[directIdx].push(row);
+      claimedRows.add(row);
+    }
+  });
+
   return MOBILE_CASE_PROGRESS_TEMPLATE.map((templateLabel, index) => {
-    const atIndex = incoming[index];
-    const legacy = findLegacyCaseStep(templateLabel, incoming);
-    const status = normalizeStepStatus(atIndex?.status || legacy?.status || "pending");
-    const date = atIndex?.date || legacy?.date;
-    const note = atIndex?.note || legacy?.note;
-    const rawLabel = String(atIndex?.label || legacy?.label || templateLabel).trim();
-    const label =
-      rawLabel && !LEGACY_CASE_STEP_LABEL_ALIASES[rawLabel] && rawLabel !== templateLabel
-        ? rawLabel
-        : templateLabel;
+    const sources = bucketsBySlot[index];
+    const merged = mergeStepSources(sources);
+
+    // Preserve a staff-edited title only when it doesn't collide with another
+    // canonical label and isn't a legacy alias key.
+    let label = templateLabel;
+    for (const src of sources) {
+      const raw = String(src?.label || "").trim();
+      if (!raw) continue;
+      if (raw === templateLabel) continue;
+      if (LEGACY_CASE_STEP_LABEL_ALIASES[raw]) continue;
+      const collidesWithAnotherTemplate =
+        MOBILE_CASE_PROGRESS_TEMPLATE.indexOf(raw) >= 0 &&
+        MOBILE_CASE_PROGRESS_TEMPLATE.indexOf(raw) !== index;
+      if (collidesWithAnotherTemplate) continue;
+      label = raw;
+      break;
+    }
+
     return {
       label,
-      status,
-      ...(date ? { date: String(date) } : {}),
-      ...(note ? { note: String(note) } : {}),
+      status: merged.status,
+      ...(merged.date ? { date: merged.date } : {}),
+      ...(merged.note ? { note: merged.note } : {}),
     };
   });
 }

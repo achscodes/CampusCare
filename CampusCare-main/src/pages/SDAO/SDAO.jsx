@@ -27,6 +27,7 @@ import OfficeHeader from "../../components/OfficeHeader/OfficeHeader";
 import StaffNotificationBell from "../../components/common/StaffNotificationBell";
 import CCModal from "../../components/common/CCModal";
 import { useDONotificationsRealtime } from "../../hooks/useDONotificationsRealtime";
+import { useRealtimeSdaoData } from "../../hooks/useRealtimeSdaoData";
 import { useLiveCampusCareSession } from "../../hooks/useLiveCampusCareSession";
 import InterOfficeNewDocumentRequestModal from "../../components/interOffice/InterOfficeNewDocumentRequestModal";
 import { canCreateDocumentRequest, labelForOfficeKey } from "../../constants/documentRequestAccess";
@@ -255,7 +256,7 @@ function SDAO({ embedDashboardOnly = false } = {}) {
   const [sdaoNewDocModalKey, setSdaoNewDocModalKey] = useState(0);
 
   const refreshSdao = useMemo(() => {
-    return async () => {
+    return async ({ silent = false } = {}) => {
       if (!isSupabaseConfigured() || !supabase) {
         setSdaoLoading(false);
         setSdaoError("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
@@ -268,10 +269,12 @@ function SDAO({ embedDashboardOnly = false } = {}) {
         setHealthReferralsIncoming([]);
         return;
       }
-      setSdaoError(null);
-      setSdaoLoading(true);
+      if (!silent) {
+        setSdaoError(null);
+        setSdaoLoading(true);
+      }
       const res = await loadSdaoFromSupabase(supabase);
-      setSdaoLoading(false);
+      if (!silent) setSdaoLoading(false);
       if (!res.ok) {
         setSdaoError(res.error?.message || String(res.error || "Could not load SDAO data."));
         return;
@@ -289,6 +292,10 @@ function SDAO({ embedDashboardOnly = false } = {}) {
   useEffect(() => {
     refreshSdao();
   }, [refreshSdao]);
+
+  useRealtimeSdaoData(() => {
+    void refreshSdao({ silent: true });
+  });
 
   const dashboardDistribution = useMemo(() => {
     const counts = {};

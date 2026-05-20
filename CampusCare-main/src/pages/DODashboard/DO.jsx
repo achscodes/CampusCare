@@ -46,7 +46,6 @@ import {
   useSanctions,
   useStudentRecords,
 } from "../../hooks/useDisciplineOfficeData";
-import { useRealtimeDisciplineCases } from "../../hooks/useRealtimeDisciplineCases";
 import { useRealtimeIncidentReports } from "../../hooks/useRealtimeIncidentReports";
 import {
   buildMonthGrid,
@@ -332,37 +331,117 @@ function DOEvidenceViewer({ evidence }) {
         const item = typeof ev === "string" ? { name: ev } : ev || {};
         const name = item.name || "Attachment";
         const dataUrl = item.dataUrl || "";
-        const mime = String(item.mime || "");
-        const isImg = mime.startsWith("image/") && dataUrl;
+        const mime = String(item.mime || "").toLowerCase();
+        const isImage = mime.startsWith("image/") && dataUrl;
+        const isPdf =
+          dataUrl &&
+          (mime === "application/pdf" ||
+            /\.pdf$/i.test(String(name || "")));
+
+        const previewBox = {
+          border: "1px solid #e2e8f0",
+          borderRadius: 10,
+          padding: 12,
+          background: "#f8fafc",
+        };
+        const headerRow = {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          marginBottom: 8,
+        };
+        const actionsRow = {
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginTop: 8,
+          flexWrap: "wrap",
+        };
+        const viewLinkStyle = {
+          fontSize: 13,
+          fontWeight: 600,
+          color: "#2563eb",
+          textDecoration: "none",
+        };
+        const downloadLinkStyle = {
+          fontSize: 13,
+          fontWeight: 500,
+          color: "#475569",
+          textDecoration: "none",
+        };
 
         return (
-          <div
-            key={`${name}-${idx}`}
-            style={{
-              border: "1px solid #e2e8f0",
-              borderRadius: 10,
-              padding: 12,
-              background: "#f8fafc",
-            }}
-          >
-            <div style={{ fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>{name}</div>
-            {isImg ? (
-              <a href={dataUrl} target="_blank" rel="noopener noreferrer">
-                <img src={dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: 220, borderRadius: 8 }} />
-              </a>
-            ) : null}
-            {dataUrl ? (
+          <div key={`${name}-${idx}`} style={previewBox}>
+            <div style={headerRow}>
+              <div style={{ fontWeight: 600, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis" }} title={name}>
+                {name}
+              </div>
+              {mime ? (
+                <span style={{ fontSize: 11, color: "#64748b", whiteSpace: "nowrap" }}>{mime}</span>
+              ) : null}
+            </div>
+
+            {isImage ? (
               <a
                 href={dataUrl}
-                download={name}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ fontSize: 14, fontWeight: 600, color: "#2563eb" }}
+                style={{ display: "block" }}
               >
-                {isImg ? "Open full size / download" : "Open or download file"}
+                <img
+                  src={dataUrl}
+                  alt={name}
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: 320,
+                    borderRadius: 8,
+                    display: "block",
+                    margin: "0 auto",
+                    background: "#fff",
+                  }}
+                />
               </a>
+            ) : null}
+
+            {isPdf ? (
+              <iframe
+                src={dataUrl}
+                title={name}
+                style={{
+                  width: "100%",
+                  height: 360,
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 8,
+                  background: "#fff",
+                }}
+              />
+            ) : null}
+
+            {!isImage && !isPdf && dataUrl ? (
+              <div style={{ fontSize: 13, color: "#475569" }}>
+                Preview not available for this file type. Use View or Download below.
+              </div>
+            ) : null}
+
+            {dataUrl ? (
+              <div style={actionsRow}>
+                <a href={dataUrl} target="_blank" rel="noopener noreferrer" style={viewLinkStyle}>
+                  View
+                </a>
+                <a
+                  href={dataUrl}
+                  download={name}
+                  rel="noopener noreferrer"
+                  style={downloadLinkStyle}
+                >
+                  Download
+                </a>
+              </div>
             ) : (
-              <span style={{ fontSize: 13, color: "#64748b" }}>Filename only (upload a new case to store viewable copy).</span>
+              <span style={{ fontSize: 13, color: "#64748b" }}>
+                Filename only (upload a new case to store a viewable copy).
+              </span>
             )}
           </div>
         );
@@ -373,39 +452,16 @@ function DOEvidenceViewer({ evidence }) {
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const [selectedCase, setSelectedCase] = useState(null);
-  const [isNewCaseOpen, setIsNewCaseOpen] = useState(false);
-  const [openDropdownId, setOpenDropdownId] = useState(null);
   const {
     cases,
     loading: casesLoading,
     fetchError: casesError,
     refresh: refreshCases,
-    createCase,
     updateCaseStatus,
   } = useCases([]);
 
-  // Realtime update handler
-  const handleCasesUpdate = useCallback((payload) => {
-    console.log('Discipline cases updated, refreshing...');
-    refreshCases(); // Refresh the cases data
-  }, [refreshCases]);
-
-  useRealtimeDisciplineCases(handleCasesUpdate);
-
-  const [newCaseForm, setNewCaseForm] = useState({
-    student: "",
-    studentId: "",
-    school: "",
-    program: "",
-    caseType: "",
-    offenseType: "",
-    description: "",
-    reportedBy: "",
-  });
-  const [newCaseEvidence, setNewCaseEvidence] = useState(null);
-  const [newCaseErrors, setNewCaseErrors] = useState({});
   const [statusUpdate, setStatusUpdate] = useState("pending");
   const [statusNote, setStatusNote] = useState("");
   const [caseModalError, setCaseModalError] = useState(null);
@@ -414,13 +470,12 @@ export function DashboardPage() {
     setCaseModalError(null);
   }, [selectedCase]);
 
+  // New-case creation is owned by Case Management. If the dashboard receives
+  // a legacy ?newCase=1 query param, hand control over to /case-management.
   useEffect(() => {
     if (searchParams.get("newCase") !== "1") return;
-    setIsNewCaseOpen(true);
-    const next = new URLSearchParams(searchParams);
-    next.delete("newCase");
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+    navigate("/case-management?newCase=1", { replace: true });
+  }, [searchParams, navigate]);
 
   const stats = useMemo(() => {
     const newCount = cases.filter((c) => c.status === "new").length;
@@ -483,14 +538,6 @@ export function DashboardPage() {
               <h1>Discipline Office Dashboard</h1>
               <p>Comprehensive overview of disciplinary cases and activities</p>
             </div>
-            <button
-              className="btn-new-case"
-              type="button"
-              onClick={() => setIsNewCaseOpen(true)}
-            >
-              <Plus size={16} strokeWidth={2} aria-hidden />
-              New Case
-            </button>
           </div>
 
           <section className="do-home-metrics" aria-label="Case summary">
@@ -806,355 +853,6 @@ export function DashboardPage() {
         </div>
       )}
 
-      {isNewCaseOpen && (
-        <div
-          className="cc-modal-overlay do-modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="do-new-case-title"
-          onMouseDown={() => setIsNewCaseOpen(false)}
-        >
-          <div
-            className="cc-modal do-modal do-modal--lg do-modal--new-case"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div className="do-modal-head">
-              <button
-                className="do-modal-x"
-                type="button"
-                aria-label="Close"
-                onClick={() => setIsNewCaseOpen(false)}
-              >
-                ×
-              </button>
-              <div className="do-modal-head-row">
-                <div className="do-modal-icon-wrap do-modal-icon-wrap--accent" aria-hidden>
-                  <Plus size={22} strokeWidth={2} />
-                </div>
-                <div>
-                  <h2 id="do-new-case-title" className="do-modal-heading do-modal-heading--blue">
-                    File New Disciplinary Case
-                  </h2>
-                  <p className="do-modal-sub">
-                    Enter the details of the disciplinary case to be filed
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const nextErrors = {};
-                const nmErr = validatePersonName(newCaseForm.student, "Student name");
-                if (nmErr) nextErrors.student = nmErr;
-
-                const sidErr = validateDoStudentId(newCaseForm.studentId, "Student ID");
-                if (sidErr) nextErrors.studentId = sidErr;
-                if (!newCaseForm.caseType) {
-                  nextErrors.caseType = "Case type is required.";
-                }
-                if (!newCaseForm.school) {
-                  nextErrors.school = "School is required.";
-                }
-                if (!newCaseForm.offenseType) {
-                  nextErrors.offenseType = "Offense type is required.";
-                }
-                if (!newCaseForm.description.trim()) {
-                  nextErrors.description = "Case description is required.";
-                }
-                if (!newCaseEvidence) {
-                  nextErrors.evidence = "Attach an evidence document (PDF, Word, image, etc.).";
-                }
-                setNewCaseErrors(nextErrors);
-                if (Object.keys(nextErrors).length > 0) return;
-
-                let evidenceItems = [];
-                try {
-                  evidenceItems = [await fileToEvidenceItem(newCaseEvidence)];
-                } catch (err) {
-                  setNewCaseErrors({ evidence: err?.message || "Could not read evidence file." });
-                  return;
-                }
-
-                try {
-                  const caseDescription = [
-                    newCaseForm.school ? `School: ${newCaseForm.school}` : "",
-                    newCaseForm.offenseType ? `Offense Type: ${newCaseForm.offenseType}` : "",
-                    newCaseForm.description,
-                  ]
-                    .filter(Boolean)
-                    .join("\n\n");
-
-                  await createCase({
-                    student: newCaseForm.student,
-                    studentId: sanitizeDoStudentIdInput(newCaseForm.studentId.trim()),
-                    caseType: newCaseForm.caseType,
-                    description: caseDescription,
-                    program: newCaseForm.program,
-                    school: newCaseForm.school,
-                    offenseType: newCaseForm.offenseType,
-                    reportedBy: newCaseForm.reportedBy,
-                    evidence: evidenceItems,
-                    officer: "Discipline Office",
-                  });
-                  setIsNewCaseOpen(false);
-                  setNewCaseForm({
-                    student: "",
-                    studentId: "",
-                    school: "",
-                    program: "",
-                    caseType: "",
-                    offenseType: "",
-                    description: "",
-                    reportedBy: "",
-                  });
-                  setNewCaseEvidence(null);
-                  setNewCaseErrors({});
-                } catch (err) {
-                  setNewCaseErrors({
-                    _submit: err?.message || "Could not create case. Check Supabase and try again.",
-                  });
-                }
-              }}
-            >
-              <div className="do-modal-body-scroll do-form-stack">
-                {newCaseErrors._submit && (
-                  <div className="cc-form-error" role="alert" style={{ marginBottom: 12 }}>
-                    {newCaseErrors._submit}
-                  </div>
-                )}
-
-                <div className="do-form-grid2">
-                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                    <label className="do-form-label" htmlFor="nf-student">
-                      Student Name <span className="req">*</span>
-                    </label>
-                    <input
-                      id="nf-student"
-                      className={`cc-input${newCaseErrors.student ? " cc-input-error" : ""}`}
-                      placeholder="Enter student name"
-                      value={newCaseForm.student}
-                      onChange={(e) =>
-                        setNewCaseForm((p) => ({ ...p, student: sanitizePersonNameInput(e.target.value) }))
-                      }
-                      aria-invalid={Boolean(newCaseErrors.student)}
-                    />
-                    {newCaseErrors.student && (
-                      <div className="cc-form-error" role="alert">
-                        {newCaseErrors.student}
-                      </div>
-                    )}
-                  </div>
-                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                    <label className="do-form-label" htmlFor="nf-sid">
-                      Student ID <span className="req">*</span>
-                    </label>
-                    <input
-                      id="nf-sid"
-                      className={`cc-input${newCaseErrors.studentId ? " cc-input-error" : ""}`}
-                      placeholder="Enter Student ID"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      value={newCaseForm.studentId}
-                      onChange={(e) =>
-                        setNewCaseForm((p) => ({
-                          ...p,
-                          studentId: sanitizeDoStudentIdInput(e.target.value),
-                        }))
-                      }
-                      aria-invalid={Boolean(newCaseErrors.studentId)}
-                    />
-                    {newCaseErrors.studentId && (
-                      <div className="cc-form-error" role="alert">
-                        {newCaseErrors.studentId}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                  <label className="do-form-label" htmlFor="nf-school">
-                    School <span className="req">*</span>
-                  </label>
-                  <CustomSelect
-                    id="nf-school"
-                    value={newCaseForm.school}
-                    onChange={(v) => {
-                      setNewCaseForm((p) => ({ ...p, school: v, program: "" }));
-                      setOpenDropdownId(null);
-                    }}
-                    options={DO_SCHOOL_OPTIONS}
-                    placeholder="Select school"
-                    error={Boolean(newCaseErrors.school)}
-                    isOpen={openDropdownId === "nf-school"}
-                    onOpen={() => setOpenDropdownId("nf-school")}
-                    onClose={() => setOpenDropdownId(null)}
-                  />
-                  {newCaseErrors.school && (
-                    <div className="cc-form-error" role="alert">
-                      {newCaseErrors.school}
-                    </div>
-                  )}
-                </div>
-
-                <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                  <label className="do-form-label" htmlFor="nf-program">
-                    Program / Course
-                  </label>
-                  <CustomSelect
-                    id="nf-program"
-                    value={newCaseForm.program}
-                    onChange={(v) => {
-                      setNewCaseForm((p) => ({ ...p, program: v }));
-                      setOpenDropdownId(null);
-                    }}
-                    options={newCaseForm.school ? getProgramsForSchool(newCaseForm.school) : NU_PROGRAM_OPTIONS}
-                    placeholder="Select program / course"
-                    error={false}
-                    isOpen={openDropdownId === "nf-program"}
-                    onOpen={() => setOpenDropdownId("nf-program")}
-                    onClose={() => setOpenDropdownId(null)}
-                  />
-                </div>
-
-                <div className="do-form-grid2 do-form-grid2--tight">
-                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                    <label className="do-form-label" htmlFor="nf-offense-type">
-                      Offense Type <span className="req">*</span>
-                    </label>
-                    <CustomSelect
-                      id="nf-offense-type"
-                      value={newCaseForm.offenseType}
-                      onChange={(v) => {
-                        setNewCaseForm((p) => ({ ...p, offenseType: v, caseType: "" }));
-                        setOpenDropdownId(null);
-                      }}
-                      options={DO_OFFENSE_TYPE_OPTIONS}
-                      placeholder="Select offense type"
-                      error={Boolean(newCaseErrors.offenseType)}
-                      isOpen={openDropdownId === "nf-offense-type"}
-                      onOpen={() => setOpenDropdownId("nf-offense-type")}
-                      onClose={() => setOpenDropdownId(null)}
-                    />
-                    {newCaseErrors.offenseType && (
-                      <div className="cc-form-error" role="alert">
-                        {newCaseErrors.offenseType}
-                      </div>
-                    )}
-                  </div>
-                  <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                    <label className="do-form-label" htmlFor="nf-ctype">
-                      Case Type <span className="req">*</span>
-                    </label>
-                    <CustomSelect
-                      id="nf-ctype"
-                      value={newCaseForm.caseType}
-                      onChange={(v) => {
-                        setNewCaseForm((p) => ({ ...p, caseType: v }));
-                        setOpenDropdownId(null);
-                      }}
-                      options={newCaseForm.offenseType
-                        ? getCaseTypesForOffenseType(newCaseForm.offenseType)
-                        : CASE_TYPE_OPTIONS}
-                      placeholder="Select case type"
-                      error={Boolean(newCaseErrors.caseType)}
-                      isOpen={openDropdownId === "nf-ctype"}
-                      onOpen={() => setOpenDropdownId("nf-ctype")}
-                      onClose={() => setOpenDropdownId(null)}
-                    />
-                    {newCaseErrors.caseType && (
-                      <div className="cc-form-error" role="alert">
-                        {newCaseErrors.caseType}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                  <label className="do-form-label" htmlFor="nf-desc">
-                    Case Description <span className="req">*</span>
-                  </label>
-                  <textarea
-                    id="nf-desc"
-                    className={`cc-textarea${newCaseErrors.description ? " cc-input-error" : ""}`}
-                    placeholder="Provide detailed description of the incident…"
-                    value={newCaseForm.description}
-                    onChange={(e) =>
-                      setNewCaseForm((p) => ({ ...p, description: e.target.value }))
-                    }
-                    aria-invalid={Boolean(newCaseErrors.description)}
-                  />
-                  {newCaseErrors.description && (
-                    <div className="cc-form-error" role="alert">
-                      {newCaseErrors.description}
-                    </div>
-                  )}
-                </div>
-
-                <div className="do-form-cell" style={{ marginBottom: 0 }}>
-                  <label className="do-form-label" htmlFor="nf-reporter">
-                    Reported By
-                  </label>
-                  <input
-                    id="nf-reporter"
-                    className="cc-input"
-                    placeholder="Name of reporting person/office"
-                    value={newCaseForm.reportedBy}
-                    onChange={(e) =>
-                      setNewCaseForm((p) => ({ ...p, reportedBy: e.target.value }))
-                    }
-                  />
-                </div>
-
-                <div className="do-form-cell do-file-field" style={{ marginBottom: 0 }}>
-                  <label className="do-form-label" htmlFor="nf-ev">
-                    Evidence / Documents <span className="req">*</span>
-                  </label>
-                  <input
-                    id="nf-ev"
-                    className={`cc-input${newCaseErrors.evidence ? " cc-input-error" : ""}`}
-                    type="file"
-                    accept=".pdf,.doc,.docx,.txt,image/*,.eml,application/pdf"
-                    onChange={(e) => {
-                      setNewCaseEvidence(e.target.files?.[0] || null);
-                      setNewCaseErrors((err) => {
-                        const next = { ...err };
-                        delete next.evidence;
-                        return next;
-                      });
-                    }}
-                    aria-invalid={Boolean(newCaseErrors.evidence)}
-                  />
-                  {newCaseEvidence ? (
-                    <p className="do-file-name">Selected: {newCaseEvidence.name}</p>
-                  ) : (
-                    <p className="do-file-name">Upload supporting documents only.</p>
-                  )}
-                  {newCaseErrors.evidence && (
-                    <div className="cc-form-error" role="alert">
-                      {newCaseErrors.evidence}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="cc-modal-actions">
-                <button
-                  className="cc-btn-secondary"
-                  type="button"
-                  onClick={() => setIsNewCaseOpen(false)}
-                >
-                  Cancel
-                </button>
-                <button className="cc-btn-primary" type="submit">
-                  File Case
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -1276,18 +974,16 @@ export function CaseManagementPage() {
     setCaseModalError(null);
   }, [selectedCase]);
 
-  useEffect(() => {
-    if (!selectedCase || !isSupabaseConfigured() || !supabase) {
-      setSelectedCaseWorkflow({ loading: false, nteRows: [], sanctions: [], proofs: [], proofFiles: [] });
-      return;
-    }
-    let cancelled = false;
-    async function loadWorkflow() {
-      setSelectedCaseWorkflow((prev) => ({ ...prev, loading: true }));
+  const loadSelectedCaseWorkflow = useCallback(
+    async (caseId, { silent = false } = {}) => {
+      if (!caseId || !isSupabaseConfigured() || !supabase) return;
+      if (!silent) {
+        setSelectedCaseWorkflow((prev) => ({ ...prev, loading: true }));
+      }
       try {
         const [nteRes, sanctionRes] = await Promise.all([
-          supabase.from("discipline_nte").select("*").eq("case_id", selectedCase.id),
-          supabase.from("discipline_sanctions").select("*").eq("case_id", selectedCase.id),
+          supabase.from("discipline_nte").select("*").eq("case_id", caseId),
+          supabase.from("discipline_sanctions").select("*").eq("case_id", caseId),
         ]);
         const sanctions = sanctionRes.data || [];
         const sanctionIds = sanctions.map((s) => s.id).filter(Boolean);
@@ -1298,60 +994,157 @@ export function CaseManagementPage() {
         const proofFileRes = proofIds.length
           ? await supabase.from("discipline_proof_files").select("*").in("submission_id", proofIds)
           : { data: [] };
-        if (!cancelled) {
-          const nteRows = nteRes.data || [];
-          setSelectedCaseWorkflow({
-            loading: false,
-            nteRows,
-            sanctions,
-            proofs: proofRes.data || [],
-            proofFiles: proofFileRes.data || [],
-          });
-        }
+        const nteRows = nteRes.data || [];
+        setSelectedCaseWorkflow({
+          loading: false,
+          nteRows,
+          sanctions,
+          proofs: proofRes.data || [],
+          proofFiles: proofFileRes.data || [],
+        });
       } catch {
-        if (!cancelled) {
-          setSelectedCaseWorkflow({ loading: false, nteRows: [], sanctions: [], proofs: [], proofFiles: [] });
-        }
+        setSelectedCaseWorkflow({ loading: false, nteRows: [], sanctions: [], proofs: [], proofFiles: [] });
       }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!selectedCase || !isSupabaseConfigured() || !supabase) {
+      setSelectedCaseWorkflow({ loading: false, nteRows: [], sanctions: [], proofs: [], proofFiles: [] });
+      return undefined;
     }
-    loadWorkflow();
+    let cancelled = false;
+    void loadSelectedCaseWorkflow(selectedCase.id).then(() => {
+      if (cancelled) return;
+    });
     return () => {
       cancelled = true;
     };
-  }, [selectedCase, updateCaseFields]);
+  }, [selectedCase, loadSelectedCaseWorkflow]);
 
-  const searchStudentsForNewCase = useCallback(async (searchQuery) => {
-    const q = searchQuery.trim();
+  useEffect(() => {
+    if (!selectedCase || !isSupabaseConfigured() || !supabase) return undefined;
+    const caseId = selectedCase.id;
+    let timerId = null;
+    const schedule = () => {
+      if (timerId != null) return;
+      timerId = window.setTimeout(() => {
+        timerId = null;
+        void loadSelectedCaseWorkflow(caseId, { silent: true });
+      }, 300);
+    };
+
+    const channel = supabase
+      .channel(`case-workflow-realtime-${caseId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "discipline_nte", filter: `case_id=eq.${caseId}` },
+        schedule,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "discipline_sanctions", filter: `case_id=eq.${caseId}` },
+        schedule,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "discipline_proof_submissions" },
+        schedule,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "discipline_proof_files" },
+        schedule,
+      )
+      .subscribe();
+
+    return () => {
+      if (timerId != null) window.clearTimeout(timerId);
+      supabase.removeChannel(channel);
+    };
+  }, [selectedCase, loadSelectedCaseWorkflow]);
+
+  const studentSearchDebounceRef = useRef(null);
+  const studentSearchSeqRef = useRef(0);
+  const STUDENT_SEARCH_LIMIT = 15;
+  const STUDENT_SEARCH_DEBOUNCE_MS = 250;
+
+  const runStudentSearch = useCallback(async (rawQuery) => {
+    const q = rawQuery.trim();
     if (!q || q.length < 2) {
       setNewCaseStudentMatches([]);
+      setNewCaseStudentLoading(false);
       return;
     }
-    if (!isSupabaseConfigured() || !supabase) {
-      return;
-    }
+    if (!isSupabaseConfigured() || !supabase) return;
+    const requestId = ++studentSearchSeqRef.current;
     setNewCaseStudentLoading(true);
     try {
       const safe = q.replace(/[%(),]/g, " ").trim();
       const { data, error } = await supabase
         .from("students")
-        .select("id, email, first_name, last_name, program, student_id")
+        .select("id, email, first_name, last_name, full_name, program, student_id")
         .or(
-          `student_id.ilike.%${safe}%,email.ilike.%${safe}%,first_name.ilike.%${safe}%,last_name.ilike.%${safe}%`,
+          [
+            `student_id.ilike.%${safe}%`,
+            `email.ilike.%${safe}%`,
+            `first_name.ilike.%${safe}%`,
+            `last_name.ilike.%${safe}%`,
+            `full_name.ilike.%${safe}%`,
+          ].join(","),
         )
-        .limit(8);
+        .limit(STUDENT_SEARCH_LIMIT);
+      if (requestId !== studentSearchSeqRef.current) return;
       if (error) throw error;
       setNewCaseStudentMatches(data || []);
       setShowStudentSearchDropdown(true);
     } catch (err) {
+      if (requestId !== studentSearchSeqRef.current) return;
       console.error("Student search error:", err);
       setNewCaseStudentMatches([]);
     } finally {
-      setNewCaseStudentLoading(false);
+      if (requestId === studentSearchSeqRef.current) {
+        setNewCaseStudentLoading(false);
+      }
     }
   }, []);
 
+  const searchStudentsForNewCase = useCallback(
+    (searchQuery) => {
+      if (studentSearchDebounceRef.current) {
+        window.clearTimeout(studentSearchDebounceRef.current);
+        studentSearchDebounceRef.current = null;
+      }
+      const q = String(searchQuery || "").trim();
+      if (!q || q.length < 2) {
+        studentSearchSeqRef.current += 1;
+        setNewCaseStudentMatches([]);
+        setNewCaseStudentLoading(false);
+        return;
+      }
+      setNewCaseStudentLoading(true);
+      studentSearchDebounceRef.current = window.setTimeout(() => {
+        studentSearchDebounceRef.current = null;
+        void runStudentSearch(q);
+      }, STUDENT_SEARCH_DEBOUNCE_MS);
+    },
+    [runStudentSearch],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (studentSearchDebounceRef.current) {
+        window.clearTimeout(studentSearchDebounceRef.current);
+        studentSearchDebounceRef.current = null;
+      }
+    };
+  }, []);
+
   const selectStudentForNewCase = useCallback((student) => {
-    const fullName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
+    const fullName =
+      String(student.full_name || "").trim() ||
+      [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
     setNewCaseForm((prev) => ({
       ...prev,
       student: fullName || student.email,
@@ -1476,7 +1269,7 @@ export function CaseManagementPage() {
     void syncOngoingStatus(selectedCase.id, hasActiveScheduledConference);
   }, [selectedCase?.id, hasActiveScheduledConference, syncOngoingStatus, selectedCase?.status]);
 
-  const openNteModal = useCallback((caseRow) => {
+  const openNteModal = useCallback(async (caseRow) => {
     if (isPendingCaseStudentId(caseRow.studentId)) {
       setCaseModalError(
         "Resolve the respondent identity before sending a mobile-linked NTE. If only email is known, use email-only outside the mobile workflow.",
@@ -1489,9 +1282,36 @@ export function CaseManagementPage() {
       String(caseRow.respondentEmail || "").trim() ||
       generateNuStudentEmail(caseRow.student) ||
       "";
+
+    let factualAntecedence;
+    const irId = String(caseRow.sourceIncidentReportId || "").trim();
+    if (irId && isSupabaseConfigured() && supabase) {
+      try {
+        const { data: irRow } = await supabase
+          .from(INCIDENT_REPORT_TABLE)
+          .select("narrative, statement_of_incident, description")
+          .eq("id", irId)
+          .maybeSingle();
+        if (irRow) {
+          const narrative = irNarrative(irRow);
+          if (narrative && narrative !== "—") {
+            factualAntecedence = narrative;
+          } else {
+            const stmt = String(irRow.statement_of_incident ?? "").trim();
+            const desc = String(irRow.description ?? "").trim();
+            if (stmt) factualAntecedence = stmt;
+            else if (desc) factualAntecedence = desc;
+          }
+        }
+      } catch {
+        // Best-effort prefill; ignore fetch errors and keep placeholder.
+      }
+    }
+
     const content = buildDefaultNteEmailContent(caseRow.student, caseRow.id, {
       caseType: caseRow.caseType,
       offenseType: caseRow.offenseType,
+      factualAntecedence,
     });
     setNteToEmail(email);
     setNteSubject(content.subject);
@@ -2399,7 +2219,9 @@ export function CaseManagementPage() {
                         }}
                       >
                         {newCaseStudentMatches.map((student) => {
-                          const fullName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
+                          const fullName =
+                            String(student.full_name || "").trim() ||
+                            [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
                           return (
                             <button
                               key={student.id}
@@ -2427,6 +2249,19 @@ export function CaseManagementPage() {
                             </button>
                           );
                         })}
+                        {newCaseStudentMatches.length >= STUDENT_SEARCH_LIMIT ? (
+                          <div
+                            style={{
+                              padding: "8px 12px",
+                              fontSize: 12,
+                              color: "#64748b",
+                              borderTop: "1px solid #f1f5f9",
+                              background: "#f8fafc",
+                            }}
+                          >
+                            Showing first {STUDENT_SEARCH_LIMIT}. Type more to narrow the results.
+                          </div>
+                        ) : null}
                       </div>
                     )}
                   </div>
@@ -7245,8 +7080,43 @@ export function SanctionsPage() {
     completionDate: "",
     communityServiceDetail: "",
   });
-  const [evidenceFile, setEvidenceFile] = useState(null);
   const [errors, setErrors] = useState({});
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmStep, setConfirmStep] = useState(1);
+  const [pendingSanctionPayload, setPendingSanctionPayload] = useState(null);
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [confirmSubmitting, setConfirmSubmitting] = useState(false);
+  const [confirmError, setConfirmError] = useState("");
+
+  const linkedCaseEvidence = useMemo(() => {
+    const linkedCase = cases.find((c) => String(c.id) === String(form.caseId));
+    return Array.isArray(linkedCase?.evidence) ? linkedCase.evidence : [];
+  }, [form.caseId, cases]);
+
+  const resetSanctionForm = () => {
+    setForm({
+      caseId: "",
+      studentId: "",
+      sanctionType: "",
+      notes: "",
+      hours: "",
+      correspondingOffice: "",
+      correspondingOfficeOther: "",
+      completionDate: "",
+      communityServiceDetail: "",
+    });
+    setErrors({});
+  };
+
+  const closeConfirmFlow = () => {
+    setConfirmOpen(false);
+    setConfirmStep(1);
+    setPendingSanctionPayload(null);
+    setConfirmPassword("");
+    setConfirmError("");
+    setConfirmSubmitting(false);
+  };
 
   const sanctionStudentPreview = useMemo(() => {
     const selectedCase = cases.find((c) => String(c.id) === String(form.caseId));
@@ -7340,19 +7210,7 @@ export function SanctionsPage() {
               className="cc-btn-primary"
               type="button"
               onClick={() => {
-                setForm({
-                  caseId: "",
-                  studentId: "",
-                  sanctionType: "",
-                  notes: "",
-                  hours: "",
-                  correspondingOffice: "",
-                  correspondingOfficeOther: "",
-                  completionDate: "",
-                  communityServiceDetail: "",
-                });
-                setEvidenceFile(null);
-                setErrors({});
+                resetSanctionForm();
                 setIsNewOpen(true);
               }}
             >
@@ -7386,7 +7244,6 @@ export function SanctionsPage() {
                     <th>Sanction Type</th>
                     <th>Case</th>
                     <th>Hours</th>
-                    <th>Status</th>
                     <th>Due Date</th>
                     <th className="cases-table-col-action">Action</th>
                   </tr>
@@ -7408,9 +7265,6 @@ export function SanctionsPage() {
                         )}
                       </td>
                       <td>{i.hours != null && i.hours !== "" ? i.hours : "—"}</td>
-                      <td>
-                        <span className={`cc-pill ${statusClass(i.status)}`}>{i.status}</span>
-                      </td>
                       <td>{i.dueDate}</td>
                       <td className="cases-table-col-action">
                         <button className="cc-btn-secondary btn-view--fixed" type="button" onClick={() => setSelected(i)}>
@@ -7421,7 +7275,7 @@ export function SanctionsPage() {
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
+                      <td colSpan={7} style={{ textAlign: "center", padding: "24px 8px", color: "#64748b" }}>
                         No sanctions found.
                       </td>
                     </tr>
@@ -7485,33 +7339,43 @@ export function SanctionsPage() {
                 </div>
               </div>
 
-              <div className="cc-modal-row" style={{ marginTop: 12 }}>
-                <div className="cc-field">
-                  <div className="cc-label">Hours</div>
-                  <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>
-                    {selected.hours != null && selected.hours !== "" ? `${selected.completedHours || 0} / ${selected.hours}` : "—"}
+              {selected.sanctionType === "Community Service" ? (
+                <>
+                  <div className="cc-modal-row" style={{ marginTop: 12 }}>
+                    <div className="cc-field">
+                      <div className="cc-label">Hours</div>
+                      <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>
+                        {selected.hours != null && selected.hours !== ""
+                          ? `${selected.completedHours || 0} / ${selected.hours}`
+                          : "—"}
+                      </div>
+                    </div>
+                    <div className="cc-field">
+                      <div className="cc-label">Completion / end date</div>
+                      <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>
+                        {selected.completionDate || "—"}
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="cc-field">
-                  <div className="cc-label">Completion / end date</div>
-                  <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>{selected.completionDate || "—"}</div>
-                </div>
-              </div>
 
-              <div style={{ marginTop: 12 }}>
-                <div className="cc-label">Corresponding office</div>
-                <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>
-                  {selected.correspondingOffice === "Others"
-                    ? selected.correspondingOfficeOther || "Others"
-                    : selected.correspondingOffice || "—"}
-                </div>
-              </div>
+                  <div style={{ marginTop: 12 }}>
+                    <div className="cc-label">Corresponding office</div>
+                    <div style={{ fontWeight: 600, color: "#0f172a", marginTop: 6 }}>
+                      {selected.correspondingOffice === "Others"
+                        ? selected.correspondingOfficeOther || "Others"
+                        : selected.correspondingOffice || "—"}
+                    </div>
+                  </div>
 
-              {selected.communityServiceDetail ? (
-                <div style={{ marginTop: 12 }}>
-                  <div className="cc-label">Community service detail</div>
-                  <div style={{ color: "#0f172a", fontSize: 14, marginTop: 6 }}>{selected.communityServiceDetail}</div>
-                </div>
+                  {selected.communityServiceDetail ? (
+                    <div style={{ marginTop: 12 }}>
+                      <div className="cc-label">Community service detail</div>
+                      <div style={{ color: "#0f172a", fontSize: 14, marginTop: 6 }}>
+                        {selected.communityServiceDetail}
+                      </div>
+                    </div>
+                  ) : null}
+                </>
               ) : null}
 
               {selected.offensesSummary ? (
@@ -7575,7 +7439,7 @@ export function SanctionsPage() {
             </div>
 
             <form
-              onSubmit={async (e) => {
+              onSubmit={(e) => {
                 e.preventDefault();
                 const nextErrors = {};
                 const sidErr = validateDoStudentId(form.studentId, "Student ID");
@@ -7600,63 +7464,40 @@ export function SanctionsPage() {
                   }
                 }
                 if (!form.notes.trim()) nextErrors.notes = "Notes are required.";
-                if (!evidenceFile) nextErrors.evidence = "Evidence attachment is required.";
 
                 setErrors(nextErrors);
                 if (Object.keys(nextErrors).length > 0) return;
 
                 const sid = sanitizeDoStudentIdInput(form.studentId.trim());
+                const isCs = form.sanctionType === "Community Service";
 
-                let evItems = [];
-                try {
-                  evItems = [await fileToEvidenceItem(evidenceFile)];
-                } catch (err) {
-                  setErrors({ evidence: err?.message || "Could not read file." });
-                  return;
-                }
+                const payload = {
+                  caseId: sanctionStudentPreview.caseId,
+                  studentName: sanctionStudentPreview.studentName.trim(),
+                  studentId: sid,
+                  sanctionType: form.sanctionType,
+                  status: "In Review",
+                  dueDate: sanctionFiledDateLabel,
+                  description: form.notes.trim(),
+                  notes: form.notes.trim(),
+                  hours: isCs ? form.hours.trim() : "",
+                  correspondingOffice: isCs ? form.correspondingOffice : "",
+                  correspondingOfficeOther:
+                    isCs && form.correspondingOffice === "Others" ? form.correspondingOfficeOther.trim() : "",
+                  completionDate: isCs ? form.completionDate.trim() : "",
+                  communityServiceDetail: isCs ? form.communityServiceDetail.trim() : "",
+                  program: sanctionStudentPreview.program,
+                  school: sanctionStudentPreview.school,
+                  offensesSummary: sanctionStudentPreview.offensesSummary,
+                  evidence: linkedCaseEvidence,
+                };
 
-                try {
-                  const isCs = form.sanctionType === "Community Service";
-                  const newItem = await insertSanction({
-                    caseId: sanctionStudentPreview.caseId,
-                    studentName: sanctionStudentPreview.studentName.trim(),
-                    studentId: sid,
-                    sanctionType: form.sanctionType,
-                    status: "In Review",
-                    dueDate: sanctionFiledDateLabel,
-                    description: form.notes.trim(),
-                    notes: form.notes.trim(),
-                    hours: isCs ? form.hours.trim() : "",
-                    correspondingOffice: isCs ? form.correspondingOffice : "",
-                    correspondingOfficeOther:
-                      isCs && form.correspondingOffice === "Others" ? form.correspondingOfficeOther.trim() : "",
-                    completionDate: isCs ? form.completionDate.trim() : "",
-                    communityServiceDetail: isCs ? form.communityServiceDetail.trim() : "",
-                    program: sanctionStudentPreview.program,
-                    school: sanctionStudentPreview.school,
-                    offensesSummary: sanctionStudentPreview.offensesSummary,
-                    evidence: evItems,
-                  });
-                  setSelected(newItem);
-                  setIsNewOpen(false);
-                  setErrors({});
-                  setEvidenceFile(null);
-                  setForm({
-                    caseId: "",
-                    studentId: "",
-                    sanctionType: "",
-                    notes: "",
-                    hours: "",
-                    correspondingOffice: "",
-                    correspondingOfficeOther: "",
-                    completionDate: "",
-                    communityServiceDetail: "",
-                  });
-                  showToast("Sanction created.", { variant: "success" });
-                  await refresh();
-                } catch (err) {
-                  showToast(err?.message || "Could not create sanction.", { variant: "error" });
-                }
+                setPendingSanctionPayload(payload);
+                setConfirmStep(1);
+                setConfirmPassword("");
+                setConfirmError("");
+                setConfirmSubmitting(false);
+                setConfirmOpen(true);
               }}
             >
               <div className="cc-modal-body">
@@ -7866,14 +7707,32 @@ export function SanctionsPage() {
                 </div>
 
                 <div className="cc-field">
-                  <div className="cc-label">Evidence Attachment</div>
-                  <input
-                    className={`cc-input${errors.evidence ? " cc-input-error" : ""}`}
-                    type="file"
-                    onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)}
-                    aria-invalid={Boolean(errors.evidence)}
-                  />
-                  {errors.evidence && <div className="cc-form-error" role="alert">{errors.evidence}</div>}
+                  <div className="cc-label">Evidence (from incident report)</div>
+                  {form.caseId ? (
+                    linkedCaseEvidence.length > 0 ? (
+                      <div
+                        style={{
+                          padding: 12,
+                          borderRadius: 10,
+                          background: "#f8fafc",
+                          border: "1px solid #e2e8f0",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, color: "#475569", marginBottom: 8 }}>
+                          Evidence submitted with the linked case will be attached to this sanction automatically.
+                        </div>
+                        <DOEvidenceViewer evidence={linkedCaseEvidence} />
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 13, color: "#64748b" }}>
+                        No evidence was submitted by the reporter for the linked case. The sanction can still be issued.
+                      </div>
+                    )
+                  ) : (
+                    <div style={{ fontSize: 13, color: "#64748b" }}>
+                      Select a linked case above to see the reporter&apos;s submitted evidence.
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -7882,10 +7741,230 @@ export function SanctionsPage() {
                   Cancel
                 </button>
                 <button className="cc-btn-primary" type="submit">
-                  Create Sanction
+                  Review & Confirm
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {confirmOpen && pendingSanctionPayload && (
+        <div
+          className="cc-modal-overlay do-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={() => {
+            if (!confirmSubmitting) closeConfirmFlow();
+          }}
+        >
+          <div
+            className="cc-modal do-modal"
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{ maxWidth: 520 }}
+          >
+            <div className="cc-modal-header">
+              <div className="cc-modal-title">
+                {confirmStep === 1 ? "Confirm Sanction" : "Verify Your Password"}
+              </div>
+              <button
+                className="cc-modal-close"
+                type="button"
+                aria-label="Close"
+                disabled={confirmSubmitting}
+                onClick={() => closeConfirmFlow()}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="cc-modal-body">
+              {confirmStep === 1 ? (
+                <>
+                  <p style={{ fontSize: 14, color: "#334155", marginBottom: 12 }}>
+                    Please review the details below. Once issued, this sanction will be recorded
+                    against the student and linked to their discipline case.
+                  </p>
+                  <dl className="ir-detail-dl">
+                    <div>
+                      <dt>Student</dt>
+                      <dd>
+                        {pendingSanctionPayload.studentName}
+                        <div style={{ color: "#64748b", fontSize: 12 }}>
+                          {pendingSanctionPayload.studentId}
+                        </div>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Linked case</dt>
+                      <dd>{pendingSanctionPayload.caseId}</dd>
+                    </div>
+                    <div>
+                      <dt>Sanction type</dt>
+                      <dd>{pendingSanctionPayload.sanctionType}</dd>
+                    </div>
+                    {pendingSanctionPayload.sanctionType === "Community Service" ? (
+                      <>
+                        <div>
+                          <dt>Hours</dt>
+                          <dd>{pendingSanctionPayload.hours || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt>Corresponding office</dt>
+                          <dd>
+                            {pendingSanctionPayload.correspondingOffice === "Others"
+                              ? pendingSanctionPayload.correspondingOfficeOther || "Others"
+                              : pendingSanctionPayload.correspondingOffice || "—"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Completion / end date</dt>
+                          <dd>{pendingSanctionPayload.completionDate || "—"}</dd>
+                        </div>
+                      </>
+                    ) : null}
+                    <div>
+                      <dt>Evidence</dt>
+                      <dd>
+                        {pendingSanctionPayload.evidence.length > 0
+                          ? `${pendingSanctionPayload.evidence.length} item(s) auto-attached from incident report`
+                          : "No evidence on file"}
+                      </dd>
+                    </div>
+                  </dl>
+                  {confirmError ? (
+                    <div className="cc-form-error" role="alert" style={{ marginTop: 12 }}>
+                      {confirmError}
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <p style={{ fontSize: 14, color: "#334155", marginBottom: 12 }}>
+                    For security, enter your account password to confirm issuing this sanction.
+                  </p>
+                  <div className="cc-field">
+                    <div className="cc-label">Password</div>
+                    {/* Honeypot inputs trick aggressive password managers (Chrome/Edge/1Password/LastPass)
+                        into binding to these hidden fields instead of the real one. */}
+                    <input
+                      type="text"
+                      name="username"
+                      autoComplete="username"
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
+                      onChange={() => {}}
+                    />
+                    <input
+                      type="password"
+                      name="cc-sanction-honeypot-password"
+                      autoComplete="current-password"
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
+                      onChange={() => {}}
+                    />
+                    <input
+                      id="cc-sanction-confirm-password"
+                      name="cc-sanction-confirm-password"
+                      type="password"
+                      className="cc-input"
+                      value={confirmPassword}
+                      onChange={(e) => {
+                        setConfirmPassword(e.target.value);
+                        if (confirmError) setConfirmError("");
+                      }}
+                      autoComplete="new-password"
+                      data-1p-ignore="true"
+                      data-lpignore="true"
+                      data-form-type="other"
+                      disabled={confirmSubmitting}
+                      autoFocus
+                    />
+                  </div>
+                  {confirmError ? (
+                    <div className="cc-form-error" role="alert" style={{ marginTop: 12 }}>
+                      {confirmError}
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+
+            <div className="cc-modal-actions">
+              {confirmStep === 1 ? (
+                <>
+                  <button
+                    type="button"
+                    className="cc-btn-secondary"
+                    onClick={() => closeConfirmFlow()}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="cc-btn-primary"
+                    onClick={() => {
+                      setConfirmError("");
+                      setConfirmStep(2);
+                    }}
+                  >
+                    Confirm
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="cc-btn-secondary"
+                    disabled={confirmSubmitting}
+                    onClick={() => {
+                      setConfirmError("");
+                      setConfirmStep(1);
+                    }}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className="cc-btn-primary"
+                    disabled={confirmSubmitting || !confirmPassword}
+                    onClick={async () => {
+                      setConfirmSubmitting(true);
+                      setConfirmError("");
+                      try {
+                        const session = readCampusCareSession();
+                        const email = session?.email;
+                        if (!email || !supabase) {
+                          throw new Error("Could not verify your session.");
+                        }
+                        const { error: pwErr } = await supabase.auth.signInWithPassword({
+                          email,
+                          password: confirmPassword,
+                        });
+                        if (pwErr) {
+                          throw new Error("Incorrect password.");
+                        }
+                        const newItem = await insertSanction(pendingSanctionPayload);
+                        setSelected(newItem);
+                        closeConfirmFlow();
+                        setIsNewOpen(false);
+                        resetSanctionForm();
+                        showToast("Sanction issued.", { variant: "success" });
+                        await refresh();
+                      } catch (err) {
+                        setConfirmError(err?.message || "Could not issue sanction.");
+                      } finally {
+                        setConfirmSubmitting(false);
+                      }
+                    }}
+                  >
+                    {confirmSubmitting ? "Issuing…" : "Issue sanction"}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}

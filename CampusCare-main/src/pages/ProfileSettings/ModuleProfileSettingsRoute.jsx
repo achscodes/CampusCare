@@ -126,31 +126,77 @@ export default function ModuleProfileSettingsRoute({ variant }) {
     navigate("/");
   };
 
+  const pageHeading = (
+    <div className="office-ps-page-head">
+      <h1 className="office-ps-page-title">Profile &amp; Settings</h1>
+      <p className="office-ps-page-sub">
+        Manage your CampusCare account, contact details, and office preferences.
+      </p>
+    </div>
+  );
+
+  const profileBody = (
+    <>
+      {pageHeading}
+      <ProfilePasswordRequiredBanner />
+      <OfficeProfileSettings
+        workflow={workflow}
+        onProfileSaved={handleProfileSaved}
+        onAvatarSaved={handleAvatarSaved}
+      />
+    </>
+  );
+
+  const logoutModal = (
+    <CCModal open={logoutOpen} title="Logout" onClose={() => setLogoutOpen(false)} centered showHeader={false}>
+      <div className="sidebar-logout-modal">
+        <div className="sidebar-logout-body">
+          <div className="sidebar-logout-icon-wrap" aria-hidden>
+            <LogOut size={20} strokeWidth={1.75} />
+          </div>
+          <div className="sidebar-logout-copy">
+            <h2 className="sidebar-logout-title" id="sidebar-logout-heading">
+              Logout Confirmation
+            </h2>
+            <p className="sidebar-logout-text">
+              Are you sure you want to logout? Any unsaved changes will be lost.
+            </p>
+          </div>
+        </div>
+        <div className="sidebar-logout-footer">
+          <button
+            type="button"
+            className="sidebar-logout-btn sidebar-logout-btn--secondary"
+            onClick={() => setLogoutOpen(false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="sidebar-logout-btn sidebar-logout-btn--primary"
+            onClick={confirmLogout}
+          >
+            Yes, Logout
+          </button>
+        </div>
+      </div>
+    </CCModal>
+  );
+
   if (variant === "do") {
     return (
       <div className="dashboard-layout do-office-layout">
-        <Sidebar profileSettingsPath={PROFILE_SETTINGS_PATH_DISCIPLINE} />
+        <Sidebar
+          profileSettingsPath={PROFILE_SETTINGS_PATH_DISCIPLINE}
+          onLogoutRequest={() => setLogoutOpen(true)}
+        />
 
         <div className="dashboard-main">
           <DisciplineOfficeTopBar userName={userName} userRole={userRole} avatarUrl={liveAvatarUrl} />
 
-          <main className="dashboard-content do-office-shell do-ps-page">
-            <div className="do-ps-page-head">
-              <div>
-                <h1 className="do-ps-page-title">Profile &amp; Settings</h1>
-                <p className="do-ps-page-sub">
-                  Manage your CampusCare account, contact details, and office preferences.
-                </p>
-              </div>
-            </div>
-            <ProfilePasswordRequiredBanner />
-            <OfficeProfileSettings
-              workflow={workflow}
-              onProfileSaved={handleProfileSaved}
-              onAvatarSaved={handleAvatarSaved}
-            />
-          </main>
+          <main className="dashboard-content do-office-shell do-ps-page">{profileBody}</main>
         </div>
+        {logoutModal}
       </div>
     );
   }
@@ -173,49 +219,9 @@ export default function ModuleProfileSettingsRoute({ variant }) {
             notifications={SDAO_NOTIFICATIONS}
             avatar={headerAvatar}
           />
-          <main className="dashboard-content sdao-page">
-            <header className="sdao-page-header">
-              <div className="sdao-page-header-text">
-                <h1 className="sdao-page-header-title">Profile &amp; Settings</h1>
-                <p className="sdao-page-header-sub">
-                  Manage your CampusCare account, contact details, and office preferences.
-                </p>
-              </div>
-            </header>
-            <ProfilePasswordRequiredBanner />
-            <OfficeProfileSettings
-              workflow={workflow}
-              onProfileSaved={handleProfileSaved}
-              onAvatarSaved={handleAvatarSaved}
-            />
-          </main>
+          <main className="dashboard-content sdao-page">{profileBody}</main>
         </div>
-
-        <CCModal open={logoutOpen} title="Logout" onClose={() => setLogoutOpen(false)} centered showHeader={false}>
-          <div className="sidebar-logout-modal">
-            <div className="sidebar-logout-body">
-              <div className="sidebar-logout-icon-wrap" aria-hidden>
-                <LogOut size={20} strokeWidth={1.75} />
-              </div>
-              <div className="sidebar-logout-copy">
-                <h2 className="sidebar-logout-title" id="sidebar-logout-heading">
-                  Logout Confirmation
-                </h2>
-                <p className="sidebar-logout-text">
-                  Are you sure you want to logout? Any unsaved changes will be lost.
-                </p>
-              </div>
-            </div>
-            <div className="sidebar-logout-footer">
-              <button type="button" className="sidebar-logout-btn sidebar-logout-btn--secondary" onClick={() => setLogoutOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="sidebar-logout-btn sidebar-logout-btn--primary" onClick={confirmLogout}>
-                Yes, Logout
-              </button>
-            </div>
-          </div>
-        </CCModal>
+        {logoutModal}
       </div>
     );
   }
@@ -243,49 +249,9 @@ export default function ModuleProfileSettingsRoute({ variant }) {
           notifications={HS_NOTIFICATIONS}
           avatar={headerAvatar}
         />
-        <main className="dashboard-content hs-page hs-office-shell">
-          <section className="hs-tab-page-heading">
-            <div className="page-title-row">
-              <div>
-                <h1 className="hs-tab-page-title">Profile &amp; Settings</h1>
-                <p className="hs-tab-page-subtitle">
-                  Manage your CampusCare account, contact details, and office preferences.
-                </p>
-              </div>
-            </div>
-          </section>
-          <ProfilePasswordRequiredBanner />
-          <OfficeProfileSettings
-            workflow={workflow}
-            onProfileSaved={handleProfileSaved}
-            onAvatarSaved={handleAvatarSaved}
-          />
-        </main>
+        <main className="dashboard-content hs-page hs-office-shell">{profileBody}</main>
       </div>
-
-      <CCModal open={logoutOpen} title="Logout" onClose={() => setLogoutOpen(false)} centered showHeader={false}>
-        <div className="sidebar-logout-modal">
-          <div className="sidebar-logout-body">
-            <div className="sidebar-logout-icon-wrap" aria-hidden>
-              <LogOut size={20} strokeWidth={1.75} />
-            </div>
-            <div className="sidebar-logout-copy">
-              <h2 className="sidebar-logout-title" id="sidebar-logout-heading">
-                Logout Confirmation
-              </h2>
-              <p className="sidebar-logout-text">Are you sure you want to logout? Any unsaved changes will be lost.</p>
-            </div>
-          </div>
-          <div className="sidebar-logout-footer">
-            <button type="button" className="sidebar-logout-btn sidebar-logout-btn--secondary" onClick={() => setLogoutOpen(false)}>
-              Cancel
-            </button>
-            <button type="button" className="sidebar-logout-btn sidebar-logout-btn--primary" onClick={confirmLogout}>
-              Yes, Logout
-            </button>
-          </div>
-        </div>
-      </CCModal>
+      {logoutModal}
     </div>
   );
 }

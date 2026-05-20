@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { registerToast } from "../../utils/toast";
-import { getPresenceDnd } from "../../utils/presenceDndGate";
 import "./ToastProvider.css";
 
 const ICONS = {
@@ -20,7 +19,6 @@ export default function ToastProvider({ children }) {
   const [items, setItems] = useState([]);
 
   const push = useCallback((message, options = {}) => {
-    if (getPresenceDnd()) return;
     const variant = options.variant ?? "info";
     const duration = options.duration ?? defaultDuration(variant);
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;

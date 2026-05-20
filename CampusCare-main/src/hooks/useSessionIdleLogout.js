@@ -1,10 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { logoutCampusCare } from "../utils/campusCareAuth";
 import { readCampusCareSession } from "../utils/campusCareSession";
 import { isQueueDisplayKioskSession } from "../utils/authKiosk";
-import { SESSION_IDLE_ACTIVITY_EVENTS, SESSION_IDLE_LOGOUT_MS } from "../constants/sessionIdle";
-import { showToast } from "../utils/toast";
+import {
+  SESSION_IDLE_ACTIVITY_EVENTS,
+  SESSION_IDLE_LOGOUT_MS,
+  SESSION_IDLE_WARNING_MS,
+} from "../constants/sessionIdle";
 
 const PUBLIC_PATHS = new Set(["/", "/signin", "/signup", "/forgot-password", "/terms", "/privacy"]);
 
@@ -14,58 +17,99 @@ function isPublicPath(pathname) {
 }
 
 /**
- * Signs the user out after {@link SESSION_IDLE_LOGOUT_MS} without activity.
+ * Two-phase idle handling for signed-in staff (non-kiosk):
+ *   - Warning shown at {@link SESSION_IDLE_WARNING_MS} of inactivity.
+ *   - Auto sign-out at {@link SESSION_IDLE_LOGOUT_MS} of inactivity.
+ *
+ * Returns the warning state and a `keepAlive` callback for the modal.
  */
 export function useSessionIdleLogout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const timerRef = useRef(null);
+  const warningTimerRef = useRef(null);
+  const logoutTimerRef = useRef(null);
+  const lastActivityRef = useRef(Date.now());
   const loggingOutRef = useRef(false);
+  const [warningOpen, setWarningOpen] = useState(false);
+
+  const clearTimers = useCallback(() => {
+    if (warningTimerRef.current) {
+      window.clearTimeout(warningTimerRef.current);
+      warningTimerRef.current = null;
+    }
+    if (logoutTimerRef.current) {
+      window.clearTimeout(logoutTimerRef.current);
+      logoutTimerRef.current = null;
+    }
+  }, []);
+
+  const armTimers = useCallback(() => {
+    clearTimers();
+    warningTimerRef.current = window.setTimeout(() => {
+      const session = readCampusCareSession();
+      if (!session?.userId || isQueueDisplayKioskSession(session)) return;
+      setWarningOpen(true);
+    }, SESSION_IDLE_WARNING_MS);
+
+    logoutTimerRef.current = window.setTimeout(async () => {
+      if (loggingOutRef.current) return;
+      const session = readCampusCareSession();
+      if (!session?.userId) return;
+      if (isQueueDisplayKioskSession(session)) return;
+
+      loggingOutRef.current = true;
+      try {
+        await logoutCampusCare();
+        setWarningOpen(false);
+        navigate("/signin", { replace: true, state: { sessionExpired: true } });
+      } finally {
+        loggingOutRef.current = false;
+      }
+    }, SESSION_IDLE_LOGOUT_MS);
+  }, [clearTimers, navigate]);
+
+  const resetActivity = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    if (warningOpen) setWarningOpen(false);
+    armTimers();
+  }, [armTimers, warningOpen]);
+
+  const getRemainingMs = useCallback(() => {
+    const elapsed = Date.now() - lastActivityRef.current;
+    return Math.max(0, SESSION_IDLE_LOGOUT_MS - elapsed);
+  }, []);
 
   useEffect(() => {
-    const resetTimer = () => {
-      if (timerRef.current) window.clearTimeout(timerRef.current);
-      timerRef.current = window.setTimeout(async () => {
-        if (loggingOutRef.current) return;
-        const session = readCampusCareSession();
-        if (!session?.userId) return;
-        if (isQueueDisplayKioskSession(session)) return;
-
-        loggingOutRef.current = true;
-        try {
-          await logoutCampusCare();
-          showToast("You were signed out after 15 minutes of inactivity.", { variant: "info" });
-          navigate("/signin", { replace: true });
-        } finally {
-          loggingOutRef.current = false;
-        }
-      }, SESSION_IDLE_LOGOUT_MS);
-    };
-
     const onActivity = () => {
       const session = readCampusCareSession();
       if (!session?.userId || isQueueDisplayKioskSession(session)) return;
       if (isPublicPath(location.pathname)) return;
-      resetTimer();
+      lastActivityRef.current = Date.now();
+      if (warningOpen) setWarningOpen(false);
+      armTimers();
     };
 
     const session = readCampusCareSession();
     if (!session?.userId || isQueueDisplayKioskSession(session) || isPublicPath(location.pathname)) {
-      if (timerRef.current) window.clearTimeout(timerRef.current);
+      clearTimers();
+      setWarningOpen(false);
       return undefined;
     }
 
-    resetTimer();
+    lastActivityRef.current = Date.now();
+    armTimers();
 
     for (const ev of SESSION_IDLE_ACTIVITY_EVENTS) {
       window.addEventListener(ev, onActivity, { passive: true });
     }
 
     return () => {
-      if (timerRef.current) window.clearTimeout(timerRef.current);
+      clearTimers();
       for (const ev of SESSION_IDLE_ACTIVITY_EVENTS) {
         window.removeEventListener(ev, onActivity);
       }
     };
-  }, [location.pathname, navigate]);
+  }, [location.pathname, armTimers, clearTimers, warningOpen]);
+
+  return { warningOpen, keepAlive: resetActivity, getRemainingMs };
 }

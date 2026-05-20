@@ -86,6 +86,30 @@ export default function WeeklyStaffSchedulePanel({ supabase, staffRows, mode = "
     reload();
   }, [reload]);
 
+  useEffect(() => {
+    if (!supabase) return undefined;
+    let timerId = null;
+    const schedule = () => {
+      if (timerId != null) return;
+      timerId = window.setTimeout(() => {
+        timerId = null;
+        void reload();
+      }, 350);
+    };
+    const channel = supabase
+      .channel(`staff-schedule-realtime-${tableName}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: tableName },
+        schedule,
+      )
+      .subscribe();
+    return () => {
+      if (timerId != null) window.clearTimeout(timerId);
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, tableName, reload]);
+
   const openEdit = (row) => {
     const pid = String(row.id);
     const rows = Object.values(availabilityMap[pid] || {});

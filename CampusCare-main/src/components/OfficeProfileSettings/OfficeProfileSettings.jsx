@@ -20,8 +20,11 @@ import "../../pages/DODashboard/DO.css";
 /** Max decoded image size before base64 (browser memory); ~600 KB file typical. */
 const PROFILE_AVATAR_MAX_BYTES = 600 * 1024;
 
-/** HSO roles: roster name/email; only profile photo is editable in-app. */
-const HSO_ROSTER_PHOTO_DESIGNATIONS = ["nurse", "physician", "dentist"];
+/**
+ * HSO clinical roles bind their name + email to the roster row, so those fields
+ * stay read-only in this UI. Photo upload is available to every variant.
+ */
+const HSO_ROSTER_LOCKED_DESIGNATIONS = ["nurse", "physician", "dentist"];
 
 /** @type {Record<ProfileSettingsWorkflow, { digestTitle: string; digestDesc: string; alertsTitle: string; alertsDesc: string; remindersTitle: string; remindersDesc: string }>} */
 const NOTIFICATION_COPY = {
@@ -62,8 +65,11 @@ export default function OfficeProfileSettings({ workflow, onProfileSaved, onAvat
 
   const officeKey = normalizeOfficeKey(session?.office);
   const hsoDesignation = normalizeHsoDesignation(session?.designation);
-  const isHsoStaffPhotoProfile =
-    officeKey === "health" && HSO_ROSTER_PHOTO_DESIGNATIONS.includes(hsoDesignation);
+  // Roster-locked identity only applies to HSO clinical staff; photo upload is
+  // available to every variant (DO, SDAO, HSO clinical, and HSO admin).
+  const isRosterLocked =
+    officeKey === "health" && HSO_ROSTER_LOCKED_DESIGNATIONS.includes(hsoDesignation);
+  const canEditAvatar = true;
 
   const rosterName = session?.name?.trim() || "";
   const rosterEmail = session?.email?.trim() || "";
@@ -94,7 +100,7 @@ export default function OfficeProfileSettings({ workflow, onProfileSaved, onAvat
   const [caseAlerts, setCaseAlerts] = useState(true);
   const [hearingReminders, setHearingReminders] = useState(false);
 
-  const displayNameHero = isHsoStaffPhotoProfile ? rosterName || "—" : fullName.trim() || "—";
+  const displayNameHero = isRosterLocked ? rosterName || "—" : fullName.trim() || "—";
 
   const openAvatarEditor = (src) => {
     setEditorImageSrc(src);
@@ -186,7 +192,7 @@ export default function OfficeProfileSettings({ workflow, onProfileSaved, onAvat
       return;
     }
 
-    if (isHsoStaffPhotoProfile) {
+    if (isRosterLocked) {
       return;
     }
 
@@ -207,7 +213,7 @@ export default function OfficeProfileSettings({ workflow, onProfileSaved, onAvat
 
   const notif = NOTIFICATION_COPY[workflow] ?? NOTIFICATION_COPY.discipline;
 
-  const personalLead = isHsoStaffPhotoProfile
+  const personalLead = isRosterLocked
     ? "Your name and email come from your roster account and cannot be edited here. You may update your profile photo below."
     : "Contact details visible to other authorized campus offices.";
 
@@ -217,7 +223,7 @@ export default function OfficeProfileSettings({ workflow, onProfileSaved, onAvat
         <section className="do-ps-card do-ps-card--hero" aria-labelledby="office-ps-identity-heading">
           <div className="do-ps-identity">
             <div>
-              {isHsoStaffPhotoProfile ? (
+              {canEditAvatar ? (
                 <>
                   <input
                     ref={avatarFileRef}
@@ -292,9 +298,9 @@ export default function OfficeProfileSettings({ workflow, onProfileSaved, onAvat
                 id="office-ps-fullname"
                 className="do-ps-input"
                 autoComplete="name"
-                readOnly={isHsoStaffPhotoProfile}
-                value={isHsoStaffPhotoProfile ? rosterName : fullName}
-                onChange={isHsoStaffPhotoProfile ? undefined : (e) => setFullName(e.target.value)}
+                readOnly={isRosterLocked}
+                value={isRosterLocked ? rosterName : fullName}
+                onChange={isRosterLocked ? undefined : (e) => setFullName(e.target.value)}
                 placeholder="Your name as it should appear in CampusCare"
               />
             </div>
@@ -307,9 +313,9 @@ export default function OfficeProfileSettings({ workflow, onProfileSaved, onAvat
                 className="do-ps-input"
                 type="email"
                 autoComplete="email"
-                readOnly={isHsoStaffPhotoProfile}
-                value={isHsoStaffPhotoProfile ? rosterEmail : email}
-                onChange={isHsoStaffPhotoProfile ? undefined : (e) => setEmail(e.target.value)}
+                readOnly={isRosterLocked}
+                value={isRosterLocked ? rosterEmail : email}
+                onChange={isRosterLocked ? undefined : (e) => setEmail(e.target.value)}
                 placeholder="name@institution.edu"
               />
             </div>
@@ -319,7 +325,7 @@ export default function OfficeProfileSettings({ workflow, onProfileSaved, onAvat
               {saveMessage}
             </p>
           ) : null}
-          {isHsoStaffPhotoProfile ? (
+          {isRosterLocked ? (
             <p className="do-ps-card-desc" style={{ marginTop: 16, marginBottom: 0 }}>
               Hover your photo and choose <strong>Update</strong> to upload or crop your picture. Your name stays on file
               from the roster.
@@ -425,7 +431,7 @@ export default function OfficeProfileSettings({ workflow, onProfileSaved, onAvat
         </section>
       </div>
 
-      {isHsoStaffPhotoProfile ? (
+      {canEditAvatar ? (
         <ProfileAvatarEditorModal
           open={avatarEditorOpen}
           imageSrc={editorImageSrc}

@@ -6,7 +6,11 @@ const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const DEFAULT_FROM = "NU Dasmariñas Discipline Office <disciplineoffice@nu-dasma.edu.ph>";
+// Sender must be on a domain verified in your Resend account.
+// nu-dasma.edu.ph is NOT verified for this API key (causes 403). Default to the
+// project's verified domain so missing secrets don't break sending. Override
+// with the NTE_EMAIL_FROM secret when needed.
+const DEFAULT_FROM = "CampusCare Discipline Office <noreply@campuscare.click>";
 const NTE_CONTACT_EMAIL = "disciplineoffice@nu-dasma.edu.ph";
 const NTE_CC_LINE = "PROGRAM CHAIR & OIC DEAN";
 
@@ -238,6 +242,20 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: "Maximum 5 attachments per email." }, 400);
     }
 
+    const ccRaw = Array.isArray(body.ccEmails) ? body.ccEmails : [];
+    const ccSet = new Set<string>();
+    for (const value of ccRaw) {
+      const normalized = String(value ?? "").trim().toLowerCase();
+      if (!normalized) continue;
+      if (!normalized.includes("@") || normalized.length > 254) {
+        return json({ ok: false, error: `Invalid Cc email: ${normalized}` }, 400);
+      }
+      if (normalized === toEmail) continue; // avoid duplicate of recipient
+      ccSet.add(normalized);
+      if (ccSet.size >= 2) break;
+    }
+    const ccEmails = Array.from(ccSet);
+
     const apiKey = Deno.env.get("RESEND_API_KEY")?.trim();
     if (!apiKey) {
       return json({ ok: false, error: "RESEND_API_KEY not configured on Edge Function." }, 500);
@@ -255,6 +273,9 @@ Deno.serve(async (req) => {
       html: htmlBody,
       text: textBody,
     };
+    if (ccEmails.length > 0) {
+      resendPayload.cc = ccEmails;
+    }
     if (attachments.length > 0) {
       resendPayload.attachments = attachments;
     }
@@ -266,6 +287,25 @@ Deno.serve(async (req) => {
     });
     if (!res.ok) {
       const t = await res.text();
+      const lower = t.toLowerCase();
+      const isUnauthorizedSender =
+        res.status === 403 ||
+        lower.includes("not authorized to send") ||
+        lower.includes("domain is not verified") ||
+        lower.includes("verify a domain");
+      if (isUnauthorizedSender) {
+        return json(
+          {
+            ok: false,
+            error:
+              "Resend rejected the sender address. The `from` domain must be verified in your Resend account. " +
+              "Set the NTE_EMAIL_FROM secret to an address on a verified domain " +
+              '(e.g. `CampusCare Discipline Office <noreply@campuscare.click>`) and redeploy. ' +
+              `Resend response: ${t || `HTTP ${res.status}`}`,
+          },
+          502,
+        );
+      }
       return json({ ok: false, error: t || `Resend HTTP ${res.status}` }, 502);
     }
 

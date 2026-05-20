@@ -10,8 +10,6 @@ import "./StatusPicker.css";
 
 const DOT = {
   online: "cc-status-picker__dot--online",
-  idle: "cc-status-picker__dot--idle",
-  do_not_disturb: "cc-status-picker__dot--do_not_disturb",
   on_break: "cc-status-picker__dot--on_break",
   offline: "cc-status-picker__dot--offline",
 };
@@ -19,17 +17,6 @@ const DOT = {
 function StatusOptionList({ status, onPick }) {
   return (
     <div className="cc-status-picker__list" role="listbox">
-      <div className="cc-status-picker__hint">Idle is set automatically after 5 minutes without activity.</div>
-      <button
-        type="button"
-        role="option"
-        className={`cc-status-picker__item${status === "idle" ? " cc-status-picker__item--active" : ""}`}
-        disabled
-      >
-        <span className={`cc-status-picker__dot ${DOT.idle}`} aria-hidden />
-        {presenceStatusLabel("idle")}
-        {status === "idle" ? " (current)" : ""}
-      </button>
       {USER_PRESENCE_MANUAL_OPTIONS.map((key) => {
         const active = status === key;
         return (
@@ -54,7 +41,7 @@ function StatusOptionList({ status, onPick }) {
 }
 
 /**
- * @param {{ status: Presence; onSelect: (c: "online"|"do_not_disturb"|"on_break"|"offline") => void; menuPlacement?: "above" | "below"; embedded?: boolean }} props
+ * @param {{ status: Presence; onSelect: (c: "online"|"on_break") => void; menuPlacement?: "above" | "below"; embedded?: boolean }} props
  */
 export default function StatusPicker({ status, onSelect, menuPlacement = "above", embedded = false }) {
   const [open, setOpen] = useState(false);

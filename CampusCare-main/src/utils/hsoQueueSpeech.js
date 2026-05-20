@@ -16,11 +16,48 @@ export function primeSpeechSynthesis() {
   }
 }
 
+const FEMALE_VOICE_HINTS = [
+  "female",
+  "woman",
+  "girl",
+  "zira",
+  "samantha",
+  "victoria",
+  "karen",
+  "moira",
+  "tessa",
+  "fiona",
+  "susan",
+  "linda",
+  "allison",
+  "ava",
+  "joanna",
+  "salli",
+  "kimberly",
+  "kendra",
+  "amy",
+  "emma",
+  "olivia",
+  "sophie",
+  "google us english",
+  "google uk english female",
+];
+
+function isFemaleVoice(v) {
+  const haystack = `${v?.name || ""} ${v?.voiceURI || ""}`.toLowerCase();
+  return FEMALE_VOICE_HINTS.some((hint) => haystack.includes(hint));
+}
+
 function pickEnglishVoice() {
-  const voices = typeof window !== "undefined" && window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
+  const voices =
+    typeof window !== "undefined" && window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
+  const enVoices = voices.filter((v) => /^en(-|$)/i.test(v.lang || ""));
   return (
-    voices.find((v) => v.lang === "en-US") ||
-    voices.find((v) => /^en(-|$)/i.test(v.lang || "")) ||
+    enVoices.find((v) => v.lang === "en-US" && isFemaleVoice(v)) ||
+    enVoices.find((v) => isFemaleVoice(v)) ||
+    voices.find((v) => isFemaleVoice(v)) ||
+    enVoices.find((v) => v.lang === "en-US") ||
+    enVoices[0] ||
     voices[0] ||
     null
   );
@@ -30,8 +67,8 @@ function attachVoice(u) {
   const voice = pickEnglishVoice();
   if (voice) u.voice = voice;
   u.lang = "en-US";
-  u.rate = 0. ;
-  u.pitch = 1;
+  u.rate = 1;
+  u.pitch = 1.05;
   u.volume = 1;
 }
 

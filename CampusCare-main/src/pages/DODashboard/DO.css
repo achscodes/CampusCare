@@ -2381,6 +2381,30 @@
 .do-ps-page-title { font-family: "Inter", sans-serif; font-weight: 500; font-size: 30px; line-height: 36px; color: #0f172a; margin: 0 0 8px 0; }
 .do-ps-page-sub   { font-family: "Inter", sans-serif; font-weight: 400; font-size: 16px; line-height: 24px; color: #64748b; margin: 0; max-width: 720px; }
 
+/* Shared Profile & Settings heading — identical look across DO / SDAO / HSO. */
+.office-ps-page-head { margin-bottom: 8px; }
+.office-ps-page-title {
+  font-family: "Inter", sans-serif;
+  font-weight: 500;
+  font-size: 30px;
+  line-height: 36px;
+  color: #0f172a;
+  margin: 0 0 8px 0;
+}
+.office-ps-page-sub {
+  font-family: "Inter", sans-serif;
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 24px;
+  color: #64748b;
+  margin: 0;
+  max-width: 720px;
+}
+@media (max-width: 720px) {
+  .office-ps-page-title { font-size: 24px; line-height: 30px; }
+  .office-ps-page-sub { font-size: 14px; line-height: 20px; }
+}
+
 .do-ps-shell { display: flex; gap: 28px; align-items: flex-start; margin-top: 24px; }
 .do-ps-shell--merged { display: block; }
 
@@ -3087,6 +3111,33 @@ button.do-ps-avatar-hover-wrap:focus-visible { outline: none; box-shadow: 0 0 0 
 .do-case-stepper-status-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* Locked rows / buttons — visually hint that the prior step must finish first. */
+.do-case-stepper-item.is-locked .do-case-stepper-card {
+  opacity: 0.72;
+  border: 1px dashed #cbd5e1;
+}
+.do-case-stepper-item.is-locked .do-case-stepper-dot {
+  background: #e2e8f0 !important;
+  color: #94a3b8;
+}
+.do-case-stepper-status-btn.is-locked,
+.do-case-stepper-quick-btn.is-locked {
+  cursor: not-allowed;
+  background: #f8fafc;
+  color: #94a3b8;
+  border-color: #e2e8f0;
+}
+.do-case-stepper-status-btn.is-locked:hover,
+.do-case-stepper-quick-btn.is-locked:hover {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+.do-case-stepper-quick-btn.is-locked {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .do-case-stepper-fields {

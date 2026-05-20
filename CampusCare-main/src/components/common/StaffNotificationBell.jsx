@@ -2,14 +2,11 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDONotificationStore } from "../../stores/doNotificationStore";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
-import { usePresenceOptional } from "../../context/PresenceContext";
 
 /** Shared notification bell for DO, HSO, and SDAO headers (same store + UI). */
 export default function StaffNotificationBell() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const presence = usePresenceOptional();
-  const dnd = presence?.status === "do_not_disturb";
   const notifications = useDONotificationStore((s) => s.notifications);
   const markRead = useDONotificationStore((s) => s.markNotificationRead);
   const markAllRead = useDONotificationStore((s) => s.markAllNotificationsRead);
@@ -38,27 +35,26 @@ export default function StaffNotificationBell() {
   };
 
   const unreadCount = notifications.filter((n) => n.unread).length;
-  const badgeCount = dnd ? 0 : unreadCount;
 
   return (
     <div style={{ position: "relative" }}>
       <button
         className="header-notifications"
         type="button"
-        aria-label={dnd ? "Notifications (muted — Do not disturb)" : "Notifications"}
+        aria-label="Notifications"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
           <path
             d="M15 6.667A5 5 0 005 6.667C5 10.833 3.333 12.5 3.333 12.5h13.334S15 10.833 15 6.667zM11.442 17.5a1.667 1.667 0 01-2.884 0"
-            stroke={dnd ? "#94a3b8" : "#374151"}
+            stroke="#374151"
             strokeWidth="1.5"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
         </svg>
-        {badgeCount > 0 ? <span className="notif-badge">{badgeCount}</span> : null}
+        {unreadCount > 0 ? <span className="notif-badge">{unreadCount}</span> : null}
       </button>
 
       {open && (
@@ -110,17 +106,46 @@ export default function StaffNotificationBell() {
                   type="button"
                   style={{
                     textAlign: "left",
-                    background: "transparent",
+                    background: n.unread ? "#faf5ff" : "#f8fafc",
                     padding: 8,
                     borderRadius: 10,
                     cursor: "pointer",
-                    border: n.unread ? "1px solid #e9d5ff" : "1px solid transparent",
+                    border: n.unread ? "1px solid #e9d5ff" : "1px solid #e2e8f0",
+                    opacity: n.unread ? 1 : 0.85,
+                    position: "relative",
                   }}
                   onClick={() => handleRead(n, n.unread)}
                 >
-                  <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>{n.title}</div>
+                  {n.unread ? (
+                    <span
+                      aria-hidden
+                      style={{
+                        position: "absolute",
+                        top: 10,
+                        right: 10,
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        background: "#7c3aed",
+                      }}
+                    />
+                  ) : null}
+                  <div style={{ fontWeight: n.unread ? 700 : 600, color: n.unread ? "#0f172a" : "#334155", fontSize: 13, paddingRight: n.unread ? 16 : 0 }}>
+                    {n.title}
+                  </div>
                   <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>{n.body}</div>
-                  <div style={{ color: "#94a3b8", fontSize: 11, marginTop: 4 }}>{n.createdAt}</div>
+                  <div
+                    style={{
+                      color: "#94a3b8",
+                      fontSize: 11,
+                      marginTop: 4,
+                      display: "flex",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <span>{n.createdAt}</span>
+                    {!n.unread ? <span style={{ color: "#94a3b8" }}>Read</span> : null}
+                  </div>
                 </button>
               ))
             )}

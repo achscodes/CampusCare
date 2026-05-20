@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
+  ArrowUpRight,
   ChevronDown,
   CircleCheck,
   Gavel,
@@ -25,9 +26,8 @@ const ICON_CLASS = "lp-lucide";
 const NAV_SCROLL_OFFSET = 128;
 
 const LANDING_SECTIONS = [
-  { id: "lp-hero", label: "Home" },
-  { id: "platform-features", label: "Features" },
   { id: "lp-overview", label: "Overview" },
+  { id: "platform-features", label: "Features" },
   { id: "why-campuscare", label: "Why Us" },
   { id: "get-started", label: "Get Started" },
 ];
@@ -69,18 +69,21 @@ const featureCards = [
     body:
       "Track health visits, manage medical records, schedule appointments, and coordinate referrals across campus offices.",
     Icon: HeartPulse,
+    tag: "Realtime",
   },
   {
     title: "Inter-Office Coordination",
     body:
       "Seamless referrals, shared context on student cases, and collaborative workflows for holistic student support.",
     Icon: Network,
+    tag: "Built-in",
   },
   {
     title: "Secure & Confidential",
     body:
       "Role-based access, careful handling of sensitive data, and practices aligned with student privacy expectations.",
     Icon: ShieldCheck,
+    tag: "RBAC",
   },
 ];
 
@@ -136,7 +139,7 @@ const LandingPage = () => {
   const [navbarScrolled, setNavbarScrolled] = useState(false);
 
   const marqueeItems = useMemo(
-    () => [...officeCards, ...officeCards],
+    () => [...officeCards, ...officeCards, ...officeCards, ...officeCards],
     [],
   );
 
@@ -399,6 +402,13 @@ const LandingPage = () => {
             </div>
             <div className="lp-hero-aside">
               <div id="lp-overview" className="lp-cards-panel lp-scroll-section">
+                <div className="lp-cards-panel__header" aria-hidden>
+                  <span className="lp-cards-panel__eyebrow">
+                    <span className="lp-cards-panel__pulse" />
+                    Welfare offices connected
+                  </span>
+                  <span className="lp-cards-panel__count">3 offices</span>
+                </div>
                 {officeCards.map((card, i) => {
                   const Icon = card.Icon;
                   return (
@@ -423,6 +433,9 @@ const LandingPage = () => {
                         <h4>{card.title}</h4>
                         <p>{card.description}</p>
                       </div>
+                      <span className="lp-service-card__arrow" aria-hidden>
+                        <ArrowUpRight className={ICON_CLASS} size={14} strokeWidth={2} />
+                      </span>
                     </div>
                   );
                 })}
@@ -455,6 +468,7 @@ const LandingPage = () => {
         <div className="lp-ambient-orbs lp-ambient-orbs--features" aria-hidden>
           <span className="lp-ambient-orb lp-ambient-orb--f1" />
           <span className="lp-ambient-orb lp-ambient-orb--f2" />
+          <span className="lp-ambient-orb lp-ambient-orb--f3" />
         </div>
         <div className="lp-container">
           <div className="lp-section-head lp-reveal">
@@ -474,6 +488,7 @@ const LandingPage = () => {
                   className="lp-feature-card lp-reveal"
                   style={{ "--lp-reveal-delay": `${i * 0.1}s` }}
                 >
+                  <span className="lp-feature-card__badge">{f.tag}</span>
                   <div className="lp-feature-icon-box">
                     <Icon
                       className={ICON_CLASS}
@@ -502,10 +517,23 @@ const LandingPage = () => {
             Why CampusCare?
           </h2>
           <div className="lp-why-inner">
-            <div className="lp-why-content lp-reveal lp-reveal-left">
+            <div className="lp-why-deco" aria-hidden>
+              <span className="lp-why-deco__blob" />
+              <span className="lp-why-deco__badge">
+                <CircleCheck className={ICON_CLASS} size={16} strokeWidth={2} />
+              </span>
+              <span className="lp-why-deco__badge lp-why-deco__badge--alt">
+                <Stethoscope className={ICON_CLASS} size={16} strokeWidth={2} />
+              </span>
+            </div>
+            <div className="lp-why-content">
               <ul className="lp-benefits">
-                {benefits.map((b) => (
-                  <li key={b.title} className="lp-benefit">
+                {benefits.map((b, i) => (
+                  <li
+                    key={b.title}
+                    className="lp-benefit lp-reveal lp-reveal-left"
+                    style={{ "--lp-reveal-delay": `${0.06 + i * 0.08}s` }}
+                  >
                     <div className="lp-benefit-check lp-check-ring" aria-hidden>
                       <CircleCheck
                         className={ICON_CLASS}

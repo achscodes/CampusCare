@@ -9,16 +9,6 @@ function displayName(row) {
   return s || "Staff";
 }
 
-function formatIdleMinutes(iso) {
-  if (!iso) return "";
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return "";
-  const m = Math.floor((Date.now() - t) / 60_000);
-  if (m < 1) return "< 1 min";
-  if (m === 1) return "1 min";
-  return `${m} min`;
-}
-
 function officeLabel(o) {
   const x = String(o || "").toLowerCase();
   if (x === "health") return "HSO";
@@ -66,8 +56,31 @@ export default function StaffPresenceDirectory({ officeFilter = null }) {
   }, [load]);
 
   useEffect(() => {
-    const id = window.setInterval(() => void load(), 45_000);
-    return () => window.clearInterval(id);
+    if (!isSupabaseConfigured() || !supabase) return undefined;
+    let timerId = null;
+    const schedule = () => {
+      if (timerId != null) return;
+      timerId = window.setTimeout(() => {
+        timerId = null;
+        void load();
+      }, 350);
+    };
+    const channel = supabase
+      .channel("staff-presence-directory-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles" },
+        schedule,
+      )
+      .subscribe();
+
+    const safety = window.setInterval(() => void load(), 60_000);
+
+    return () => {
+      if (timerId != null) window.clearTimeout(timerId);
+      window.clearInterval(safety);
+      supabase.removeChannel(channel);
+    };
   }, [load]);
 
   const sorted = useMemo(() => {
@@ -108,7 +121,6 @@ export default function StaffPresenceDirectory({ officeFilter = null }) {
             ) : (
               sorted.map((r) => {
                 const st = normalizePresenceStatus(r.presence_status);
-                const idleNote = st === "idle" ? ` · inactive ${formatIdleMinutes(r.last_active_at)}` : "";
                 return (
                   <tr key={r.id}>
                     <td className="cc-staff-dir__name">{displayName(r)}</td>
@@ -117,7 +129,6 @@ export default function StaffPresenceDirectory({ officeFilter = null }) {
                     <td>
                       <span className={`cc-staff-dir__pill cc-staff-dir__pill--${st}`}>
                         {presenceStatusLabel(st)}
-                        {idleNote}
                       </span>
                     </td>
                   </tr>

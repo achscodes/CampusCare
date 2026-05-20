@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Clock, RotateCcw, Save, Smartphone, Zap } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Clock, Lock, RotateCcw, Save, Smartphone, Zap } from "lucide-react";
 import {
   CASE_PROGRESS_QUICK_ACTIONS,
   CASE_STEP_STATUSES,
@@ -15,6 +15,34 @@ import {
   MOBILE_CASE_PROGRESS_TEMPLATE,
   patchCaseProgressStep,
 } from "../../utils/disciplineCaseMapper";
+
+const QUICK_ACTION_PREREQ_INDEX = {
+  nte_sent: -1,
+  nte_responded: 0,
+  decision_made: 1,
+  conference_scheduled: 2,
+  conference_completed: 2,
+  sanction_issued: 3,
+};
+
+function caseStepsEqual(a, b) {
+  const left = Array.isArray(a) ? a : [];
+  const right = Array.isArray(b) ? b : [];
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    const x = left[i] || {};
+    const y = right[i] || {};
+    if (
+      String(x.label || "") !== String(y.label || "") ||
+      String(x.status || "pending") !== String(y.status || "pending") ||
+      String(x.date || "") !== String(y.date || "") ||
+      String(x.note || "") !== String(y.note || "")
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
 
 const STATUS_UI = {
   pending: { label: "Pending", dot: "#cbd5e1", text: "#64748b", bg: "#fff" },
@@ -44,11 +72,51 @@ export function CaseProgressStepperPanel({
     setDirty(false);
   }, [caseRow?.id, caseRow?.caseSteps]);
 
+  // Self-heal once per case: if the stored shape doesn't match the canonical
+  // (e.g. legacy DBs with both "Case conference scheduled" + "Case conference
+  // completed"), persist the cleaned shape so all clients converge.
+  const healedCaseIdRef = useRef(null);
+  useEffect(() => {
+    const caseId = caseRow?.id;
+    if (!caseId || !onSave) return;
+    if (healedCaseIdRef.current === caseId) return;
+    const canonical = ensureCanonicalCaseSteps(caseRow?.caseSteps);
+    if (caseStepsEqual(canonical, caseRow?.caseSteps)) {
+      healedCaseIdRef.current = caseId;
+      return;
+    }
+    healedCaseIdRef.current = caseId;
+    const patch = buildCaseProgressStepsPatch(caseRow, canonical);
+    Promise.resolve(onSave(patch)).catch(() => {
+      // Best-effort self-heal — don't block the user if persistence fails.
+    });
+  }, [caseRow, onSave]);
+
   const savedMetrics = useMemo(
     () => computeCaseProgressMetrics(caseRow?.caseSteps),
     [caseRow?.caseSteps],
   );
   const draftMetrics = useMemo(() => computeCaseProgressMetrics(draft), [draft]);
+
+  const firstIncompleteIndex = useMemo(() => {
+    const idx = draft.findIndex((s) => s.status !== "completed");
+    return idx === -1 ? draft.length : idx;
+  }, [draft]);
+
+  const isStepUnlocked = useCallback(
+    (stepIndex) => stepIndex <= firstIncompleteIndex,
+    [firstIncompleteIndex],
+  );
+
+  const isQuickActionUnlocked = useCallback(
+    (actionId) => {
+      const required = QUICK_ACTION_PREREQ_INDEX[actionId];
+      if (required == null || required < 0) return true;
+      const prereq = draft[required];
+      return Boolean(prereq && prereq.status === "completed");
+    },
+    [draft],
+  );
 
   const pendingNte = linkedNteRows.find((n) => String(n.status) === "pending_response");
   const respondedNte = linkedNteRows.find((n) => String(n.status) === "responded");
@@ -155,18 +223,24 @@ export function CaseProgressStepperPanel({
           Quick update
         </div>
         <div className="do-case-stepper-quick-btns">
-          {CASE_PROGRESS_QUICK_ACTIONS.map((action) => (
-            <button
-              key={action.id}
-              type="button"
-              className="cc-btn-secondary do-case-stepper-quick-btn"
-              disabled={saving}
-              title={action.hint}
-              onClick={() => applyQuickAction(action.id)}
-            >
-              {action.label}
-            </button>
-          ))}
+          {CASE_PROGRESS_QUICK_ACTIONS.map((action) => {
+            const unlocked = isQuickActionUnlocked(action.id);
+            const lockedTitle = "Complete the previous step before using this action.";
+            return (
+              <button
+                key={action.id}
+                type="button"
+                className={`cc-btn-secondary do-case-stepper-quick-btn${unlocked ? "" : " is-locked"}`}
+                disabled={saving || !unlocked}
+                aria-disabled={!unlocked || undefined}
+                title={unlocked ? action.hint : lockedTitle}
+                onClick={() => applyQuickAction(action.id)}
+              >
+                {!unlocked ? <Lock size={12} aria-hidden /> : null}
+                {action.label}
+              </button>
+            );
+          })}
           {(pendingNte || respondedNte) && (
             <button
               type="button"
@@ -186,10 +260,14 @@ export function CaseProgressStepperPanel({
           const ui = STATUS_UI[step.status] || STATUS_UI.pending;
           const isLast = stepIndex === draft.length - 1;
           const isoDate = caseStepShortLabelToIsoDate(step.date);
+          const unlocked = isStepUnlocked(stepIndex);
+          const lockTitle = "Complete the previous step before changing this one.";
           return (
             <li
               key={step.label}
-              className={`do-case-stepper-item${step.status === "in_progress" ? " is-active" : ""}`}
+              className={`do-case-stepper-item${step.status === "in_progress" ? " is-active" : ""}${
+                unlocked ? "" : " is-locked"
+              }`}
             >
               <div className="do-case-stepper-rail" aria-hidden>
                 <span className="do-case-stepper-dot" style={{ background: ui.dot }}>
@@ -208,7 +286,16 @@ export function CaseProgressStepperPanel({
 
               <div className="do-case-stepper-card" style={{ background: ui.bg }}>
                 <div className="do-case-stepper-card-head">
-                  <strong>{step.label}</strong>
+                  <strong>
+                    {!unlocked ? (
+                      <Lock
+                        size={14}
+                        aria-hidden
+                        style={{ verticalAlign: "-2px", marginRight: 6, color: "#94a3b8" }}
+                      />
+                    ) : null}
+                    {step.label}
+                  </strong>
                   <span className="do-case-stepper-status-pill" style={{ color: ui.text }}>
                     {stepStatusLabel(step.status)}
                   </span>
@@ -244,8 +331,12 @@ export function CaseProgressStepperPanel({
                     <button
                       key={statusOption}
                       type="button"
-                      className={`do-case-stepper-status-btn${step.status === statusOption ? " is-selected" : ""}`}
-                      disabled={saving}
+                      className={`do-case-stepper-status-btn${step.status === statusOption ? " is-selected" : ""}${
+                        unlocked ? "" : " is-locked"
+                      }`}
+                      disabled={saving || !unlocked}
+                      aria-disabled={!unlocked || undefined}
+                      title={unlocked ? undefined : lockTitle}
                       onClick={() => updateStep(stepIndex, { status: statusOption })}
                     >
                       {stepStatusLabel(statusOption)}

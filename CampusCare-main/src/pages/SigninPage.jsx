@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import AuthSplitAside from "../components/auth/AuthSplitAside";
+import CCModal from "../components/common/CCModal";
 import "./authPagesLayout.css";
 import "./SigninPage.css";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
@@ -39,6 +40,14 @@ const SigninPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const authNotice = location.state?.message;
+  const sessionExpired = location.state?.sessionExpired === true;
+  const [sessionExpiredOpen, setSessionExpiredOpen] = useState(false);
+
+  useEffect(() => {
+    if (!sessionExpired) return;
+    setSessionExpiredOpen(true);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [sessionExpired, navigate, location.pathname]);
 
   const [step, setStep] = useState(() => (readLoginOtpPending()?.userId ? "otp" : "credentials"));
   const [email, setEmail] = useState(() => readLoginOtpPending()?.email || "");
@@ -578,6 +587,33 @@ const SigninPage = () => {
           subtitle="Sign in to open your office workspace—cases, referrals, and health records stay in one secure, role-aware platform."
         />
       </div>
+
+      <CCModal
+        open={sessionExpiredOpen}
+        title="Session Expired"
+        onClose={() => setSessionExpiredOpen(false)}
+        centered
+      >
+        <div className="cc-modal-body" style={{ maxWidth: 460 }}>
+          <p style={{ margin: "0 0 12px", color: "#0f172a", fontSize: 14, lineHeight: 1.55 }}>
+            Your account has been automatically logged out due to inactivity.
+            This security measure helps protect your account and sensitive
+            information.
+          </p>
+          <p style={{ margin: 0, color: "#475569", fontSize: 13, lineHeight: 1.55 }}>
+            Please log in again to continue using the system.
+          </p>
+        </div>
+        <div className="cc-modal-actions" style={{ padding: "12px 18px 16px" }}>
+          <button
+            type="button"
+            className="cc-btn-primary"
+            onClick={() => setSessionExpiredOpen(false)}
+          >
+            OK
+          </button>
+        </div>
+      </CCModal>
     </div>
   );
 };

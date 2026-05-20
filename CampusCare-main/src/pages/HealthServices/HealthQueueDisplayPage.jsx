@@ -119,6 +119,8 @@ export default function HealthQueueDisplayPage() {
 
   useEffect(() => {
     let cancelled = false;
+    let reloadTimer = null;
+    let safetyTimer = null;
 
     const load = async () => {
       if (!isSupabaseConfigured() || !supabase) {
@@ -141,11 +143,37 @@ export default function HealthQueueDisplayPage() {
       setRows(enriched);
     };
 
-    load();
-    const t = window.setInterval(load, 5000);
+    const scheduleReload = () => {
+      if (reloadTimer != null) return;
+      reloadTimer = window.setTimeout(() => {
+        reloadTimer = null;
+        void load();
+      }, 250);
+    };
+
+    void load();
+
+    let channel = null;
+    if (isSupabaseConfigured() && supabase) {
+      channel = supabase
+        .channel("health-queue-display-realtime")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "health_appointments" },
+          scheduleReload,
+        )
+        .subscribe();
+    }
+
+    safetyTimer = window.setInterval(() => {
+      void load();
+    }, 30000);
+
     return () => {
       cancelled = true;
-      window.clearInterval(t);
+      if (reloadTimer != null) window.clearTimeout(reloadTimer);
+      if (safetyTimer != null) window.clearInterval(safetyTimer);
+      if (channel) supabase.removeChannel(channel);
     };
   }, []);
 
@@ -167,7 +195,7 @@ export default function HealthQueueDisplayPage() {
       if (prev !== id && id && s.snap.now) {
         const text = buildStationAnnouncement(s.key, s.snap.now?.queueNumber);
         if (text) {
-          void speakQueueAnnouncement(text, { repeats: 3 });
+          void speakQueueAnnouncement(text, { repeats: 2 });
         }
       }
     }

@@ -207,6 +207,39 @@ function useDisciplineTable({ table, localKey, seed, mapRow }) {
   };
 }
 
+function missingSchemaColumn(error, table) {
+  const msg = String(error?.message || "");
+  const re = new RegExp(`Could not find the '([^']+)' column of '${table}' in the schema cache`, "i");
+  const m = msg.match(re);
+  return m?.[1] || null;
+}
+
+async function insertWithSchemaFallback(table, row, maxRetries = 6) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  let body = { ...row };
+  for (let i = 0; i <= maxRetries; i += 1) {
+    const { data, error } = await supabase.from(table).insert(body).select().single();
+    if (!error) return data;
+    const missing = missingSchemaColumn(error, table);
+    if (!missing || !(missing in body)) throw error;
+    delete body[missing];
+  }
+  throw new Error(`Could not insert into ${table} after schema fallback retries.`);
+}
+
+async function updateWithSchemaFallback(table, id, patchBody, maxRetries = 6) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  let body = { ...patchBody };
+  for (let i = 0; i <= maxRetries; i += 1) {
+    const { error } = await supabase.from(table).update(body).eq("id", id);
+    if (!error) return;
+    const missing = missingSchemaColumn(error, table);
+    if (!missing || !(missing in body)) throw error;
+    delete body[missing];
+  }
+  throw new Error(`Could not update ${table} after schema fallback retries.`);
+}
+
 export function useStudentRecords(seed) {
   const { items, loading, fetchError, refresh, useRemote, setLocal } = useDisciplineTable({
     table: "discipline_student_records",
@@ -448,12 +481,7 @@ export function useSanctions(seed) {
         return client;
       }
       if (!supabase) throw new Error("Supabase is not configured.");
-      const { data, error } = await supabase
-        .from("discipline_sanctions")
-        .insert(row)
-        .select()
-        .single();
-      if (error) throw error;
+      const data = await insertWithSchemaFallback("discipline_sanctions", row);
       await syncCaseProgressFromSanction(m.rowToSanction(data));
       await refresh();
       return m.rowToSanction(data);
@@ -490,8 +518,7 @@ export function useSanctions(seed) {
         body.community_service_detail = String(patch.communityServiceDetail);
       if (patch.completionDate != null) body.completion_date = String(patch.completionDate);
       if (patch.evidence != null) body.evidence = patch.evidence;
-      const { error } = await supabase.from("discipline_sanctions").update(body).eq("id", sanctionId);
-      if (error) throw error;
+      await updateWithSchemaFallback("discipline_sanctions", sanctionId, body);
       const merged = existing ? { ...existing, ...patch } : patch;
       await syncCaseProgressFromSanction(merged, patch.status);
       await refresh();

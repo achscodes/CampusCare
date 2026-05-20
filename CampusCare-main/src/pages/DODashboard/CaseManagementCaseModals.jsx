@@ -157,7 +157,8 @@ export function CaseManagementNteModal({
   setSelectedCase,
 }) {
   const [showCc, setShowCc] = useState(false);
-  const [nteCc, setNteCc] = useState("");
+  const [nteCc1, setNteCc1] = useState("");
+  const [nteCc2, setNteCc2] = useState("");
   const [minimized, setMinimized] = useState(false);
   const [composeTab, setComposeTab] = useState("edit");
   const [nteAttachments, setNteAttachments] = useState([]);
@@ -169,6 +170,9 @@ export function CaseManagementNteModal({
       setComposeTab("edit");
     } else {
       setNteAttachments([]);
+      setNteCc1("");
+      setNteCc2("");
+      setShowCc(false);
     }
   }, [nteModalOpen]);
 
@@ -238,6 +242,16 @@ export function CaseManagementNteModal({
         filename,
         content,
       }));
+
+      const ccCandidates = [nteCc1, nteCc2]
+        .map((v) => String(v || "").trim().toLowerCase())
+        .filter(Boolean);
+      const invalidCc = ccCandidates.find((v) => !v.includes("@"));
+      if (invalidCc) {
+        throw new Error(`Cc email looks invalid: ${invalidCc}`);
+      }
+      const ccEmails = Array.from(new Set(ccCandidates)).slice(0, 2);
+
       const result = await sendDisciplineNteNotice({
         caseId: selectedCase.id,
         toEmail: nteToEmail.trim(),
@@ -245,6 +259,7 @@ export function CaseManagementNteModal({
         htmlBody,
         textBody: bodyText,
         attachments: attachments.length ? attachments : undefined,
+        ccEmails: ccEmails.length ? ccEmails : undefined,
       });
       if (supabase) {
         const { data: caseRow } = await supabase
@@ -342,21 +357,36 @@ export function CaseManagementNteModal({
                 )}
               </div>
               {showCc && (
-                <div className="do-gmail-compose-row">
-                  <label className="do-gmail-compose-label" htmlFor="nte-cc">
-                    Cc
-                  </label>
-                  <input
-                    id="nte-cc"
-                    className="do-gmail-compose-input"
-                    type="text"
-                    value={nteCc}
-                    onChange={(e) => setNteCc(e.target.value)}
-                    placeholder="Optional (not sent yet)"
-                    disabled
-                    title="Cc is for display only in this version"
-                  />
-                </div>
+                <>
+                  <div className="do-gmail-compose-row">
+                    <label className="do-gmail-compose-label" htmlFor="nte-cc-1">
+                      Cc 1
+                    </label>
+                    <input
+                      id="nte-cc-1"
+                      className="do-gmail-compose-input"
+                      type="email"
+                      value={nteCc1}
+                      onChange={(e) => setNteCc1(e.target.value)}
+                      placeholder="program.chair@example.edu"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="do-gmail-compose-row">
+                    <label className="do-gmail-compose-label" htmlFor="nte-cc-2">
+                      Cc 2
+                    </label>
+                    <input
+                      id="nte-cc-2"
+                      className="do-gmail-compose-input"
+                      type="email"
+                      value={nteCc2}
+                      onChange={(e) => setNteCc2(e.target.value)}
+                      placeholder="oic.dean@example.edu"
+                      autoComplete="off"
+                    />
+                  </div>
+                </>
               )}
               <div className="do-gmail-compose-row">
                 <label className="do-gmail-compose-label" htmlFor="nte-subject">

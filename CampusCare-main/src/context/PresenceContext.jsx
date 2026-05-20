@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { supabase, isSupabaseConfigured } from "../lib/supabaseClient";
 import { useUserPresence } from "../hooks/useUserPresence";
-import { setPresenceDnd } from "../utils/presenceDndGate";
 
 const PresenceContext = createContext(null);
 
@@ -30,14 +29,6 @@ export function PresenceProvider({ children }) {
 
   const enabled = authed && !publicPath;
   const { status, setManualStatus } = useUserPresence(enabled);
-
-  useEffect(() => {
-    return () => setPresenceDnd(false);
-  }, []);
-
-  useEffect(() => {
-    setPresenceDnd(!!enabled && status === "do_not_disturb");
-  }, [enabled, status]);
 
   const value = useMemo(() => ({ status, setManualStatus, presenceEnabled: enabled }), [status, setManualStatus, enabled]);
 

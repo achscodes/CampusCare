@@ -18,6 +18,7 @@ const NTE_CC_LINE = "PROGRAM CHAIR & OIC DEAN";
  *   htmlBody: string,
  *   textBody: string,
  *   attachments?: Array<{ filename: string, content: string }>,
+ *   ccEmails?: string[],
  * }} params
  */
 export async function sendDisciplineNteNotice(params) {
@@ -37,8 +38,23 @@ export async function sendDisciplineNteNotice(params) {
     );
   }
 
+  const normalizedCc = Array.isArray(params?.ccEmails)
+    ? Array.from(
+        new Set(
+          params.ccEmails
+            .map((v) => String(v || "").trim().toLowerCase())
+            .filter((v) => v && v.includes("@")),
+        ),
+      ).slice(0, 2)
+    : [];
+
+  const invokeBody = {
+    ...params,
+    ...(normalizedCc.length ? { ccEmails: normalizedCc } : {}),
+  };
+
   const { data, error } = await supabase.functions.invoke(NTE_FUNCTION_SLUG, {
-    body: params,
+    body: invokeBody,
   });
 
   if (error) {
